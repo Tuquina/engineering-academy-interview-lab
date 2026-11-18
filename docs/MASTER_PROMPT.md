@@ -1719,16 +1719,16 @@ La aplicación es amplia. Organizar el desarrollo en fases ejecutables, con entr
 
 ### Fase 2 — Aprendizaje
 
-- [ ] Lector de lecciones.
-- [ ] Diagramas.
-- [ ] Ejemplos.
-- [ ] Quiz.
-- [ ] Flashcards.
-- [ ] Progress tracking.
-- [ ] Buscador.
-- [ ] Notas.
-- [ ] Bookmarks.
-- [ ] Rutas de aprendizaje.
+- [x] Lector de lecciones.
+- [x] Diagramas.
+- [x] Ejemplos.
+- [x] Quiz.
+- [x] Flashcards.
+- [x] Progress tracking.
+- [x] Buscador.
+- [x] Notas.
+- [x] Bookmarks.
+- [x] Rutas de aprendizaje.
 
 **Resultado:** ya debe poder utilizarse diariamente para estudiar.
 

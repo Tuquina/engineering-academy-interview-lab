@@ -97,11 +97,12 @@ entrevista para evitar lecciones de relleno.
 
 ### Componentes disponibles en MDX
 
-| Componente                                                                      | Uso                                                             |
-| ------------------------------------------------------------------------------- | --------------------------------------------------------------- |
-| `<Callout type="info \| tip \| warning \| danger \| interview" title="...">`    | Notas, advertencias, errores frecuentes, consejos de entrevista |
-| `<FlowDiagram steps={[{ title, detail, tone? }]} caption="..." />`              | Flujo paso a paso; `tone`: `default`, `boundary`, `runtime`     |
-| `<KnowledgeCheck question="..." options={[{ text, correct?, explanation }]} />` | Pregunta autocorregible que explica cada opción                 |
+| Componente                                                                                         | Uso                                                                                                  |
+| -------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| `<Callout type="info \| tip \| warning \| danger \| interview" title="...">`                       | Notas, advertencias, errores frecuentes, consejos de entrevista                                      |
+| `<FlowDiagram steps={[{ title, detail, tone? }]} caption="..." />`                                 | Flujo paso a paso; `tone`: `default`, `boundary`, `runtime`                                          |
+| `<KnowledgeCheck id="<lessonId>.qN" question="..." options={[{ text, correct?, explanation }]} />` | Pregunta autocorregible; el `id` (obligatorio, único, con prefijo de la lección) indexa el historial |
+| `<MermaidDiagram chart={...} caption="..." />` (el diagrama va en un template literal)             | Diagrama Mermaid (flowchart, sequence, state, er…) con vista ampliada                                |
 
 En los strings de `question`, `text` y `explanation`, el texto entre backticks se muestra como código.
 Los bloques de código se resaltan con Shiki (`ts`, `tsx`, `js`, `json`, `csharp`, `java`, `bash`, `sql`, `text`).
@@ -123,3 +124,34 @@ Las rutas viven en `content/paths/*.json`. Cada etapa tiene `items` que pueden s
 docker compose run --rm app pnpm test
 docker compose run --rm app pnpm build
 ```
+
+## 5. Agregar flashcards
+
+Creá o extendé un mazo en `content/flashcards/<mazo>.json`:
+
+```json
+{
+  "id": "redis",
+  "title": "Redis",
+  "description": "Estructuras, expiración y caching.",
+  "courseId": "redis",
+  "cards": [
+    {
+      "id": "redis.ttl",
+      "front": "¿Qué devuelve `TTL` para una clave sin expiración?",
+      "back": "-1. Si la clave no existe devuelve -2.",
+      "difficulty": "basic",
+      "tags": ["redis"],
+      "lessonId": null
+    }
+  ]
+}
+```
+
+Los IDs de tarjeta son globales y estables (el historial de repasos se guarda por ID). `lessonId` es opcional y
+enlaza a la lección que explica el concepto.
+
+## 6. Agregar una cheatsheet
+
+Creá `content/cheatsheets/<slug>.mdx` con frontmatter `title`, `description`, `order`, `tags` y `relatedLessons`
+(IDs de lecciones existentes). El cuerpo admite los mismos componentes MDX que las lecciones.

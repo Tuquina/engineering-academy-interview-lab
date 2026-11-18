@@ -1,0 +1,72 @@
+{
+  "id": "nodejs",
+  "title": "Node.js",
+  "description": "Event loop, concurrencia y backend profesional.",
+  "courseId": "nodejs",
+  "cards": [
+    {
+      "id": "node.event-loop-order",
+      "front": "Orden de ejecución: código síncrono, `process.nextTick`, `Promise.then` y `setTimeout(fn, 0)`.",
+      "back": "En un script CommonJS: 1) síncrono, 2) cola de `process.nextTick`, 3) microtasks (`Promise.then`), 4) `setTimeout` en la fase de timers. Matiz: en un módulo ES el código principal ya corre dentro de una microtask, por lo que un `then` puede adelantarse a `nextTick`.",
+      "difficulty": "intermediate",
+      "tags": ["event loop"],
+      "lessonId": "nodejs.event-loop"
+    },
+    {
+      "id": "node.microtask-starvation",
+      "front": "¿Qué pasa si una microtask agenda otra microtask indefinidamente?",
+      "back": "El event loop nunca avanza a la siguiente fase: se vacía la cola de microtasks antes de continuar, así que timers e I/O quedan bloqueados (starvation).",
+      "difficulty": "advanced",
+      "tags": ["event loop"],
+      "lessonId": "nodejs.event-loop"
+    },
+    {
+      "id": "node.setimmediate-vs-timeout",
+      "front": "Dentro de un callback de I/O, ¿qué se ejecuta antes: `setImmediate` o `setTimeout(fn, 0)`?",
+      "back": "`setImmediate`, porque después de la fase poll viene la fase check. Fuera de un callback de I/O (en el módulo principal) el orden entre ambos no está garantizado.",
+      "difficulty": "advanced",
+      "tags": ["event loop"],
+      "lessonId": "nodejs.event-loop"
+    },
+    {
+      "id": "node.cpu-bound",
+      "front": "¿Por qué una tarea CPU-bound larga es un problema en un servidor Node.js?",
+      "back": "Ocupa el único hilo que ejecuta JavaScript: mientras dura, ninguna otra request avanza (aumenta la latencia de todas). Soluciones: worker threads, partir el trabajo o moverlo a otro servicio.",
+      "difficulty": "intermediate",
+      "tags": ["concurrencia", "performance"],
+      "lessonId": "nodejs.event-loop"
+    },
+    {
+      "id": "node.thread-pool",
+      "front": "¿Qué operaciones usa el thread pool de libuv?",
+      "back": "Las que no tienen API asíncrona nativa del sistema operativo: sistema de archivos, `dns.lookup`, compresión (zlib) y parte de crypto. El tamaño por defecto es 4 (`UV_THREADPOOL_SIZE`). La red usa mecanismos del SO (epoll, kqueue, IOCP), no el pool.",
+      "difficulty": "advanced",
+      "tags": ["libuv"],
+      "lessonId": "nodejs.event-loop"
+    },
+    {
+      "id": "node.idempotency-key",
+      "front": "¿Para qué sirve un header `Idempotency-Key` en una API de pagos?",
+      "back": "Permite que el cliente reintente una operación con efectos (p. ej. un cobro) sin duplicarla: el servidor guarda el resultado asociado a la clave y, ante un reintento, devuelve el mismo resultado en lugar de ejecutar de nuevo.",
+      "difficulty": "intermediate",
+      "tags": ["apis", "idempotencia"],
+      "lessonId": null
+    },
+    {
+      "id": "node.backpressure",
+      "front": "¿Qué es backpressure en streams?",
+      "back": "El mecanismo por el que un consumidor más lento frena al productor. En Node, `write()` devuelve `false` cuando el buffer está lleno y hay que esperar el evento `drain`; `pipeline()` lo gestiona automáticamente.",
+      "difficulty": "intermediate",
+      "tags": ["streams"],
+      "lessonId": null
+    },
+    {
+      "id": "node.correlation-id",
+      "front": "¿Qué es un correlation ID y por qué importa?",
+      "back": "Un identificador que acompaña a una request a través de servicios, colas y logs. Permite reconstruir el recorrido completo de una operación al diagnosticar un incidente.",
+      "difficulty": "basic",
+      "tags": ["observabilidad"],
+      "lessonId": null
+    }
+  ]
+}

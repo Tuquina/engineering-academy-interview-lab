@@ -160,3 +160,11 @@
 .prose :where(code):not(:where(pre code)) {
   overflow-wrap: anywhere;
 }
+
+/* Tamaño de lectura configurable (Configuración → Lectura). El valor lo aplica el script de arranque. */
+:root[data-font-size="sm"] .reading-scale {
+  font-size: 0.9375rem;
+}
+:root[data-font-size="lg"] .reading-scale {
+  font-size: 1.125rem;
+}

@@ -1,0 +1,115 @@
+---
+title: "TypeScript: tipos esenciales"
+description: "unknown, narrowing, uniones discriminadas, utility types, branded types y validación con Zod."
+order: 3
+tags: ["typescript", "tipos", "zod"]
+relatedLessons: ["typescript.runtime-vs-type-system"]
+---
+
+## Qué existe en runtime
+
+| Construcción                                          | ¿Existe al ejecutar?      |
+| ----------------------------------------------------- | ------------------------- |
+| `interface`, `type`, genéricos, anotaciones           | No                        |
+| `as`, `!`, `satisfies`                                | No (no verifican nada)    |
+| `class`                                               | Sí (función constructora) |
+| `enum`, `namespace` con valores, parameter properties | Sí (generan código)       |
+
+## `any` vs `unknown` vs `never`
+
+```ts
+const a: any = JSON.parse(raw); // sin chequeos: se propaga en silencio
+const u: unknown = JSON.parse(raw); // obliga a validar antes de usar
+function fail(message: string): never {
+  throw new Error(message); // never: no retorna
+}
+```
+
+## Narrowing
+
+```ts
+function describe(value: string | number | Date): string {
+  if (typeof value === "string") return value;
+  if (typeof value === "number") return value.toFixed(2);
+  return value.toISOString(); // instanceof también estrecha clases
+}
+
+// Type predicate: el compilador confía en la condición.
+function isDebt(value: unknown): value is Debt {
+  return typeof value === "object" && value !== null && "amountCents" in value;
+}
+```
+
+## Uniones discriminadas y exhaustividad
+
+```ts
+type PaymentEvent =
+  | { type: "paid"; amountCents: number }
+  | { type: "promised"; dueDate: string }
+  | { type: "refused"; reason: string };
+
+function handle(event: PaymentEvent): string {
+  switch (event.type) {
+    case "paid":
+      return `Pagó ${event.amountCents}`;
+    case "promised":
+      return `Prometió pagar el ${event.dueDate}`;
+    case "refused":
+      return `Rechazó: ${event.reason}`;
+    default: {
+      const unreachable: never = event; // error de compilación si falta un caso
+      return unreachable;
+    }
+  }
+}
+```
+
+## Utility types frecuentes
+
+| Tipo                    | Resultado                           |
+| ----------------------- | ----------------------------------- |
+| `Partial<T>`            | Todas las propiedades opcionales    |
+| `Required<T>`           | Todas obligatorias                  |
+| `Readonly<T>`           | Todas de sólo lectura (superficial) |
+| `Pick<T, "a" \| "b">`   | Sólo esas propiedades               |
+| `Omit<T, "a">`          | Todas menos esas                    |
+| `Record<K, V>`          | Objeto con claves `K` y valores `V` |
+| `ReturnType<typeof fn>` | Tipo de retorno de una función      |
+| `Awaited<T>`            | Tipo resuelto de una promesa        |
+| `NonNullable<T>`        | Quita `null` y `undefined`          |
+
+## Branded types
+
+```ts
+type Brand<T, B extends string> = T & { readonly __brand: B };
+type DebtId = Brand<string, "DebtId">;
+type CustomerId = Brand<string, "CustomerId">;
+
+const toDebtId = (raw: string): DebtId => {
+  if (!raw.startsWith("debt_")) throw new Error("DebtId inválido");
+  return raw as DebtId; // única aserción, justificada por la validación previa
+};
+```
+
+## Zod en los límites
+
+```ts
+import { z } from "zod";
+
+const PaymentSchema = z.object({
+  debtId: z.string().startsWith("debt_"),
+  amountCents: z.number().int().positive(),
+  paidAt: z.iso.datetime(),
+});
+type Payment = z.infer<typeof PaymentSchema>;
+
+const parsed = PaymentSchema.safeParse(body);
+if (!parsed.success) return Response.json(z.flattenError(parsed.error), { status: 422 });
+```
+
+## `satisfies`
+
+```ts
+// Verifica la forma sin perder los tipos literales.
+const RETRY_POLICY = { maxAttempts: 5, backoff: "exponential" } satisfies RetryPolicy;
+```

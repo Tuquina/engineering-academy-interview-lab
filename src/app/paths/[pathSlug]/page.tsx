@@ -2,7 +2,9 @@ import { BookOpen, Target } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import { DEFAULT_PATH_ID } from "@/infrastructure/composition/learner-data";
 import { getCatalog } from "@/infrastructure/composition/learning";
+import { ActivePathButton } from "@/modules/preferences/presentation/active-path-button";
 import { LessonStatusIcon, ProgressSummaryBar } from "@/modules/progress/presentation/progress-badges";
 
 interface PathPageProps {
@@ -38,6 +40,9 @@ export default async function PathPage({ params }: PathPageProps) {
         </p>
         <div className="mt-6 max-w-md">
           <ProgressSummaryBar lessonIds={lessonIds} label="Progreso de la ruta" />
+          <div className="mt-3">
+            <ActivePathButton pathId={path.id} isDefault={path.id === DEFAULT_PATH_ID} />
+          </div>
         </div>
       </header>
 

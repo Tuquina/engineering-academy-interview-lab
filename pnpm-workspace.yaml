@@ -3,3 +3,4 @@ minimumReleaseAgeExclude:
   - "@vitest/mocker@5.1.1"
   - "@vitest/spy@5.1.1"
   - vitest@5.1.1
+  - recharts@3.11.0

@@ -1,7 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   EMPTY_PROGRESS,
+  MAX_STUDY_INCREMENT_SECONDS,
+  addStudyTime,
   completeLesson,
+  recordAnswer,
+  recordReadingPosition,
+  summarizeQuiz,
   findNextLesson,
   recentLessons,
   recordLessonVisit,
@@ -22,6 +27,7 @@ describe("progreso de lecciones", () => {
       startedAt: t1.toISOString(),
       lastVisitedAt: t2.toISOString(),
       completedAt: null,
+      lastSectionId: null,
     });
   });
 
@@ -94,5 +100,55 @@ describe("recentLessons", () => {
     state = recordLessonVisit(state, "b", t3);
     state = recordLessonVisit(state, "c", t2);
     expect(recentLessons(state, 2).map((r) => r.id)).toEqual(["b", "c"]);
+  });
+});
+
+describe("posición de lectura", () => {
+  it("sólo se registra para lecciones visitadas y no cambia el estado si es la misma sección", () => {
+    expect(recordReadingPosition(EMPTY_PROGRESS, "a", "intro")).toBe(EMPTY_PROGRESS);
+    const visited = recordReadingPosition(recordLessonVisit(EMPTY_PROGRESS, "a", t1), "a", "intro");
+    expect(visited.lessons.a?.lastSectionId).toBe("intro");
+    expect(recordReadingPosition(visited, "a", "intro")).toBe(visited);
+  });
+});
+
+describe("respuestas a preguntas", () => {
+  it("acumula intentos y conserva el resultado de la última respuesta", () => {
+    let state = recordAnswer(EMPTY_PROGRESS, { questionId: "q1", lessonId: "a", correct: false }, t1);
+    state = recordAnswer(state, { questionId: "q1", lessonId: "a", correct: true }, t2);
+    expect(state.questions.q1).toEqual({
+      lessonId: "a",
+      attempts: 2,
+      correctAttempts: 1,
+      lastAnsweredAt: t2.toISOString(),
+      lastCorrect: true,
+    });
+  });
+
+  it("resume aciertos y debilidades vigentes", () => {
+    let state = recordAnswer(EMPTY_PROGRESS, { questionId: "q1", lessonId: "a", correct: true }, t1);
+    state = recordAnswer(state, { questionId: "q2", lessonId: "a", correct: false }, t1);
+    expect(summarizeQuiz(state)).toEqual({
+      answered: 2,
+      firstTryCorrect: 1,
+      currentlyWrong: ["q2"],
+      accuracy: 0.5,
+    });
+    expect(summarizeQuiz(EMPTY_PROGRESS).accuracy).toBe(0);
+  });
+});
+
+describe("tiempo de estudio", () => {
+  it("suma segundos por día e ignora valores inválidos", () => {
+    let state = addStudyTime(EMPTY_PROGRESS, "2026-11-18", 30);
+    state = addStudyTime(state, "2026-11-18", 15);
+    expect(state.studySeconds["2026-11-18"]).toBe(45);
+    expect(addStudyTime(state, "2026-11-18", -5)).toBe(state);
+    expect(addStudyTime(state, "2026-11-18", Number.NaN)).toBe(state);
+  });
+
+  it("acota cada incremento para no inflar métricas con timers defectuosos", () => {
+    const state = addStudyTime(EMPTY_PROGRESS, "2026-11-18", 10_000);
+    expect(state.studySeconds["2026-11-18"]).toBe(MAX_STUDY_INCREMENT_SECONDS);
   });
 });

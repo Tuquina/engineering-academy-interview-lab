@@ -1,53 +1,49 @@
 "use client";
 
-import { createContext, useContext, useMemo, useSyncExternalStore, type ReactNode } from "react";
-import type { ProgressStore } from "../application/progress-store";
+import { useMemo } from "react";
+import { createStoreContext } from "@/shared/lib/create-store-context";
+import { toDayKey } from "@/shared/kernel/day-key";
 import {
   EMPTY_PROGRESS,
+  addStudyTime,
   completeLesson,
+  recordAnswer,
   recordLessonVisit,
+  recordReadingPosition,
   reopenLesson,
   type ProgressState,
 } from "../domain/progress";
 
-const ProgressStoreContext = createContext<ProgressStore | null>(null);
+const progressContext = createStoreContext<ProgressState>("Progress", EMPTY_PROGRESS);
 
-/** Provee el store de progreso a la UI. La implementación concreta se decide en la raíz de composición. */
-export function ProgressProvider({ store, children }: { store: ProgressStore; children: ReactNode }) {
-  return <ProgressStoreContext.Provider value={store}>{children}</ProgressStoreContext.Provider>;
-}
+/** Provee el store de progreso. La implementación concreta se decide en la raíz de composición. */
+export const ProgressProvider = progressContext.Provider;
 
-function useStore(): ProgressStore {
-  const store = useContext(ProgressStoreContext);
-  if (!store) throw new Error("useProgress debe usarse dentro de <ProgressProvider>.");
-  return store;
-}
-
-const getServerSnapshot = (): ProgressState => EMPTY_PROGRESS;
-
-/**
- * Estado de progreso reactivo. Durante SSR e hidratación devuelve el estado vacío para evitar diferencias
- * entre servidor y cliente; después refleja lo persistido.
- */
-export function useProgressState(): ProgressState {
-  const store = useStore();
-  return useSyncExternalStore(store.subscribe, store.getSnapshot, getServerSnapshot);
-}
+/** Estado de progreso reactivo (vacío durante SSR e hidratación). */
+export const useProgressState = progressContext.useStoreState;
 
 export interface ProgressActions {
   recordVisit(lessonId: string): void;
+  recordPosition(lessonId: string, sectionId: string): void;
   complete(lessonId: string): void;
   reopen(lessonId: string): void;
+  answer(questionId: string, lessonId: string, correct: boolean): void;
+  addStudySeconds(seconds: number): void;
 }
 
 /** Acciones de progreso; encapsulan el reloj y la persistencia para que los componentes no los conozcan. */
 export function useProgressActions(): ProgressActions {
-  const store = useStore();
+  const store = progressContext.useStore();
   return useMemo(
     () => ({
       recordVisit: (lessonId) => store.update((s) => recordLessonVisit(s, lessonId, new Date())),
+      recordPosition: (lessonId, sectionId) =>
+        store.update((s) => recordReadingPosition(s, lessonId, sectionId)),
       complete: (lessonId) => store.update((s) => completeLesson(s, lessonId, new Date())),
       reopen: (lessonId) => store.update((s) => reopenLesson(s, lessonId)),
+      answer: (questionId, lessonId, correct) =>
+        store.update((s) => recordAnswer(s, { questionId, lessonId, correct }, new Date())),
+      addStudySeconds: (seconds) => store.update((s) => addStudyTime(s, toDayKey(new Date()), seconds)),
     }),
     [store],
   );

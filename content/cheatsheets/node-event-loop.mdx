@@ -1,0 +1,64 @@
+---
+title: "Node.js event loop"
+description: "Fases, colas de prioridad, orden de ejecución y cómo detectar y evitar bloqueos."
+order: 2
+tags: ["nodejs", "event loop", "performance"]
+relatedLessons: ["nodejs.event-loop"]
+---
+
+## Orden de ejecución (script CommonJS)
+
+1. Código síncrono hasta vaciar la pila de llamadas.
+2. Cola de `process.nextTick`.
+3. Microtasks: continuaciones de promesas, `queueMicrotask`.
+4. Fases del loop: **timers → pending callbacks → poll → check → close callbacks**.
+5. Después de **cada** callback se repiten los pasos 2 y 3.
+
+| API                     | Dónde corre                                          |
+| ----------------------- | ---------------------------------------------------- |
+| `process.nextTick(fn)`  | Antes de continuar el loop (prioridad máxima)        |
+| `Promise.then`, `await` | Cola de microtasks                                   |
+| `setTimeout(fn, ms)`    | Fase timers, cuando pasaron al menos `ms` (mínimo 1) |
+| `setImmediate(fn)`      | Fase check, justo después de poll                    |
+| Callbacks de I/O        | Fase poll                                            |
+
+```js
+setTimeout(() => console.log("timeout"), 0);
+setImmediate(() => console.log("immediate"));
+// En el módulo principal: orden NO garantizado.
+// Dentro de un callback de I/O: immediate siempre primero.
+```
+
+## Qué usa el thread pool de libuv (4 hilos por defecto)
+
+- `fs` (salvo watchers), `dns.lookup`, `zlib`, crypto costoso (`pbkdf2`, `scrypt`, `randomBytes` asíncronos).
+- **No** la red: sockets y HTTP usan epoll, kqueue o IOCP.
+- Ajuste: variable de entorno `UV_THREADPOOL_SIZE` (medir antes de cambiarla).
+
+## Qué bloquea el loop
+
+- Versiones `*Sync`: `readFileSync`, `pbkdf2Sync`, `execSync`.
+- `JSON.parse` / `JSON.stringify` de payloads grandes.
+- Bucles de cálculo largos, ordenar arrays enormes.
+- Regex con backtracking catastrófico (ReDoS).
+- Cadenas infinitas de microtasks o `nextTick` recursivo.
+
+## Medir
+
+```ts
+import { monitorEventLoopDelay } from "node:perf_hooks";
+
+const h = monitorEventLoopDelay({ resolution: 20 });
+h.enable();
+// Valores en nanosegundos.
+const p99Ms = h.percentile(99) / 1e6;
+```
+
+## Soluciones
+
+| Situación             | Solución                                                 |
+| --------------------- | -------------------------------------------------------- |
+| Existe API asíncrona  | Usarla (corre en el thread pool o en el SO)              |
+| Cálculo propio pesado | `worker_threads` o una cola con workers dedicados        |
+| Trabajo divisible     | Lotes + `await setImmediate()` de `node:timers/promises` |
+| Payloads grandes      | Limitar tamaño del request, usar streams                 |

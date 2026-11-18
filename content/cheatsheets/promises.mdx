@@ -1,0 +1,83 @@
+---
+title: "Promises y async/await"
+description: "Combinadores, cancelación, timeouts y errores frecuentes al trabajar con código asíncrono en TypeScript."
+order: 1
+tags: ["typescript", "asincronía", "promises"]
+relatedLessons: ["typescript.promises-task-completablefuture", "nodejs.event-loop"]
+---
+
+## Combinadores
+
+| Necesito…                               | Uso                  | Si algo falla                                     |
+| --------------------------------------- | -------------------- | ------------------------------------------------- |
+| Todas, y sin cualquiera no puedo seguir | `Promise.all`        | Rechaza con el primer error; las demás siguen     |
+| Todas, aceptando fallos parciales       | `Promise.allSettled` | Nunca rechaza; revisar `status` de cada resultado |
+| La primera que termine (bien o mal)     | `Promise.race`       | Rechaza si la primera en terminar falla           |
+| La primera que salga bien               | `Promise.any`        | Rechaza con `AggregateError` si fallan todas      |
+
+```ts
+const [debt, history] = await Promise.all([getDebt(id), getHistory(id)]);
+
+const results = await Promise.allSettled(customers.map(sendReminder));
+const failed = results.filter((r) => r.status === "rejected");
+```
+
+## Timeouts y cancelación
+
+```ts
+// Timeout real: cancela la request subyacente.
+const res = await fetch(url, { signal: AbortSignal.timeout(3_000) });
+
+// Combinar cancelación externa + timeout.
+const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(3_000)]);
+
+// Distinguir el motivo.
+try {
+  await fetch(url, { signal });
+} catch (error) {
+  if (error instanceof DOMException && error.name === "TimeoutError") {
+    /* timeout */
+  }
+  if (error instanceof DOMException && error.name === "AbortError") {
+    /* cancelado */
+  }
+}
+```
+
+## Patrones
+
+```ts
+// Secuencial a propósito (orden importa o rate limit estricto).
+for (const item of items) await process(item);
+
+// Ceder el event loop entre lotes grandes.
+import { setImmediate as yieldToLoop } from "node:timers/promises";
+for (const batch of batches) {
+  handle(batch);
+  await yieldToLoop();
+}
+
+// Esperar sin bloquear.
+import { setTimeout as sleep } from "node:timers/promises";
+await sleep(500);
+```
+
+## Errores frecuentes
+
+- `array.forEach(async ...)`: no espera nada y deja rechazos sin manejar. Usar `for...of`, `Promise.all` o
+  concurrencia acotada.
+- Promesas flotantes (sin `await` ni `.catch`). Activar `@typescript-eslint/no-floating-promises`.
+- `return promise` dentro de `try/catch` no captura el rechazo: usar `return await promise`.
+- `Promise.race` como timeout no cancela la operación perdedora.
+- `Promise.all` sobre miles de elementos: satura dependencias. Acotar la concurrencia.
+- En Node.js 15+, un rechazo no manejado termina el proceso.
+
+## Equivalencias
+
+| JavaScript           | C#                          | Java                            |
+| -------------------- | --------------------------- | ------------------------------- |
+| `Promise<T>`         | `Task<T>`                   | `CompletableFuture<T>`          |
+| `Promise.all`        | `Task.WhenAll`              | `CompletableFuture.allOf`       |
+| `Promise.race`       | `Task.WhenAny`              | `CompletableFuture.anyOf`       |
+| `AbortSignal`        | `CancellationToken`         | `Future.cancel` (no interrumpe) |
+| `await` (no bloquea) | `await` / `.Result` bloquea | `join()` / `get()` bloquean     |

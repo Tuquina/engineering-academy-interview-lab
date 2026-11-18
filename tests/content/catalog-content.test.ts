@@ -4,12 +4,15 @@ import { LearningQueries } from "@/modules/learning/application/learning-queries
 import type { Catalog } from "@/modules/learning/domain/catalog";
 import { FileSystemContentSource } from "@/modules/learning/infrastructure/file-system-content-source";
 import { extractHeadings } from "@/modules/learning/presentation/lesson/extract-headings";
+import { loadCheatsheets } from "@/modules/learning/infrastructure/file-system-cheatsheet-source";
+import { loadDecks } from "@/modules/flashcards/infrastructure/file-system-deck-source";
 
 /**
  * Integridad del contenido real del repositorio. Falla si un autor agrega contenido con frontmatter inválido,
  * referencias rotas o lecciones que no siguen la estructura pedagógica mínima.
  */
-const source = new FileSystemContentSource(path.resolve(import.meta.dirname, "../../content"));
+const contentRoot = path.resolve(import.meta.dirname, "../../content");
+const source = new FileSystemContentSource(contentRoot);
 const queries = new LearningQueries(source);
 let catalog: Catalog;
 
@@ -50,5 +53,47 @@ describe("contenido del repositorio", () => {
     const path = catalog.getPathBySlug("full-stack-ai-platform-engineer");
     expect(path).toBeDefined();
     expect(catalog.resolvePathLessons(path!).length).toBeGreaterThan(0);
+  });
+});
+
+describe("knowledge checks", () => {
+  it("cada pregunta tiene un ID único con el prefijo de su lección", async () => {
+    const seen = new Set<string>();
+    for (const course of catalog.courses) {
+      for (const lesson of catalog.getLessonsOfCourse(course.id)) {
+        const body = (await source.loadLessonBody(lesson.id)) ?? "";
+        const checks = body.match(/<KnowledgeCheck\b/g)?.length ?? 0;
+        const ids = [...body.matchAll(/<KnowledgeCheck\s+id="([^"]+)"/g)].map((m) => m[1]!);
+        expect(ids.length, `${lesson.id}: todos los KnowledgeCheck necesitan id`).toBe(checks);
+        for (const id of ids) {
+          expect(id.startsWith(`${lesson.id}.`), `${id} debe empezar con ${lesson.id}.`).toBe(true);
+          expect(seen.has(id), `ID de pregunta repetido: ${id}`).toBe(false);
+          seen.add(id);
+        }
+      }
+    }
+  });
+});
+
+describe("flashcards y cheatsheets", () => {
+  it("los mazos referencian cursos y lecciones existentes", async () => {
+    const decks = await loadDecks(contentRoot);
+    expect(decks.flatMap((d) => d.cards).length).toBeGreaterThanOrEqual(30);
+    for (const deck of decks) {
+      expect(catalog.getCourseById(deck.courseId), `${deck.id}: curso ${deck.courseId}`).toBeDefined();
+      for (const card of deck.cards) {
+        if (card.lessonId) expect(catalog.getLessonById(card.lessonId), `${card.id}: lección`).toBeDefined();
+      }
+    }
+  });
+
+  it("las cheatsheets enlazan lecciones existentes", async () => {
+    const sheets = await loadCheatsheets(contentRoot);
+    expect(sheets.length).toBeGreaterThan(0);
+    for (const sheet of sheets) {
+      for (const lessonId of sheet.relatedLessons) {
+        expect(catalog.getLessonById(lessonId), `${sheet.slug}: ${lessonId}`).toBeDefined();
+      }
+    }
   });
 });

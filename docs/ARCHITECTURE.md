@@ -31,13 +31,17 @@ Navegador ──► src/app (Server Components / Route Handlers: adaptadores del
 
 Estas reglas se verifican automáticamente en `tests/architecture/dependency-rules.test.ts`.
 
-## 3. Módulos (estado en Fase 1)
+## 3. Módulos (estado en Fase 2)
 
-| Módulo                                                                                                               | Estado               | Responsabilidad                                                                            |
-| -------------------------------------------------------------------------------------------------------------------- | -------------------- | ------------------------------------------------------------------------------------------ |
-| `learning`                                                                                                           | Implementado         | Catálogo (áreas, cursos, módulos, lecciones, rutas), integridad, lectura de lecciones MDX. |
-| `progress`                                                                                                           | Implementado (local) | Progreso por lección en modo invitado (`localStorage`). PostgreSQL en Fase 6.              |
-| `exercises`, `challenges`, `interviews`, `flashcards`, `architecture-lab`, `agent-lab`, `content-management`, `auth` | Planificados         | Se crean cuando una fase los necesita; no existen carpetas vacías.                         |
+| Módulo                                                                                                 | Estado               | Responsabilidad                                                                               |
+| ------------------------------------------------------------------------------------------------------ | -------------------- | --------------------------------------------------------------------------------------------- |
+| `learning`                                                                                             | Implementado         | Catálogo (áreas, cursos, módulos, lecciones, rutas), integridad, lecciones y cheatsheets MDX. |
+| `progress`                                                                                             | Implementado (local) | Progreso, respuestas a quizzes, tiempo de estudio, estadísticas y recomendaciones.            |
+| `flashcards`                                                                                           | Implementado (local) | Mazos en `content/flashcards`, repetición espaciada (SM-2 adaptado, ADR-0005).                |
+| `notebook`                                                                                             | Implementado (local) | Notas por lección, marcadores y cheatsheets favoritas.                                        |
+| `preferences`                                                                                          | Implementado (local) | Tamaño de lectura, ruta activa, tarjetas nuevas por día.                                      |
+| `search`                                                                                               | Implementado         | Índice y búsqueda local (Ctrl/Cmd + K).                                                       |
+| `exercises`, `challenges`, `interviews`, `architecture-lab`, `agent-lab`, `content-management`, `auth` | Planificados         | Se crean cuando una fase los necesita; no existen carpetas vacías.                            |
 
 ## 4. Modelo de contenido
 
@@ -82,3 +86,18 @@ docker compose --profile e2e run --rm e2e    # Playwright contra el contenedor a
 | El crecimiento del catálogo rompe referencias                              | Validación en `Catalog.create()` + test que carga el contenido real.                          |
 | TypeScript 7 aún no soportado por `typescript-eslint`                      | Se fija TypeScript 6.0 ([ADR-0002](adr/0002-dependency-baseline.md)).                         |
 | El progreso local se pierde al limpiar el navegador                        | Explícito en la UI; sincronización con cuenta en Fase 6.                                      |
+
+## 7. Estado de cliente (modo invitado)
+
+Todo el estado de usuario usa el puerto `ExternalStore<T>` (`src/shared/kernel/external-store.ts`), consumido con
+`useSyncExternalStore`. La implementación actual es `LocalStorageStore<T>` (`src/infrastructure/browser`), que valida
+con Zod, migra versiones y sincroniza pestañas. La raíz de composición `src/infrastructure/composition/client-stores.ts`
+decide la implementación; en la Fase 6 se agregará una respaldada por la API autenticada sin cambiar los componentes.
+
+| Clave local       | Módulo      | Contenido                                                       |
+| ----------------- | ----------- | --------------------------------------------------------------- |
+| `eal:progress`    | progress    | Lecciones (v2), respuestas a knowledge checks, segundos por día |
+| `eal:flashcards`  | flashcards  | Planificación SM-2 por tarjeta y repasos por día                |
+| `eal:notebook`    | notebook    | Notas, marcadores y cheatsheets favoritas                       |
+| `eal:preferences` | preferences | Tamaño de lectura, ruta activa, tarjetas nuevas por día         |
+| `eal:theme`       | shared      | Tema claro/oscuro (aplicado antes del primer pintado)           |

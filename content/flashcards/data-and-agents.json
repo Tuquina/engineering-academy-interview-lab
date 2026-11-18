@@ -1,0 +1,72 @@
+{
+  "id": "data-and-agents",
+  "title": "Datos y agentes de IA",
+  "description": "PostgreSQL, Redis y fundamentos de ingeniería de agentes LLM.",
+  "courseId": "llm-agents",
+  "cards": [
+    {
+      "id": "pg.isolation-default",
+      "front": "¿Cuál es el nivel de aislamiento por defecto de PostgreSQL y qué anomalía permite?",
+      "back": "Read Committed. Cada sentencia ve los datos confirmados al iniciarla, por lo que dos lecturas en la misma transacción pueden ver valores distintos (non-repeatable read) y un read-modify-write puede perder actualizaciones si no se usa `SELECT ... FOR UPDATE` o una actualización atómica.",
+      "difficulty": "advanced",
+      "tags": ["postgresql", "transacciones"],
+      "lessonId": null
+    },
+    {
+      "id": "pg.unique-idempotency",
+      "front": "¿Cómo garantizar en la base que un pago no se registre dos veces?",
+      "back": "Con una restricción única sobre la clave de idempotencia (p. ej. `UNIQUE (provider, external_payment_id)`) e `INSERT ... ON CONFLICT DO NOTHING`. La base resuelve la carrera; la aplicación no necesita un lock previo.",
+      "difficulty": "intermediate",
+      "tags": ["postgresql", "idempotencia"],
+      "lessonId": null
+    },
+    {
+      "id": "pg.composite-index-order",
+      "front": "Índice compuesto `(tenant_id, created_at)`: ¿sirve para filtrar sólo por `created_at`?",
+      "back": "Un B-tree compuesto se aprovecha sobre todo por su prefijo izquierdo: sirve para `tenant_id` sólo, o `tenant_id` + rango de `created_at`. PostgreSQL 18 agregó skip scan, útil si `tenant_id` tiene pocos valores distintos, pero para consultas frecuentes por `created_at` conviene un índice propio.",
+      "difficulty": "intermediate",
+      "tags": ["postgresql", "índices"],
+      "lessonId": null
+    },
+    {
+      "id": "redis.cache-aside",
+      "front": "Describí el patrón Cache Aside.",
+      "back": "La aplicación lee primero de la caché; si no está (miss), lee de la base, guarda en caché con TTL y devuelve. Al escribir, actualiza la base e invalida (o actualiza) la entrada de caché.",
+      "difficulty": "basic",
+      "tags": ["redis", "caching"],
+      "lessonId": null
+    },
+    {
+      "id": "redis.stampede",
+      "front": "¿Qué es un cache stampede y cómo se mitiga?",
+      "back": "Muchas requests encuentran a la vez la misma clave expirada y todas recalculan contra la base. Mitigaciones: un solo recálculo con lock o single-flight, expiración temprana probabilística y TTL con jitter.",
+      "difficulty": "advanced",
+      "tags": ["redis", "caching"],
+      "lessonId": null
+    },
+    {
+      "id": "llm.tool-calling",
+      "front": "En tool calling, ¿quién ejecuta la herramienta: el modelo o la aplicación?",
+      "back": "La aplicación. El modelo sólo propone el nombre de la herramienta y los argumentos; la aplicación los valida, decide si se permite, la ejecuta y devuelve el resultado al modelo.",
+      "difficulty": "basic",
+      "tags": ["agentes", "tool calling"],
+      "lessonId": null
+    },
+    {
+      "id": "llm.memory-types",
+      "front": "Memoria conversacional vs estado de negocio: ¿dónde debe vivir una promesa de pago?",
+      "back": "En el estado estructurado del negocio (base de datos, con fecha y monto), no sólo en el historial de chat. El agente la consulta con una herramienta; la conversación es contexto, no fuente de verdad.",
+      "difficulty": "intermediate",
+      "tags": ["agentes", "memoria"],
+      "lessonId": null
+    },
+    {
+      "id": "llm.eval-nondeterminism",
+      "front": "¿Por qué no alcanza con ejecutar una vez cada caso para evaluar un agente?",
+      "back": "Las respuestas varían entre ejecuciones. Hay que repetir cada caso, medir la tasa de éxito y su variabilidad, y comparar versiones con criterios de aceptación (quality gates), no con una sola muestra.",
+      "difficulty": "intermediate",
+      "tags": ["agentes", "evals"],
+      "lessonId": null
+    }
+  ]
+}

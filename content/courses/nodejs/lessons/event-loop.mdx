@@ -1,0 +1,337 @@
+---
+id: nodejs.event-loop
+moduleId: nodejs.internals
+title: "El event loop de Node.js: fases, microtasks y cómo no bloquearlo"
+description: "Cómo Node.js atiende miles de conexiones con un solo hilo de JavaScript, en qué orden se ejecutan timers, promesas y callbacks de I/O, y por qué una tarea CPU-bound degrada a todas las requests."
+difficulty: intermediate
+order: 1
+objectives:
+  - "Describir la arquitectura de Node.js: V8, libuv, el event loop y el thread pool."
+  - "Predecir el orden de ejecución de código síncrono, `process.nextTick`, promesas, timers y `setImmediate`."
+  - "Explicar por qué una tarea CPU-bound bloquea a todas las requests y cómo evitarlo."
+  - "Medir el event loop lag con `monitorEventLoopDelay`."
+  - "Contrastar el modelo de Node.js con el de un servidor thread-per-request en .NET o Java."
+prerequisites: ["typescript.promises-task-completablefuture"]
+estimatedMinutes: 40
+tags: ["event loop", "libuv", "microtasks", "performance", "concurrencia", "c#", "java"]
+version: "1.0.0"
+comparesWith: ["csharp", "java"]
+references:
+  - title: "Node.js — The Node.js Event Loop"
+    url: "https://nodejs.org/en/learn/asynchronous-work/event-loop-timers-and-nexttick"
+  - title: "Node.js — Don't Block the Event Loop (or the Worker Pool)"
+    url: "https://nodejs.org/en/learn/asynchronous-work/dont-block-the-event-loop"
+  - title: "Node.js — perf_hooks.monitorEventLoopDelay"
+    url: "https://nodejs.org/api/perf_hooks.html#perf_hooksmonitoreventloopdelayoptions"
+  - title: "Node.js — Worker threads"
+    url: "https://nodejs.org/api/worker_threads.html"
+  - title: "libuv — Design overview"
+    url: "https://docs.libuv.org/en/v1.x/design.html"
+relatedExercises: []
+relatedChallenges: []
+diagrams: []
+interviewQuestions:
+  - question: "¿Cómo funciona el event loop de Node.js?"
+    keyPoints:
+      - "Un solo hilo ejecuta JavaScript; la I/O se delega al sistema operativo o al thread pool de libuv."
+      - "El loop recorre fases: timers, pending callbacks, poll (I/O), check (setImmediate) y close callbacks."
+      - "Después de cada callback se vacían la cola de process.nextTick y luego la de microtasks (promesas)."
+      - "Concurrencia sin paralelismo de JS: muchas operaciones en vuelo, una sola ejecutando código a la vez."
+  - question: "¿Por qué una operación CPU-bound es peligrosa en un servidor Node.js y cómo la resolverías?"
+    keyPoints:
+      - "Ocupa el único hilo de JS: ninguna otra request avanza mientras dura, y la latencia sube para todas."
+      - "Opciones: versiones asíncronas que usan el thread pool, worker threads, partir el trabajo en trozos o moverlo a otro servicio o a una cola."
+      - "Medirlo: event loop lag (monitorEventLoopDelay) como métrica de salud."
+  - question: "¿Qué diferencia hay entre process.nextTick y setImmediate?"
+    keyPoints:
+      - "nextTick se ejecuta antes de continuar el event loop, al terminar la operación actual (antes que las promesas en CommonJS)."
+      - "setImmediate se ejecuta en la fase check, después de la fase poll."
+      - "Abusar de nextTick puede dejar sin turno a la I/O (starvation)."
+  - question: "Compará el modelo de concurrencia de Node.js con un servidor ASP.NET o Spring tradicional."
+    keyPoints:
+      - "Thread-per-request: cada request ocupa un hilo del pool; un cálculo pesado bloquea sólo ese hilo."
+      - "Node: un hilo de JS para todas las requests; muy eficiente para I/O, frágil ante CPU-bound."
+      - "ASP.NET con async y Java con virtual threads también liberan hilos durante la I/O, pero ejecutan código en paralelo en varios núcleos."
+summary:
+  - "Node.js ejecuta JavaScript en un solo hilo; la concurrencia viene de no esperar la I/O."
+  - "Orden: código síncrono, process.nextTick, microtasks y luego las fases del loop (timers, poll, check…)."
+  - "Las microtasks se vacían por completo antes de seguir: una cadena infinita de promesas bloquea el loop."
+  - "Una tarea CPU-bound larga aumenta la latencia de todas las requests, no sólo de la suya."
+  - "Medí el event loop lag y mové el trabajo pesado a worker threads, al thread pool o a otro servicio."
+---
+
+## ¿Qué problema resuelve?
+
+Un endpoint de la API de cobranzas genera un reporte de deudas y, para "proteger" los datos, firma el archivo derivando
+una clave con `crypto.pbkdf2Sync` con 600.000 iteraciones. En las pruebas tarda unos 300 ms y nadie se preocupa. En
+producción, cuando un operador pide un reporte, **todas** las conversaciones de los agentes se congelan durante esos
+300 ms: webhooks, health checks y respuestas al cliente esperan en fila.
+
+No es un problema de ese endpoint: es el modelo de ejecución de Node.js. Entender el event loop permite explicar
+por qué pasa, predecir el orden en que corre el código y diseñar servicios que no se degraden así.
+
+## Arquitectura: un hilo de JavaScript y mucha I/O delegada
+
+- **V8** ejecuta JavaScript: compila, gestiona la pila de llamadas (call stack) y la memoria.
+- **libuv** implementa el event loop y la I/O asíncrona. Para la red usa los mecanismos del sistema operativo
+  (epoll, kqueue, IOCP); para lo que no tiene una API asíncrona nativa (sistema de archivos, `dns.lookup`, zlib,
+  partes de crypto) usa un **thread pool** de 4 hilos por defecto (`UV_THREADPOOL_SIZE`).
+- **El event loop** toma callbacks listos y los ejecuta de a uno en el hilo de JavaScript.
+
+La consecuencia: **hay concurrencia (miles de operaciones en vuelo) pero no paralelismo de JavaScript**. En cada
+instante, como mucho un callback está ejecutando código tuyo.
+
+## Las fases del event loop
+
+<MermaidDiagram
+  caption="Cada vuelta del loop recorre las fases en orden. Entre callback y callback se vacían nextTick y las microtasks."
+  chart={`
+flowchart TD
+  T[timers: setTimeout y setInterval vencidos] --> PC[pending callbacks: algunos errores de I/O diferidos]
+  PC --> IP[idle, prepare: uso interno]
+  IP --> P[poll: obtiene eventos de I/O y ejecuta sus callbacks]
+  P --> C[check: callbacks de setImmediate]
+  C --> CL[close callbacks: por ejemplo socket.on close]
+  CL --> T
+  M[[Después de CADA callback: vaciar process.nextTick y luego microtasks]] -.-> T
+  M -.-> P
+  M -.-> C
+`}
+/>
+
+| Fase                  | Qué ejecuta                                                                         |
+| --------------------- | ----------------------------------------------------------------------------------- |
+| **timers**            | Callbacks de `setTimeout` / `setInterval` cuyo tiempo mínimo ya pasó                |
+| **pending callbacks** | Algunos callbacks de I/O diferidos (por ejemplo, ciertos errores de TCP)            |
+| **poll**              | Espera y procesa eventos de I/O; es donde el proceso pasa la mayor parte del tiempo |
+| **check**             | Callbacks de `setImmediate`                                                         |
+| **close callbacks**   | Eventos de cierre como `socket.on("close")`                                         |
+
+Fuera de las fases hay dos colas con prioridad: la de **`process.nextTick`** y la de **microtasks** (continuaciones
+de promesas y `queueMicrotask`). Desde Node.js 11 ambas se vacían **después de cada callback**, no sólo entre fases.
+
+## Predecir el orden de ejecución
+
+```js
+// order.cjs (CommonJS)
+console.log("A: síncrono");
+setTimeout(() => console.log("B: timeout"), 0);
+setImmediate(() => console.log("C: immediate"));
+Promise.resolve().then(() => console.log("D: promise"));
+process.nextTick(() => console.log("E: nextTick"));
+console.log("F: síncrono");
+```
+
+Salida:
+
+```text
+A: síncrono
+F: síncrono
+E: nextTick
+D: promise
+B: timeout      ← B y C pueden invertirse
+C: immediate
+```
+
+1. Primero termina todo el código síncrono (**A**, **F**).
+2. Se vacía la cola de `nextTick` (**E**) y después la de microtasks (**D**).
+3. El orden entre **B** y **C** **no está garantizado** en el módulo principal: depende de si, al entrar al loop, ya
+   pasó el milisegundo mínimo del timer.
+
+Dentro de un callback de I/O el orden sí es determinista, porque después de la fase poll siempre viene check:
+
+```js
+const fs = require("node:fs");
+fs.readFile(__filename, () => {
+  setTimeout(() => console.log("timeout"), 0);
+  setImmediate(() => console.log("immediate")); // siempre primero dentro de un callback de I/O
+});
+```
+
+<Callout type="info" title="Módulos ES cambian un detalle">
+  En un módulo ES (`.mjs` o `"type": "module"`), el código principal ya se evalúa dentro de una microtask. Por
+  eso un `Promise.then` agendado ahí puede ejecutarse **antes** que `process.nextTick`. En un servidor real
+  esto rara vez importa; en una entrevista, mencionar el matiz suma.
+</Callout>
+
+## Ejemplo incorrecto
+
+```ts
+// ❌ Trabajo CPU-bound síncrono dentro de un handler HTTP.
+import { pbkdf2Sync } from "node:crypto";
+
+export async function POST(request: Request): Promise<Response> {
+  const { reportId } = (await request.json()) as { reportId: string };
+  const report = await reports.build(reportId);
+
+  // Bloquea el único hilo de JS ~300 ms: ninguna otra request avanza mientras tanto.
+  const key = pbkdf2Sync(report.secret, report.salt, 600_000, 32, "sha256");
+
+  return Response.json({ signature: sign(report, key) });
+}
+```
+
+Además del `as` sin validación (ver la lección de type erasure), el problema central es `pbkdf2Sync`: es CPU-bound y
+síncrono. Mientras corre, el event loop no puede ejecutar callbacks: las demás requests esperan, los health checks
+pueden fallar y el orquestador puede reiniciar un proceso que en realidad estaba sano.
+
+## Implementación recomendada
+
+```ts
+import { pbkdf2 } from "node:crypto";
+import { promisify } from "node:util";
+
+const pbkdf2Async = promisify(pbkdf2);
+
+export async function POST(request: Request): Promise<Response> {
+  const { reportId } = ReportRequestSchema.parse(await request.json());
+  const report = await reports.build(reportId);
+
+  // La versión asíncrona corre en el thread pool de libuv: el event loop sigue atendiendo otras requests.
+  const key = await pbkdf2Async(report.secret, report.salt, 600_000, 32, "sha256");
+
+  return Response.json({ signature: sign(report, key) });
+}
+```
+
+Según el tipo de trabajo:
+
+- **Existe versión asíncrona** (crypto, zlib, fs): usala; corre en el thread pool.
+- **Cálculo propio pesado** (parsear un CSV enorme, scoring de miles de deudas): `worker_threads`, o mejor, una cola
+  con workers dedicados si el trabajo puede ser asíncrono para el usuario.
+- **Trabajo divisible:** procesarlo en lotes cediendo el control entre lotes con `await setImmediate()` de
+  `node:timers/promises`.
+
+Y medirlo, porque lo que no se mide se descubre en un incidente:
+
+```ts
+import { monitorEventLoopDelay } from "node:perf_hooks";
+
+const histogram = monitorEventLoopDelay({ resolution: 20 });
+histogram.enable();
+
+setInterval(() => {
+  // Los valores están en nanosegundos.
+  logger.info({ p99Ms: histogram.percentile(99) / 1e6, maxMs: histogram.max / 1e6 }, "event loop delay");
+  histogram.reset();
+}, 10_000).unref(); // unref: este timer no impide que el proceso termine
+```
+
+## Casos límite y errores frecuentes
+
+- **Starvation por microtasks.** Una cadena que siempre agenda otra promesa (o un `nextTick` recursivo) nunca deja que
+  el loop avance: timers e I/O quedan bloqueados aunque "todo sea asíncrono".
+- **`setTimeout(fn, 0)` no es cero.** El mínimo efectivo es 1 ms y el callback corre cuando el loop llega a la fase
+  de timers: si el hilo está ocupado, se atrasa. Los timers garantizan un mínimo, no un máximo.
+- **Saturación del thread pool.** Con 4 hilos, muchas operaciones simultáneas de fs o crypto hacen cola entre sí;
+  `dns.lookup` compite con ellas. Se puede ajustar `UV_THREADPOOL_SIZE`, pero conviene medir primero.
+- **`JSON.parse` y `JSON.stringify` grandes** también son CPU-bound y síncronos: un payload de decenas de MB bloquea
+  el loop. Limitá el tamaño de los requests.
+- **Regex con backtracking catastrófico** (ReDoS): una expresión regular mal escrita sobre un input malicioso puede
+  bloquear el proceso durante segundos.
+- **En serverless** (como Vercel Functions), cada instancia atiende pocas requests a la vez, pero bloquear igual
+  alarga la duración facturada y la latencia.
+
+## Comparación con .NET y Java
+
+| Aspecto                           | Node.js                                  | ASP.NET Core                                     | Spring (servlet clásico)                         |
+| --------------------------------- | ---------------------------------------- | ------------------------------------------------ | ------------------------------------------------ |
+| Hilos ejecutando tu código        | Uno (más workers si los creás)           | Varios del thread pool, en paralelo              | Uno por request del pool del contenedor          |
+| Durante la I/O                    | El hilo queda libre para otros callbacks | Con `async`, el hilo vuelve al pool              | El hilo espera bloqueado (salvo virtual threads) |
+| CPU-bound en una request          | Bloquea **todas** las requests           | Ocupa un hilo; las demás siguen en otros núcleos | Ocupa un hilo; las demás siguen                  |
+| Condiciones de carrera en memoria | No entre callbacks (un solo hilo)        | Sí: requiere locks o estructuras concurrentes    | Sí: requiere sincronización                      |
+
+Desde Java 21, los **virtual threads** permiten escribir código bloqueante sin ocupar un hilo del sistema operativo
+durante la I/O: un objetivo parecido al de Node, con otro modelo de programación.
+
+<Callout type="interview" title="Cómo explicarlo en una entrevista">
+  "Node ejecuta JavaScript en un solo hilo y delega la I/O al sistema operativo o al thread pool de libuv, así
+  que escala muy bien en I/O pero cualquier cálculo síncrono largo frena a todas las requests. Después de cada
+  callback se vacían nextTick y las microtasks, y luego el loop sigue con sus fases: timers, poll, check. Para
+  trabajo pesado uso APIs asíncronas, worker threads o una cola, y monitoreo el event loop lag como métrica de
+  salud."
+</Callout>
+
+## Ejercicio interactivo
+
+<KnowledgeCheck
+  id="nodejs.event-loop.q1"
+  question="En un script CommonJS: `setTimeout(() => log('T'), 0); Promise.resolve().then(() => log('P')); process.nextTick(() => log('N')); log('S');`. ¿Qué se imprime?"
+  options={[
+    {
+      text: "S, N, P, T",
+      correct: true,
+      explanation:
+        "Correcto: primero el código síncrono, luego la cola de nextTick, luego las microtasks y por último el timer en la fase de timers.",
+    },
+    {
+      text: "S, P, N, T",
+      explanation:
+        "En CommonJS, nextTick se vacía antes que las microtasks. Este orden puede verse en un módulo ES, donde el código principal ya corre dentro de una microtask.",
+    },
+    {
+      text: "T, S, N, P",
+      explanation:
+        "Un timer nunca interrumpe código síncrono: el callback espera a que la pila de llamadas quede vacía.",
+    },
+    {
+      text: "S, T, N, P",
+      explanation:
+        "Las colas de nextTick y microtasks se vacían antes de que el loop llegue a la fase de timers.",
+    },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="nodejs.event-loop.q2"
+  question="Dentro del callback de `fs.readFile`, agendás `setTimeout(a, 0)` y `setImmediate(b)`. ¿Qué corre primero?"
+  options={[
+    {
+      text: "`a`, porque el timeout es de 0 ms.",
+      explanation:
+        "Después de la fase poll (donde corre el callback de I/O) viene check, antes de volver a timers.",
+    },
+    {
+      text: "`b`, siempre.",
+      correct: true,
+      explanation:
+        "Correcto: dentro de un callback de I/O, setImmediate se ejecuta en la fase check de la misma vuelta del loop.",
+    },
+    {
+      text: "Depende del sistema operativo.",
+      explanation: "Ese no determinismo existe en el módulo principal, no dentro de un callback de I/O.",
+    },
+    {
+      text: "Ambos en paralelo.",
+      explanation: "Nunca hay dos callbacks de JavaScript ejecutándose a la vez en el mismo hilo.",
+    },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="nodejs.event-loop.q3"
+  question="La API de cobranzas sube su latencia p99 cada vez que se genera un reporte grande. ¿Cuál es la primera hipótesis a verificar?"
+  options={[
+    {
+      text: "La base de datos está lenta.",
+      explanation:
+        "Es posible, pero no explicaría que todas las requests se degraden justo durante el reporte. Medí el event loop delay antes.",
+    },
+    {
+      text: "El reporte ejecuta trabajo CPU-bound síncrono que bloquea el event loop.",
+      correct: true,
+      explanation:
+        "Correcto: es el síntoma típico. Confirmalo con monitorEventLoopDelay o un profile de CPU y mové el trabajo al thread pool, a worker threads o a una cola.",
+    },
+    {
+      text: "Faltan instancias: hay que escalar horizontalmente.",
+      explanation:
+        "Escalar reparte la carga pero cada instancia sigue bloqueándose al generar reportes. Primero hay que encontrar la causa.",
+    },
+    {
+      text: "El garbage collector de V8 es lento.",
+      explanation:
+        "Las pausas de GC existen, pero la correlación con un endpoint concreto apunta primero a trabajo síncrono propio.",
+    },
+  ]}
+/>

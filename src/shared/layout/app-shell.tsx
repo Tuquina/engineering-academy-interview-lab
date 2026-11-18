@@ -9,7 +9,16 @@ import { ThemeToggle } from "./theme-toggle";
  * Estructura principal: sidebar persistente en escritorio, barra superior y área de contenido.
  * Es un Server Component; sólo la navegación activa, el menú móvil y el tema se hidratan en el cliente.
  */
-export function AppShell({ courses, children }: { courses: readonly CourseNavLink[]; children: ReactNode }) {
+export function AppShell({
+  courses,
+  search,
+  children,
+}: {
+  courses: readonly CourseNavLink[];
+  /** Buscador global; se inyecta como slot para que el layout compartido no dependa de módulos de negocio. */
+  search: ReactNode;
+  children: ReactNode;
+}) {
   return (
     <div className="flex min-h-dvh">
       <a
@@ -30,8 +39,9 @@ export function AppShell({ courses, children }: { courses: readonly CourseNavLin
           <div className="lg:hidden">
             <Brand />
           </div>
-          <div className="ml-auto flex items-center gap-1">
-            <span className="text-muted hidden text-xs sm:inline">Modo invitado · progreso local</span>
+          <div className="flex min-w-0 flex-1 justify-center px-2">{search}</div>
+          <div className="flex items-center gap-1">
+            <span className="text-muted hidden text-xs xl:inline">Modo invitado · progreso local</span>
             <ThemeToggle />
           </div>
         </header>

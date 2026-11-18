@@ -406,6 +406,7 @@ prefiere un esquema del que se derive el tipo.
 ## Ejercicio interactivo
 
 <KnowledgeCheck
+  id="typescript.runtime-vs-type-system.q1"
   question="Tenés `const body: unknown = await request.json()`. ¿Cuál es la forma correcta de obtener un `PaymentReceivedEvent` confiable?"
   options={[
     {
@@ -433,6 +434,7 @@ prefiere un esquema del que se derive el tipo.
 />
 
 <KnowledgeCheck
+  id="typescript.runtime-vs-type-system.q2"
   question="Con `type CustomerId = string` y `type DebtId = string`, ¿qué ocurre al llamar `cancelDebt(customerId)` si la función espera un `DebtId`?"
   options={[
     {
@@ -459,6 +461,7 @@ prefiere un esquema del que se derive el tipo.
 />
 
 <KnowledgeCheck
+  id="typescript.runtime-vs-type-system.q3"
   question="¿Por qué no se puede escribir `function create<T>(): T { return new T(); }` en TypeScript, cuando en C# existe `new T()` con la restricción `where T : new()`?"
   options={[
     {

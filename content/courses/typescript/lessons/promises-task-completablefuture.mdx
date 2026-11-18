@@ -1,0 +1,369 @@
+---
+id: typescript.promises-task-completablefuture
+moduleId: typescript.async
+title: "Promises en profundidad: Promise<T> frente a Task<T> y CompletableFuture<T>"
+description: "Cómo funciona realmente una Promise, cómo combinar operaciones concurrentes sin perder errores ni saturar dependencias, y en qué se diferencia del modelo asíncrono de .NET y Java."
+difficulty: intermediate
+order: 1
+objectives:
+  - "Explicar el ciclo de vida de una Promise (pending, fulfilled, rejected) y por qué es eager."
+  - "Elegir entre `Promise.all`, `allSettled`, `race` y `any` según la semántica de fallo que necesitás."
+  - "Detectar errores típicos: `await` secuencial innecesario, `forEach` con async y promesas flotantes."
+  - "Implementar concurrencia acotada y timeouts con `AbortSignal`."
+  - "Comparar `Promise<T>` con `Task<T>` de C# y `CompletableFuture<T>` de Java en hilos, cancelación y errores."
+prerequisites: ["typescript.runtime-vs-type-system"]
+estimatedMinutes: 40
+tags: ["promises", "async/await", "concurrencia", "abortcontroller", "c#", "java"]
+version: "1.0.0"
+comparesWith: ["csharp", "java"]
+references:
+  - title: "MDN — Promise"
+    url: "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Promise"
+  - title: "MDN — Using promises"
+    url: "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Using_promises"
+  - title: "MDN — AbortSignal.timeout()"
+    url: "https://developer.mozilla.org/en-US/docs/Web/API/AbortSignal/timeout_static"
+  - title: "Node.js — Process: evento unhandledRejection"
+    url: "https://nodejs.org/api/process.html#event-unhandledrejection"
+  - title: ".NET — Asynchronous programming with async and await"
+    url: "https://learn.microsoft.com/en-us/dotnet/csharp/asynchronous-programming/"
+  - title: "Java SE — CompletableFuture"
+    url: "https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/concurrent/CompletableFuture.html"
+relatedExercises: []
+relatedChallenges: []
+diagrams: []
+interviewQuestions:
+  - question: "¿Cuál es la diferencia entre Promise.all y Promise.allSettled? ¿Cuándo usarías cada uno?"
+    keyPoints:
+      - "all rechaza en cuanto una promesa rechaza (todo o nada); allSettled espera a todas y nunca rechaza."
+      - "all no cancela las demás operaciones: siguen ejecutándose aunque ya no importe su resultado."
+      - "all para operaciones que dependen entre sí para producir una respuesta; allSettled para lotes independientes donde un fallo parcial es aceptable y hay que reportarlo."
+  - question: "¿Qué ocurre con una promesa rechazada que nadie maneja en Node.js?"
+    keyPoints:
+      - "Se emite unhandledRejection; desde Node.js 15 el comportamiento por defecto termina el proceso."
+      - "Causas típicas: promesas flotantes (sin await ni catch) y async dentro de forEach."
+      - "Prevención: siempre await o devolver la promesa, regla de lint no-floating-promises y manejo centralizado de errores."
+  - question: "¿Cómo limitarías la concurrencia al procesar 10.000 elementos contra una API externa?"
+    keyPoints:
+      - "Promise.all sobre 10.000 llamadas dispara todas a la vez: satura la API, el pool de conexiones y la memoria."
+      - "Concurrencia acotada: N workers que toman elementos de una cola compartida, o una librería probada."
+      - "Combinar con timeouts, reintentos con backoff y respeto de rate limits del proveedor."
+  - question: "Compará Promise<T> de JavaScript con Task<T> de C#."
+    keyPoints:
+      - "Ambos representan un resultado futuro y se usan con async/await; ambos suelen estar en ejecución al obtenerlos (hot/eager)."
+      - "En Node las continuaciones corren en el único hilo de JavaScript como microtasks; en .NET pueden correr en el thread pool o en un SynchronizationContext."
+      - "Cancelación: AbortSignal frente a CancellationToken, ambos cooperativos. JavaScript no puede bloquear esperando (no existe .Result)."
+summary:
+  - "Una Promise es un valor futuro que se resuelve una sola vez; su ejecutor corre de inmediato al crearla."
+  - "await suspende la función, no el hilo: el event loop sigue atendiendo otras tareas."
+  - "Lanzá en paralelo lo independiente y esperalo con un combinador elegido por su semántica de fallo."
+  - "Promise.all no cancela lo que queda en curso; la cancelación es cooperativa con AbortSignal."
+  - "Nunca dejes promesas flotantes: en Node.js un rechazo no manejado termina el proceso."
+  - "Para lotes grandes, concurrencia acotada; para dependencias lentas, timeouts explícitos."
+---
+
+## ¿Qué problema resuelve?
+
+Un agente de cobranzas necesita, antes de contactar a un cliente, tres datos: la deuda vigente, el historial de
+contactos y las propuestas de pago permitidas. Cada consulta tarda unos 120 ms contra servicios distintos. La primera
+versión que escribe casi todo el mundo es esta:
+
+```ts
+const debt = await debtService.getDebt(customerId);
+const history = await contactService.getHistory(customerId);
+const proposals = await proposalService.getAllowed(customerId);
+// ≈ 360 ms: cada await espera a que termine el anterior aunque no dependan entre sí
+```
+
+Las tres consultas son independientes, pero el código las encadena. Con miles de conversaciones por hora, esa
+latencia se acumula en cada turno del agente. El problema contrario también es frecuente: lanzar 10.000 llamadas a la
+vez con `Promise.all` y tumbar al proveedor o agotar el pool de conexiones.
+
+Dominar las Promises es saber **qué lanzar en paralelo, cuánto paralelismo permitir, qué hacer cuando algo falla y
+cómo cortar lo que tarda demasiado**.
+
+## El modelo mental de una Promise
+
+Una Promise representa un resultado que todavía no existe. Tiene tres estados y cambia de estado **una sola vez**:
+
+- **pending:** la operación sigue en curso.
+- **fulfilled:** terminó con un valor.
+- **rejected:** terminó con un error (el _reason_).
+
+Tres reglas explican casi todo su comportamiento:
+
+1. **Es eager.** La función que se pasa a `new Promise(executor)` corre de inmediato, de forma síncrona. Llamar a una
+   función `async` ya inicia su trabajo; `await` sólo espera el resultado.
+2. **Las continuaciones son microtasks.** Los callbacks de `then`, `catch` y lo que sigue a un `await` se encolan como
+   microtasks y se ejecutan cuando la pila de llamadas actual termina, nunca de forma síncrona.
+3. **`await` suspende la función, no el hilo.** Mientras una función espera, el event loop atiende otras requests.
+
+```ts
+async function loadCustomerContext(customerId: string) {
+  console.log("1. empieza");
+  const debt = await debtService.getDebt(customerId); // la función se suspende acá
+  console.log("3. reanuda con", debt.id);
+  return debt;
+}
+
+const pending = loadCustomerContext("cus_1"); // imprime "1. empieza" de inmediato
+console.log("2. sigo ejecutando mientras tanto");
+await pending;
+```
+
+<MermaidDiagram
+  caption="Tres consultas independientes lanzadas a la vez: la latencia total es la de la más lenta, no la suma."
+  chart={`
+sequenceDiagram
+  participant H as Handler
+  participant D as Deudas
+  participant C as Contactos
+  participant P as Propuestas
+  H->>D: getDebt()
+  H->>C: getHistory()
+  H->>P: getAllowed()
+  Note over H: Promise.all espera las tres
+  D-->>H: deuda (110 ms)
+  P-->>H: propuestas (95 ms)
+  C-->>H: historial (130 ms)
+  Note over H: total ≈ 130 ms en lugar de ≈ 335 ms
+`}
+/>
+
+## Combinadores: elegir por la semántica de fallo
+
+Los cuatro combinadores reciben varias promesas, pero difieren en **cuándo terminan** y **qué hacen ante un error**:
+
+| Combinador           | Se resuelve cuando…                 | Rechaza cuando…                          | Equivalente aproximado                            |
+| -------------------- | ----------------------------------- | ---------------------------------------- | ------------------------------------------------- |
+| `Promise.all`        | todas se cumplen (valores en orden) | la primera rechaza (las demás siguen)    | `Task.WhenAll` · `CompletableFuture.allOf`        |
+| `Promise.allSettled` | todas terminan, bien o mal          | nunca                                    | `Task.WhenAll` + inspeccionar cada `Task`         |
+| `Promise.race`       | la primera que termina, bien o mal  | la primera que termina lo hace con error | `Task.WhenAny` · `CompletableFuture.anyOf`        |
+| `Promise.any`        | la primera que se cumple            | todas rechazan (`AggregateError`)        | Sin equivalente directo en las librerías estándar |
+
+```ts
+// Todo o nada: sin cualquiera de los tres datos no se puede decidir el próximo contacto.
+const [debt, history, proposals] = await Promise.all([
+  debtService.getDebt(customerId),
+  contactService.getHistory(customerId),
+  proposalService.getAllowed(customerId),
+]);
+
+// Lote independiente: un fallo no debe impedir notificar al resto, pero hay que saber cuáles fallaron.
+const results = await Promise.allSettled(customers.map((c) => notifier.sendReminder(c)));
+const failed = results.flatMap((result, i) => (result.status === "rejected" ? [customers[i]!.id] : []));
+```
+
+<Callout type="warning" title="Promise.all no cancela nada">
+  Si `getHistory` rechaza a los 20 ms, `Promise.all` rechaza en ese momento, pero `getDebt` y `getAllowed`
+  **siguen ejecutándose**: sus resultados simplemente se descartan. Si esas operaciones tienen efectos
+  (escribir, cobrar, enviar), seguirán ocurriendo. Para cortarlas hace falta cancelación cooperativa con
+  `AbortSignal`.
+</Callout>
+
+## Comparación con `Task<T>` y `CompletableFuture<T>`
+
+Si venís de .NET o Java, la sintaxis de `async`/`await` resulta familiar, pero el modelo de ejecución no es igual:
+
+| Aspecto                       | JavaScript `Promise<T>`                               | C# `Task<T>`                                                   | Java `CompletableFuture<T>`                                      |
+| ----------------------------- | ----------------------------------------------------- | -------------------------------------------------------------- | ---------------------------------------------------------------- |
+| ¿Dónde corre el trabajo?      | I/O en el sistema operativo o el thread pool de libuv | Thread pool o I/O asíncrono del sistema operativo              | `ForkJoinPool.commonPool()` o el `Executor` indicado             |
+| ¿Dónde corre la continuación? | En el único hilo de JS, como microtask                | Thread pool o `SynchronizationContext` capturado               | En el hilo que completa el futuro o en el `Executor` de `*Async` |
+| Esperar bloqueando            | Imposible: no existe un `.Result`                     | `.Result` / `.Wait()` (riesgo de deadlock con contexto)        | `.join()` / `.get()` bloquean el hilo                            |
+| Cancelación                   | `AbortSignal`, cooperativa                            | `CancellationToken`, cooperativa                               | `cancel()` marca el futuro; no interrumpe el trabajo en curso    |
+| Error al esperar              | Se lanza el _reason_ tal cual                         | `await` relanza la excepción original                          | `join()` envuelve en `CompletionException`                       |
+| Rechazo sin manejar           | `unhandledRejection` (Node termina el proceso)        | `TaskScheduler.UnobservedTaskException`, no termina el proceso | Se pierde en silencio si nadie consulta el futuro                |
+
+La diferencia más importante es la primera fila: en Node.js **todo tu JavaScript corre en un solo hilo**. No hay
+condiciones de carrera por memoria compartida entre callbacks, pero un cálculo síncrono largo bloquea todas las
+requests (lo vemos en la lección del event loop).
+
+## Ejemplo incorrecto
+
+```ts
+// ❌ Tres errores frecuentes en un mismo job de recordatorios.
+export async function sendDailyReminders(customers: Customer[]): Promise<void> {
+  // 1. forEach ignora las promesas que devuelve el callback: la función termina antes de enviar nada
+  //    y cualquier rechazo queda sin manejar.
+  customers.forEach(async (customer) => {
+    await notifier.sendReminder(customer);
+  });
+
+  // 2. Promesa flotante: nadie la espera ni captura su error.
+  auditLog.record("daily-reminders-started");
+
+  // 3. Timeout con race que no cancela la operación: la llamada sigue viva consumiendo recursos.
+  await Promise.race([crm.syncAll(), sleep(5_000).then(() => Promise.reject(new Error("timeout")))]);
+}
+```
+
+Por qué falla:
+
+1. `Array.prototype.forEach` no espera promesas. El job informa éxito sin haber enviado nada, y si un envío falla,
+   el rechazo no tiene handler: en Node.js 15+ eso **termina el proceso**.
+2. Una promesa sin `await` ni `.catch` es un error silencioso esperando ocurrir.
+3. `Promise.race` decide qué resultado usar, pero no detiene a la perdedora: `crm.syncAll()` sigue en curso.
+
+## Implementación recomendada
+
+```ts
+/**
+ * Aplica `fn` a cada elemento con un máximo de `limit` operaciones simultáneas.
+ * Conserva el orden de los resultados y rechaza ante el primer error (como Promise.all).
+ */
+export async function mapWithConcurrency<T, R>(
+  items: readonly T[],
+  limit: number,
+  fn: (item: T, index: number) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
+
+  async function worker(): Promise<void> {
+    while (nextIndex < items.length) {
+      const index = nextIndex++; // seguro: no hay otro hilo de JS que intercale entre leer e incrementar
+      results[index] = await fn(items[index]!, index);
+    }
+  }
+
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
+}
+
+export async function sendDailyReminders(customers: Customer[]): Promise<ReminderReport> {
+  await auditLog.record("daily-reminders-started"); // esperada: si falla, el job falla de forma visible
+
+  const outcomes = await mapWithConcurrency(customers, 10, async (customer) => {
+    try {
+      // Cada envío tiene su propio timeout real: el AbortSignal cancela la request HTTP subyacente.
+      await notifier.sendReminder(customer, { signal: AbortSignal.timeout(3_000) });
+      return { customerId: customer.id, ok: true as const };
+    } catch (error) {
+      return { customerId: customer.id, ok: false as const, error: String(error) };
+    }
+  });
+
+  return { sent: outcomes.filter((o) => o.ok).length, failed: outcomes.filter((o) => !o.ok) };
+}
+```
+
+Decisiones clave:
+
+- **Concurrencia acotada (10):** protege al proveedor y al pool de conexiones; el límite se ajusta a su rate limit.
+- **Errores como datos por elemento:** un envío fallido no aborta el lote, pero queda reportado.
+- **`AbortSignal.timeout`:** el timeout cancela la operación de verdad, siempre que la API subyacente acepte una
+  señal (como `fetch`). Para combinar un timeout con una cancelación externa existe `AbortSignal.any([a, b])`.
+
+## Casos límite y errores frecuentes
+
+- **`return await` dentro de `try`.** `return promise` dentro de un `try/catch` no captura su rechazo; `return await
+promise` sí, porque el rechazo ocurre dentro del bloque.
+- **`await` en un bucle no siempre es un error.** Si el orden importa o hay un rate limit estricto, el procesamiento
+  secuencial es correcto: la clave es que sea una decisión, no un accidente.
+- **Rechazos tardíos con `Promise.all`.** Si dos promesas rechazan, `all` informa la primera; la segunda queda
+  manejada internamente y se pierde. Si necesitás todos los errores, usá `allSettled`.
+- **Un `Promise.all` vacío** se resuelve de inmediato con `[]`; un `Promise.any` vacío rechaza con `AggregateError`.
+- **Cancelar no deshace.** Abortar una request que ya llegó al servidor no garantiza que la operación no se haya
+  aplicado: para efectos como cobros hace falta idempotencia del lado del servidor.
+- **Errores que no son `Error`.** Se puede rechazar con cualquier valor; en un `catch`, el error es `unknown` y
+  conviene normalizarlo antes de leer `.message`.
+- **Detección automática.** La regla `@typescript-eslint/no-floating-promises` detecta promesas sin manejar y
+  `@typescript-eslint/no-misused-promises`, callbacks async donde se espera una función síncrona (como `forEach`).
+
+## Cuándo usar cada herramienta
+
+- **`await` secuencial:** cuando cada paso depende del anterior o el orden es un requisito.
+- **`Promise.all`:** operaciones independientes que necesitás todas para continuar.
+- **`Promise.allSettled`:** lotes donde un fallo parcial es aceptable y debe reportarse.
+- **`Promise.any`:** redundancia (la primera réplica o el primer proveedor que responda bien).
+- **`Promise.race`:** rara vez sola; preferí `AbortSignal.timeout` para timeouts.
+- **Concurrencia acotada:** cualquier lote cuyo tamaño no controlás (clientes, mensajes, archivos).
+
+<Callout type="interview" title="Cómo explicarlo en una entrevista">
+  "Una Promise es eager: la operación ya está en curso cuando la tengo. Por eso lanzo en paralelo lo
+  independiente y lo espero con el combinador cuya semántica de fallo necesito. Sé que `Promise.all` no
+  cancela lo que queda en curso, así que para timeouts uso `AbortSignal`, y para lotes grandes acoto la
+  concurrencia. A diferencia de .NET, en Node no puedo bloquear esperando un resultado, y un rechazo no
+  manejado termina el proceso."
+</Callout>
+
+## Ejercicio interactivo
+
+<KnowledgeCheck
+  id="typescript.promises-task-completablefuture.q1"
+  question="Un endpoint necesita tres consultas independientes y no puede responder si falta cualquiera. ¿Qué usarías?"
+  options={[
+    {
+      text: "Tres `await` seguidos.",
+      explanation:
+        "Funciona, pero suma las latencias: las consultas no dependen entre sí y podrían correr a la vez.",
+    },
+    {
+      text: "`Promise.all` con las tres llamadas.",
+      correct: true,
+      explanation:
+        "Correcto: corren en paralelo y la falta de cualquiera rechaza la operación, que es la semántica pedida.",
+    },
+    {
+      text: "`Promise.allSettled` con las tres llamadas.",
+      explanation:
+        "Esperaría a todas aun después de un fallo y obligaría a revisar cada resultado; sirve cuando un fallo parcial es aceptable.",
+    },
+    {
+      text: "`Promise.any` con las tres llamadas.",
+      explanation:
+        "Se resolvería con la primera que responda bien y descartaría las otras dos: no es lo que se necesita.",
+    },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="typescript.promises-task-completablefuture.q2"
+  question="`customers.forEach(async (c) => { await send(c); })` dentro de una función async. ¿Qué ocurre?"
+  options={[
+    {
+      text: "Envía los mensajes uno por uno, en orden.",
+      explanation: "No: forEach no espera las promesas que devuelve el callback.",
+    },
+    {
+      text: "Inicia todos los envíos a la vez, la función continúa sin esperarlos y los rechazos quedan sin manejar.",
+      correct: true,
+      explanation:
+        "Correcto. Cada callback inicia su envío y forEach descarta la promesa. Usá `for...of` con await, `Promise.all` o concurrencia acotada.",
+    },
+    {
+      text: "No compila en TypeScript.",
+      explanation:
+        "Compila: forEach acepta un callback que devuelve cualquier cosa. La regla `no-misused-promises` lo detecta.",
+    },
+    {
+      text: "Espera a todos los envíos porque la función externa es async.",
+      explanation: "Que la función externa sea async no cambia el comportamiento de forEach.",
+    },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="typescript.promises-task-completablefuture.q3"
+  question="Usás `Promise.race([callCrm(), timeout(5000)])` y gana el timeout. ¿Qué pasa con `callCrm()`?"
+  options={[
+    {
+      text: "Se cancela automáticamente.",
+      explanation: "Las promesas no se cancelan solas: race sólo decide qué resultado se usa.",
+    },
+    {
+      text: "Sigue ejecutándose y su resultado se descarta.",
+      correct: true,
+      explanation:
+        "Correcto. Para cortarla, la operación debe aceptar un `AbortSignal` (por ejemplo, `AbortSignal.timeout(5000)` en `fetch`).",
+    },
+    {
+      text: "Lanza un `AbortError`.",
+      explanation: "Sólo lanzaría AbortError si recibiera una señal y alguien la abortara.",
+    },
+    {
+      text: "Bloquea el event loop hasta terminar.",
+      explanation: "No bloquea: sigue pendiente como cualquier otra operación asíncrona.",
+    },
+  ]}
+/>

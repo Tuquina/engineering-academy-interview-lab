@@ -1,0 +1,72 @@
+{
+  "id": "architecture",
+  "title": "Arquitectura y System Design",
+  "description": "Patrones de arquitectura, consistencia y resiliencia.",
+  "courseId": "software-architecture",
+  "cards": [
+    {
+      "id": "arch.outbox",
+      "front": "¿Qué problema resuelve el patrón Transactional Outbox?",
+      "back": "El dual write: guardar en la base y publicar un evento no es atómico. Se escribe el evento en una tabla outbox en la misma transacción que el cambio de negocio, y un proceso aparte lo publica (entrega al menos una vez).",
+      "difficulty": "intermediate",
+      "tags": ["mensajería", "consistencia"],
+      "lessonId": null
+    },
+    {
+      "id": "arch.idempotent-consumer",
+      "front": "Si la entrega es \"al menos una vez\", ¿qué debe garantizar el consumidor?",
+      "back": "Ser idempotente: procesar el mismo mensaje dos veces produce el mismo efecto que una. Típicamente se registra el ID del mensaje procesado (tabla inbox o constraint única) en la misma transacción que el efecto.",
+      "difficulty": "intermediate",
+      "tags": ["mensajería", "idempotencia"],
+      "lessonId": null
+    },
+    {
+      "id": "arch.cqrs-vs-es",
+      "front": "CQRS vs Event Sourcing: ¿son lo mismo?",
+      "back": "No. CQRS separa modelos de escritura y de lectura. Event Sourcing persiste el estado como secuencia de eventos. Se combinan a menudo, pero cada uno puede usarse sin el otro.",
+      "difficulty": "intermediate",
+      "tags": ["cqrs", "event sourcing"],
+      "lessonId": null
+    },
+    {
+      "id": "arch.circuit-breaker",
+      "front": "Estados de un Circuit Breaker y para qué sirve cada uno.",
+      "back": "Closed: deja pasar y cuenta fallos. Open: falla rápido sin llamar a la dependencia caída. Half-open: deja pasar pruebas limitadas para decidir si vuelve a closed. Evita saturar un servicio caído y propagar latencia.",
+      "difficulty": "intermediate",
+      "tags": ["resiliencia"],
+      "lessonId": null
+    },
+    {
+      "id": "arch.retry-jitter",
+      "front": "¿Por qué agregar jitter al backoff exponencial de los reintentos?",
+      "back": "Para que muchos clientes que fallaron a la vez no reintenten sincronizados (thundering herd) y vuelvan a tumbar el servicio que se está recuperando.",
+      "difficulty": "intermediate",
+      "tags": ["resiliencia", "reintentos"],
+      "lessonId": null
+    },
+    {
+      "id": "arch.hexagonal",
+      "front": "En arquitectura hexagonal, ¿qué es un puerto y qué es un adaptador?",
+      "back": "Puerto: interfaz definida por el núcleo (lo que necesita o lo que ofrece). Adaptador: implementación concreta que conecta ese puerto con una tecnología (HTTP, PostgreSQL, una cola). Las dependencias apuntan hacia el núcleo.",
+      "difficulty": "basic",
+      "tags": ["hexagonal"],
+      "lessonId": null
+    },
+    {
+      "id": "arch.modular-monolith",
+      "front": "¿Cuándo conviene un monolito modular antes que microservicios?",
+      "back": "Cuando el equipo es chico, el dominio todavía cambia y no hay necesidades de escalado o despliegue independientes. Se obtienen límites claros entre módulos sin el costo operativo de la red, la consistencia distribuida y el despliegue múltiple.",
+      "difficulty": "intermediate",
+      "tags": ["arquitectura"],
+      "lessonId": null
+    },
+    {
+      "id": "arch.saga",
+      "front": "¿Qué es una saga y cómo se \"deshace\" un paso?",
+      "back": "Una secuencia de transacciones locales en distintos servicios coordinada por eventos (coreografía) o por un orquestador. No hay rollback distribuido: cada paso tiene una acción compensatoria que revierte su efecto de negocio.",
+      "difficulty": "advanced",
+      "tags": ["consistencia", "distribuidos"],
+      "lessonId": null
+    }
+  ]
+}

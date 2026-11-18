@@ -1,52 +1,66 @@
 "use client";
 
-import { ArrowRight, History, MessagesSquare, PlayCircle, Swords } from "lucide-react";
+import {
+  ArrowRight,
+  Boxes,
+  Flame,
+  History,
+  Lightbulb,
+  MessagesSquare,
+  PlayCircle,
+  Swords,
+  Target,
+  Timer,
+} from "lucide-react";
 import Link from "next/link";
-import { findNextLesson, recentLessons, summarizeProgress } from "../domain/progress";
+import { useIsClient } from "@/shared/lib/use-is-client";
 import { Button } from "@/shared/ui/button";
 import { Card, CardDescription, CardTitle } from "@/shared/ui/card";
 import { ProgressIndicator } from "@/shared/ui/progress-indicator";
+import { findNextLesson, recentLessons, summarizeProgress } from "../domain/progress";
+import { useLearnerSnapshot, type LearnerData } from "./learner-data";
 import { useProgressState } from "./progress-context";
 
-/** Datos serializables que el servidor prepara para el dashboard. */
-export interface DashboardLesson {
-  readonly id: string;
-  readonly title: string;
-  readonly href: string;
-  readonly courseTitle: string;
-  readonly estimatedMinutes: number;
-}
-
-export interface DashboardData {
-  readonly activePath: {
-    readonly title: string;
-    readonly href: string;
-    readonly lessonIds: readonly string[];
-  } | null;
-  readonly courses: ReadonlyArray<{
-    readonly id: string;
-    readonly title: string;
-    readonly href: string;
-    readonly lessonIds: readonly string[];
-  }>;
-  readonly lessons: Readonly<Record<string, DashboardLesson>>;
+function Metric({
+  icon: Icon,
+  label,
+  value,
+  hint,
+}: {
+  icon: typeof Flame;
+  label: string;
+  value: string;
+  hint: string;
+}) {
+  return (
+    <div className="border-border bg-surface rounded-lg border p-4">
+      <dt className="text-muted flex items-center gap-1.5 text-xs">
+        <Icon aria-hidden className="size-3.5" /> {label}
+      </dt>
+      <dd className="text-foreground mt-1 text-2xl font-semibold tabular-nums">{value}</dd>
+      <dd className="text-muted text-xs">{hint}</dd>
+    </div>
+  );
 }
 
 /**
- * Panel principal. Calcula todo a partir del progreso registrado; no muestra métricas que todavía no se
- * registran (rachas, minutos, rendimiento en evaluaciones): esas tarjetas llegan con la Fase 2.
+ * Panel principal: qué estudiar ahora, por qué, y cómo viene la preparación. Todas las métricas provienen de lo
+ * que efectivamente se registró en este navegador; durante la carga se muestran guiones, no ceros inventados.
  */
-export function DashboardOverview({ data }: { data: DashboardData }) {
+export function DashboardOverview({ data }: { data: LearnerData }) {
+  const isClient = useIsClient();
   const state = useProgressState();
-  const pathLessonIds = data.activePath?.lessonIds ?? [];
+  const snapshot = useLearnerSnapshot(data, isClient);
+  const pathLessonIds = snapshot.activePath?.lessonIds ?? [];
   const pathSummary = summarizeProgress(state, pathLessonIds);
   const nextLessonId = findNextLesson(state, pathLessonIds);
   const nextLesson = nextLessonId ? data.lessons[nextLessonId] : undefined;
   const recent = recentLessons(state, 5).filter((r) => data.lessons[r.id]);
+  const show = (value: string) => (snapshot.ready ? value : "–");
 
   return (
     <div className="flex flex-col gap-6">
-      <Card className="border-accent/30 from-accent/8 flex flex-col gap-5 bg-gradient-to-br to-transparent p-6">
+      <Card className="from-accent/8 border-accent/30 flex flex-col gap-5 bg-gradient-to-br to-transparent p-6">
         <div>
           <p className="text-accent text-xs font-semibold tracking-wide uppercase">
             Siguiente paso recomendado
@@ -92,21 +106,72 @@ export function DashboardOverview({ data }: { data: DashboardData }) {
         </p>
       </Card>
 
+      <dl className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <Metric
+          icon={Flame}
+          label="Racha de estudio"
+          value={show(`${snapshot.streakDays} ${snapshot.streakDays === 1 ? "día" : "días"}`)}
+          hint="Días seguidos con 5+ min activos"
+        />
+        <Metric
+          icon={Timer}
+          label="Últimos 7 días"
+          value={show(`${snapshot.minutesLast7Days} min`)}
+          hint="Tiempo activo estimado"
+        />
+        <Metric
+          icon={Boxes}
+          label="Flashcards vencidas"
+          value={show(String(snapshot.dueFlashcards))}
+          hint={`${snapshot.reviewedFlashcards} repasos en total`}
+        />
+        <Metric
+          icon={Target}
+          label="Precisión en quizzes"
+          value={show(
+            snapshot.quiz.answered > 0 ? `${Math.round(snapshot.quiz.accuracy * 100)}%` : "Sin datos",
+          )}
+          hint={`${snapshot.quiz.answered} preguntas respondidas`}
+        />
+      </dl>
+
       <div className="grid gap-6 lg:grid-cols-2">
+        <Card className="flex flex-col gap-4">
+          <CardTitle className="flex items-center gap-2">
+            <Lightbulb aria-hidden className="text-warning size-4" /> Qué practicar hoy
+          </CardTitle>
+          {!snapshot.ready ? (
+            <CardDescription>Calculando recomendaciones…</CardDescription>
+          ) : snapshot.recommendations.length === 0 ? (
+            <CardDescription>No hay recomendaciones: todo al día.</CardDescription>
+          ) : (
+            <ol className="flex flex-col gap-2">
+              {snapshot.recommendations.map((rec) => (
+                <li key={rec.id}>
+                  <Link href={rec.href} className="hover:bg-surface-2 block rounded-md px-2 py-1.5">
+                    <span className="text-foreground block text-sm font-medium">{rec.title}</span>
+                    <span className="text-muted text-xs">{rec.reason}</span>
+                  </Link>
+                </li>
+              ))}
+            </ol>
+          )}
+        </Card>
+
         <Card className="flex flex-col gap-4">
           <div>
             <CardTitle>Ruta activa</CardTitle>
-            {data.activePath ? (
+            {snapshot.activePath ? (
               <CardDescription>
-                <Link href={data.activePath.href} className="text-accent hover:underline">
-                  {data.activePath.title}
+                <Link href={snapshot.activePath.href} className="text-accent hover:underline">
+                  {snapshot.activePath.title}
                 </Link>
               </CardDescription>
             ) : (
               <CardDescription>No hay rutas publicadas.</CardDescription>
             )}
           </div>
-          {data.activePath && (
+          {snapshot.activePath && (
             <div className="flex flex-col gap-1.5">
               <div className="flex justify-between text-sm">
                 <span className="text-muted">Lecciones completadas</span>
@@ -117,37 +182,34 @@ export function DashboardOverview({ data }: { data: DashboardData }) {
               <ProgressIndicator value={pathSummary.ratio} label="Progreso de la ruta activa" />
             </div>
           )}
-        </Card>
-
-        <Card className="flex flex-col gap-4">
-          <CardTitle className="flex items-center gap-2">
-            <History aria-hidden className="text-muted size-4" /> Últimas lecciones visitadas
-          </CardTitle>
-          {recent.length === 0 ? (
-            <CardDescription>
-              Todavía no abriste ninguna lección. Empezá por el siguiente paso recomendado.
-            </CardDescription>
-          ) : (
-            <ul className="flex flex-col gap-1">
-              {recent.map((entry) => {
-                const lesson = data.lessons[entry.id];
-                if (!lesson) return null;
-                return (
-                  <li key={entry.id}>
-                    <Link
-                      href={lesson.href}
-                      className="hover:bg-surface-2 flex items-center justify-between gap-3 rounded-md px-2 py-1.5 text-sm"
-                    >
-                      <span className="text-foreground truncate">{lesson.title}</span>
-                      <span className="text-muted shrink-0 text-xs">
-                        {entry.status === "completed" ? "completada" : "en curso"}
-                      </span>
-                    </Link>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
+          <div className="border-border border-t pt-4">
+            <p className="text-foreground mb-2 flex items-center gap-2 text-sm font-medium">
+              <History aria-hidden className="text-muted size-4" /> Últimas lecciones visitadas
+            </p>
+            {recent.length === 0 ? (
+              <CardDescription>Todavía no abriste ninguna lección.</CardDescription>
+            ) : (
+              <ul className="flex flex-col gap-1">
+                {recent.map((entry) => {
+                  const lesson = data.lessons[entry.id];
+                  if (!lesson) return null;
+                  return (
+                    <li key={entry.id}>
+                      <Link
+                        href={lesson.href}
+                        className="hover:bg-surface-2 flex items-center justify-between gap-3 rounded-md px-2 py-1.5 text-sm"
+                      >
+                        <span className="text-foreground truncate">{lesson.title}</span>
+                        <span className="text-muted shrink-0 text-xs">
+                          {entry.status === "completed" ? "completada" : "en curso"}
+                        </span>
+                      </Link>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </div>
         </Card>
       </div>
 
@@ -171,8 +233,8 @@ export function DashboardOverview({ data }: { data: DashboardData }) {
             );
           })}
         </ul>
-        <Link href="/library" className="text-accent inline-flex items-center gap-1 text-sm hover:underline">
-          Ver la biblioteca completa <ArrowRight aria-hidden className="size-3.5" />
+        <Link href="/stats" className="text-accent inline-flex items-center gap-1 text-sm hover:underline">
+          Ver estadísticas detalladas <ArrowRight aria-hidden className="size-3.5" />
         </Link>
       </Card>
     </div>

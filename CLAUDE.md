@@ -37,5 +37,6 @@ No correr `pnpm build` en el contenedor mientras `app` está levantado: comparte
 
 ## Estado del proyecto
 
-- Fase 1 — Fundaciones: **completada** (ver docs/STATUS.md).
-- Siguiente: **Fase 2 — Aprendizaje**.
+- Fase 1 — Fundaciones: **completada**.
+- Fase 2 — Aprendizaje: **completada** (ver docs/STATUS.md).
+- Siguiente: **Fase 3 — Laboratorios**.

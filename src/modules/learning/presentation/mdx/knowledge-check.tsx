@@ -2,9 +2,11 @@
 
 import { CheckCircle2, RotateCcw, XCircle } from "lucide-react";
 import { useId, useState } from "react";
+import { useProgressActions, useProgressState } from "@/modules/progress/presentation/progress-context";
 import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
-import { InlineCodeText } from "./inline-code-text";
+import { InlineCodeText } from "@/shared/ui/inline-code-text";
+import { useCurrentLesson } from "../lesson/lesson-context";
 
 export interface KnowledgeCheckOption {
   text: string;
@@ -13,24 +15,49 @@ export interface KnowledgeCheckOption {
   explanation: string;
 }
 
+export interface KnowledgeCheckProps {
+  /** ID estable y único de la pregunta (p. ej. `typescript.runtime-vs-type-system.q1`); indexa el historial. */
+  id: string;
+  question: string;
+  options: KnowledgeCheckOption[];
+}
+
 /**
  * Pregunta de opción única autocorregible. Tras comprobar, explica cada alternativa (no sólo la correcta),
  * porque entender por qué una opción es incorrecta es parte del aprendizaje.
  *
- * El resultado no se persiste todavía: el registro de respuestas e intentos llega con el módulo de quizzes (Fase 2).
+ * Dentro de una lección, cada comprobación se registra en el progreso (intentos y último resultado), lo que
+ * alimenta las estadísticas y las recomendaciones por debilidad.
  */
-export function KnowledgeCheck({ question, options }: { question: string; options: KnowledgeCheckOption[] }) {
+export function KnowledgeCheck({ id, question, options }: KnowledgeCheckProps) {
   const groupId = useId();
+  const lesson = useCurrentLesson();
+  const record = useProgressState().questions[id];
+  const { answer } = useProgressActions();
   const [selected, setSelected] = useState<number | null>(null);
   const [checked, setChecked] = useState(false);
   const isCorrect = checked && selected !== null && options[selected]?.correct === true;
+
+  const check = () => {
+    if (selected === null) return;
+    setChecked(true);
+    if (lesson) answer(id, lesson.lessonId, options[selected]?.correct === true);
+  };
 
   return (
     <section
       aria-labelledby={`${groupId}-q`}
       className="not-prose border-border bg-surface my-8 rounded-lg border p-5"
     >
-      <p className="text-violet mb-1 text-xs font-semibold tracking-wide uppercase">Knowledge check</p>
+      <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+        <p className="text-violet text-xs font-semibold tracking-wide uppercase">Knowledge check</p>
+        {record && !checked && (
+          <p className="text-muted text-xs">
+            Última respuesta: {record.lastCorrect ? "correcta" : "incorrecta"} · {record.attempts}{" "}
+            {record.attempts === 1 ? "intento" : "intentos"}
+          </p>
+        )}
+      </div>
       <p id={`${groupId}-q`} className="text-foreground mb-4 font-medium">
         <InlineCodeText text={question} />
       </p>
@@ -81,7 +108,7 @@ export function KnowledgeCheck({ question, options }: { question: string; option
 
       <div className="mt-4 flex flex-wrap items-center gap-3">
         {!checked ? (
-          <Button size="sm" disabled={selected === null} onClick={() => setChecked(true)}>
+          <Button size="sm" disabled={selected === null} onClick={check}>
             Comprobar
           </Button>
         ) : (

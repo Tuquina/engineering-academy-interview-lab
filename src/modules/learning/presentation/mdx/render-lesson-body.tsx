@@ -6,6 +6,7 @@ import remarkGfm from "remark-gfm";
 import { Callout } from "./callout";
 import { FlowDiagram } from "./flow-diagram";
 import { KnowledgeCheck } from "./knowledge-check";
+import { MermaidDiagram } from "./mermaid-diagram";
 
 /**
  * Conjunto cerrado de componentes disponibles en las lecciones. Agregar un componente aquí lo habilita para
@@ -15,6 +16,7 @@ export const lessonComponents = {
   Callout,
   FlowDiagram,
   KnowledgeCheck,
+  MermaidDiagram,
 };
 
 const SUPPORTED_LANGUAGES = ["ts", "tsx", "js", "json", "csharp", "java", "bash", "sql", "text"] as const;

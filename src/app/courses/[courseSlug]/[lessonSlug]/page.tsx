@@ -14,7 +14,16 @@ import {
 } from "@/modules/learning/presentation/lesson/lesson-sections";
 import { TableOfContents, type TocEntry } from "@/modules/learning/presentation/lesson/table-of-contents";
 import { renderLessonBody } from "@/modules/learning/presentation/mdx/render-lesson-body";
+import { LessonContextProvider } from "@/modules/learning/presentation/lesson/lesson-context";
+import { BookmarkButton } from "@/modules/notebook/presentation/bookmark-button";
+import { LessonNotes } from "@/modules/notebook/presentation/lesson-notes";
 import { LessonProgressControls } from "@/modules/progress/presentation/lesson-progress-controls";
+import {
+  ReadingPositionTracker,
+  ResumeReadingBanner,
+} from "@/modules/progress/presentation/reading-position";
+import { StudyTimer } from "@/modules/progress/presentation/study-timer";
+import { SequentialKeyboardNav } from "@/shared/layout/keyboard-navigation";
 import { Badge } from "@/shared/ui/badge";
 
 interface LessonPageProps {
@@ -58,9 +67,15 @@ export default async function LessonPage({ params }: LessonPageProps) {
       ? [{ id: FIXED_SECTION_IDS.references, text: "Referencias", depth: 2 as const }]
       : []),
   ];
+  const sections = toc.map((entry) => ({ id: entry.id, title: entry.text }));
+  const previousHref = adjacent.previous ? `/courses/${course.slug}/${adjacent.previous.slug}` : undefined;
+  const nextHref = adjacent.next ? `/courses/${course.slug}/${adjacent.next.slug}` : undefined;
 
   return (
     <div className="mx-auto flex max-w-6xl gap-10">
+      <StudyTimer />
+      <ReadingPositionTracker lessonId={lesson.id} sections={sections} />
+      <SequentialKeyboardNav previousHref={previousHref} nextHref={nextHref} />
       <article className="min-w-0 flex-1">
         <nav aria-label="Ruta de navegación" className="text-muted mb-4 text-sm">
           <Link href="/library" className="hover:text-foreground">
@@ -89,15 +104,22 @@ export default async function LessonPage({ params }: LessonPageProps) {
               </Badge>
             )}
             <span className="text-muted text-xs">Contenido v{lesson.version}</span>
+            <span className="ml-auto">
+              <BookmarkButton lessonId={lesson.id} />
+            </span>
           </div>
         </header>
 
         <div className="flex flex-col gap-10">
+          <ResumeReadingBanner lessonId={lesson.id} sections={sections} />
           <LearningObjectives objectives={lesson.objectives} />
-          <div className="prose prose-headings:tracking-tight max-w-none">{body}</div>
+          <LessonContextProvider lessonId={lesson.id}>
+            <div className="prose prose-headings:tracking-tight reading-scale max-w-none">{body}</div>
+          </LessonContextProvider>
           <InterviewQuestions questions={lesson.interviewQuestions} />
           <LessonSummary points={lesson.summary} />
           <LessonReferences references={lesson.references} />
+          <LessonNotes lessonId={lesson.id} />
           <LessonProgressControls lessonId={lesson.id} />
 
           <nav aria-label="Lecciones del curso" className="grid gap-3 sm:grid-cols-2">

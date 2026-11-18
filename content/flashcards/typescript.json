@@ -1,0 +1,72 @@
+{
+  "id": "typescript",
+  "title": "TypeScript",
+  "description": "Sistema de tipos, type erasure, validación en runtime y asincronía.",
+  "courseId": "typescript",
+  "cards": [
+    {
+      "id": "ts.type-erasure",
+      "front": "¿Qué es type erasure en TypeScript y qué consecuencia práctica tiene?",
+      "back": "Los tipos sólo existen al compilar: el JavaScript emitido no los contiene. Consecuencia: no hay `instanceof` con interfaces ni `typeof T`, y todo dato externo (HTTP, JSON, colas, LLMs) debe validarse en runtime en los límites del sistema.",
+      "difficulty": "intermediate",
+      "tags": ["tipos", "runtime"],
+      "lessonId": "typescript.runtime-vs-type-system"
+    },
+    {
+      "id": "ts.structural-typing",
+      "front": "Tipado estructural vs nominal: ¿qué decide la compatibilidad en TypeScript?",
+      "back": "La forma (propiedades y sus tipos), no el nombre ni la herencia. Dos interfaces distintas con la misma forma son intercambiables; por eso alias como `CustomerId` y `DebtId` (ambos `string`) no se distinguen sin branded types.",
+      "difficulty": "intermediate",
+      "tags": ["tipos"],
+      "lessonId": "typescript.runtime-vs-type-system"
+    },
+    {
+      "id": "ts.unknown-vs-any",
+      "front": "¿Por qué tipar datos externos como `unknown` y no como `any`?",
+      "back": "`unknown` obliga a hacer narrowing o validación antes de usar el valor; `any` desactiva el chequeo y se propaga en silencio a todo lo que toca.",
+      "difficulty": "basic",
+      "tags": ["tipos", "validación"],
+      "lessonId": "typescript.runtime-vs-type-system"
+    },
+    {
+      "id": "ts.type-assertion",
+      "front": "¿Qué verificación hace en runtime `value as Customer`?",
+      "back": "Ninguna. La aserción sólo cambia lo que cree el compilador. Es aceptable cuando la justificación es local (p. ej. tras validar en un constructor de branded type), nunca para datos externos.",
+      "difficulty": "basic",
+      "tags": ["tipos"],
+      "lessonId": "typescript.runtime-vs-type-system"
+    },
+    {
+      "id": "ts.zod-infer",
+      "front": "¿Qué ventaja tiene derivar el tipo con `z.infer<typeof Schema>` frente a escribir la interfaz aparte?",
+      "back": "Validación y tipo salen de una sola fuente: no pueden desincronizarse. El esquema es un valor de runtime que lleva el tipo consigo.",
+      "difficulty": "intermediate",
+      "tags": ["zod", "validación"],
+      "lessonId": "typescript.runtime-vs-type-system"
+    },
+    {
+      "id": "ts.promise-all-vs-allsettled",
+      "front": "`Promise.all` vs `Promise.allSettled`: ¿cuándo usar cada uno?",
+      "back": "`all` falla en cuanto una promesa rechaza (todo-o-nada; las demás siguen ejecutándose). `allSettled` espera a todas y devuelve el resultado de cada una: útil para operaciones independientes donde un fallo parcial es aceptable.",
+      "difficulty": "intermediate",
+      "tags": ["asincronía"],
+      "lessonId": "typescript.promises-task-completablefuture"
+    },
+    {
+      "id": "ts.promise-eager",
+      "front": "Una `Promise` de JavaScript, ¿empieza a ejecutarse cuando se la espera con `await`?",
+      "back": "No. La función ejecutora corre de inmediato al crear la promesa (es eager, como un `Task` en caliente de C#). `await` sólo espera el resultado.",
+      "difficulty": "intermediate",
+      "tags": ["asincronía"],
+      "lessonId": "typescript.promises-task-completablefuture"
+    },
+    {
+      "id": "ts.abortcontroller",
+      "front": "¿Cómo se cancela una operación asíncrona en TypeScript/Node.js?",
+      "back": "Con `AbortController`: se pasa `controller.signal` a la operación (por ejemplo `fetch`) y se llama a `controller.abort()`. `AbortSignal.timeout(ms)` crea una señal que se aborta sola. Una promesa no se puede cancelar desde fuera si la operación no acepta la señal.",
+      "difficulty": "intermediate",
+      "tags": ["asincronía", "cancelación"],
+      "lessonId": "typescript.promises-task-completablefuture"
+    }
+  ]
+}

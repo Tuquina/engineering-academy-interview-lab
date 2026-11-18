@@ -1,6 +1,6 @@
 import { CheckCircle2, ExternalLink, MessagesSquare, Target } from "lucide-react";
 import type { InterviewQuestionRef, Reference } from "../../domain/catalog-types";
-import { InlineCodeText } from "../mdx/inline-code-text";
+import { InlineCodeText } from "@/shared/ui/inline-code-text";
 
 /**
  * Secciones fijas del modelo pedagógico (MASTER_PROMPT §9) que se generan a partir de los metadatos de la

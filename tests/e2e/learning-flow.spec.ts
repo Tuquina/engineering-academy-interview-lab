@@ -35,14 +35,15 @@ test.describe("flujo de aprendizaje (modo invitado)", () => {
     await page.getByRole("button", { name: "Marcar como completada" }).click();
     await expect(page.getByText("Lección completada")).toBeVisible();
 
+    // El dashboard avanza a la siguiente lección de la ruta y refleja el progreso parcial.
     await page.goto("/");
-    await expect(
-      page.getByText("Completaste todas las lecciones publicadas de tu ruta activa."),
-    ).toBeVisible();
-    await expect(page.getByRole("progressbar", { name: "Progreso de la ruta activa" })).toHaveAttribute(
-      "aria-valuenow",
-      "100",
+    await expect(page.getByRole("link", { name: /Continuar estudiando/ })).toHaveAttribute(
+      "href",
+      "/courses/typescript/promises-task-completablefuture",
     );
+    const pathProgress = page.getByRole("progressbar", { name: "Progreso de la ruta activa" });
+    await expect(pathProgress).not.toHaveAttribute("aria-valuenow", "0");
+    await expect(pathProgress).not.toHaveAttribute("aria-valuenow", "100");
   });
 
   test("la tabla de contenidos enlaza a secciones existentes", async ({ page, isMobile }) => {
