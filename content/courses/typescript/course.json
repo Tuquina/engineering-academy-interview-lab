@@ -1,0 +1,90 @@
+{
+  "id": "typescript",
+  "slug": "typescript",
+  "title": "TypeScript en profundidad",
+  "description": "Del sistema de tipos a la asincronía y el diseño de código mantenible, con comparaciones explícitas con C# y Java para acelerar el aprendizaje de quien ya domina esos lenguajes.",
+  "areaId": "languages-runtime",
+  "difficulty": "intermediate",
+  "order": 1,
+  "prerequisites": [],
+  "tags": ["typescript", "tipos", "asincronía"],
+  "modules": [
+    {
+      "id": "typescript.fundamentals",
+      "slug": "fundamentos-avanzados",
+      "title": "Fundamentos avanzados",
+      "description": "Qué es realmente TypeScript, qué existe en tiempo de ejecución y cómo razona el compilador.",
+      "order": 1,
+      "topics": [
+        "TypeScript frente a JavaScript",
+        "Runtime frente a sistema de tipos",
+        "Type erasure",
+        "Type inference",
+        "Tipado estructural",
+        "type frente a interface",
+        "Union e intersection types",
+        "Literal types",
+        "Optional properties y readonly",
+        "unknown, any y never",
+        "null, undefined y strict null checks",
+        "Type assertions y riesgos",
+        "Type narrowing y type predicates",
+        "Discriminated unions y exhaustiveness checking"
+      ]
+    },
+    {
+      "id": "typescript.advanced-types",
+      "slug": "sistema-de-tipos-avanzado",
+      "title": "Sistema de tipos avanzado",
+      "description": "Generics, tipos derivados y diseño de APIs type-safe validadas en runtime.",
+      "order": 2,
+      "topics": [
+        "Generics y generic constraints",
+        "keyof e indexed access types",
+        "Mapped types",
+        "Conditional types e infer",
+        "Utility types",
+        "Template literal types",
+        "Diseño de APIs type-safe",
+        "Branded types",
+        "Validación en runtime con Zod",
+        "DTOs y contratos tipados"
+      ]
+    },
+    {
+      "id": "typescript.async",
+      "slug": "asincronia",
+      "title": "Asincronía",
+      "description": "Promises, concurrencia controlada, cancelación y resiliencia.",
+      "order": 3,
+      "topics": [
+        "Callbacks y Promises",
+        "async/await",
+        "Promise.all, allSettled, race y any",
+        "Propagación de errores",
+        "Cancelación con AbortController",
+        "Timeouts",
+        "Concurrencia controlada",
+        "Race conditions",
+        "Reintentos y backoff exponencial"
+      ]
+    },
+    {
+      "id": "typescript.design-quality",
+      "slug": "diseno-y-calidad",
+      "title": "Diseño y calidad",
+      "description": "Organización de módulos, manejo de errores, testing y refactoring en TypeScript.",
+      "order": 4,
+      "topics": [
+        "Organización de módulos",
+        "Funciones puras e inmutabilidad",
+        "Dependency inversion",
+        "Result pattern y error handling",
+        "Testing",
+        "Refactoring",
+        "Patrones y anti-patterns",
+        "Optimización"
+      ]
+    }
+  ]
+}

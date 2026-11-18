@@ -1,0 +1,69 @@
+{
+  "id": "software-architecture",
+  "slug": "arquitectura-de-software",
+  "title": "Arquitectura de software y patrones",
+  "description": "Principios, patrones de diseño y de arquitectura con sus costos reales, cuándo no usarlos y cómo defender las decisiones en una entrevista.",
+  "areaId": "architecture",
+  "difficulty": "advanced",
+  "order": 1,
+  "prerequisites": [],
+  "tags": ["arquitectura", "patrones", "ddd"],
+  "modules": [
+    {
+      "id": "software-architecture.principles",
+      "slug": "principios",
+      "title": "Principios fundamentales",
+      "description": "Las ideas que justifican (o desaconsejan) cada patrón.",
+      "order": 1,
+      "topics": [
+        "SOLID",
+        "DRY, KISS y YAGNI",
+        "Separation of Concerns",
+        "Coupling y cohesion",
+        "Composition y encapsulation",
+        "Dependency Inversion y Dependency Injection",
+        "Clean Code y refactoring",
+        "Testing pyramid",
+        "Diseño orientado a dominio"
+      ]
+    },
+    {
+      "id": "software-architecture.design-patterns",
+      "slug": "patrones-de-diseno",
+      "title": "Patrones de diseño",
+      "description": "Patrones clásicos aplicados con pragmatismo en TypeScript.",
+      "order": 2,
+      "topics": [
+        "Strategy",
+        "Factory Method y Abstract Factory",
+        "Builder",
+        "Adapter, Decorator, Facade y Proxy",
+        "Observer y Mediator",
+        "Command y State",
+        "Template Method y Chain of Responsibility",
+        "Composite",
+        "Repository, Specification y Unit of Work"
+      ]
+    },
+    {
+      "id": "software-architecture.architecture-patterns",
+      "slug": "patrones-de-arquitectura",
+      "title": "Patrones de arquitectura",
+      "description": "Estructuras de sistemas y patrones de integración y resiliencia.",
+      "order": 3,
+      "topics": [
+        "Layered, Clean, Hexagonal y Onion Architecture",
+        "Modular Monolith y Microservices",
+        "Event-Driven Architecture y Event Sourcing",
+        "CQRS y Saga",
+        "Transactional Outbox, Inbox e Idempotent Consumer",
+        "Circuit Breaker, Retry y Bulkhead",
+        "Rate Limiting",
+        "Cache Aside y Write Through",
+        "API Gateway y Backend for Frontend",
+        "Strangler Fig y Anti-Corruption Layer",
+        "Dead Letter Queue"
+      ]
+    }
+  ]
+}

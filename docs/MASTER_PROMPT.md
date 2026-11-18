@@ -91,7 +91,7 @@ La plataforma está dirigida inicialmente a un ingeniero de software con experie
 No es un principiante en programación.
 
 El objetivo es profundizar especialmente en tecnologías y conceptos requeridos por posiciones Full Stack orientadas a plataformas de agentes de IA.
-
+
 El usuario necesita dominar y demostrar conocimientos en:
 
 1. TypeScript y Node.js.
@@ -1701,19 +1701,19 @@ La aplicación es amplia. Organizar el desarrollo en fases ejecutables, con entr
 
 ### Fase 1 — Fundaciones
 
-- [ ] Crear proyecto Next.js.
-- [ ] Configurar TypeScript estricto.
-- [ ] Instalar dependencias.
-- [ ] Configurar arquitectura modular.
-- [ ] Configurar estilos y componentes.
-- [ ] Configurar testing.
-- [ ] Crear layout principal.
-- [ ] Crear navegación.
-- [ ] Crear dashboard básico.
-- [ ] Crear motor de contenido MDX.
-- [ ] Crear registro de cursos.
-- [ ] Crear primera ruta educativa.
-- [ ] Crear primera lección real.
+- [x] Crear proyecto Next.js.
+- [x] Configurar TypeScript estricto.
+- [x] Instalar dependencias.
+- [x] Configurar arquitectura modular.
+- [x] Configurar estilos y componentes.
+- [x] Configurar testing.
+- [x] Crear layout principal.
+- [x] Crear navegación.
+- [x] Crear dashboard básico.
+- [x] Crear motor de contenido MDX.
+- [x] Crear registro de cursos.
+- [x] Crear primera ruta educativa.
+- [x] Crear primera lección real.
 
 **Resultado:** una plataforma navegable y funcional.
 

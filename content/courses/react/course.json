@@ -1,0 +1,70 @@
+{
+  "id": "react",
+  "slug": "react",
+  "title": "React: modelo mental y arquitectura",
+  "description": "Renderizado, reconciliación, hooks, estado y composición, con foco en evitar los errores que más aparecen en code reviews y entrevistas.",
+  "areaId": "frontend",
+  "difficulty": "intermediate",
+  "order": 1,
+  "prerequisites": ["typescript"],
+  "tags": ["react", "hooks", "frontend"],
+  "modules": [
+    {
+      "id": "react.rendering",
+      "slug": "componentes-y-renderizado",
+      "title": "Componentes y renderizado",
+      "description": "Qué dispara un render y cómo React decide qué actualizar.",
+      "order": 1,
+      "topics": [
+        "Arquitectura de componentes",
+        "JSX, props y estado",
+        "Renderizado y reconciliation",
+        "Virtual DOM y sus límites conceptuales",
+        "Composition, lifting state y render props"
+      ]
+    },
+    {
+      "id": "react.hooks",
+      "slug": "hooks",
+      "title": "Hooks",
+      "description": "Uso correcto de hooks y diseño de custom hooks.",
+      "order": 2,
+      "topics": [
+        "useState y useReducer",
+        "useEffect y sus errores frecuentes",
+        "useMemo, useCallback y React.memo",
+        "useRef",
+        "Custom hooks",
+        "Context"
+      ]
+    },
+    {
+      "id": "react.state-data",
+      "slug": "estado-y-datos",
+      "title": "Estado, datos y formularios",
+      "description": "Server state frente a client state, formularios y carga de datos.",
+      "order": 3,
+      "topics": [
+        "Estado derivado",
+        "Formularios: controlled vs uncontrolled",
+        "Data fetching",
+        "Server state vs client state",
+        "Suspense y error boundaries"
+      ]
+    },
+    {
+      "id": "react.quality",
+      "slug": "calidad-y-arquitectura",
+      "title": "Calidad y arquitectura frontend",
+      "description": "Optimización de renders, testing, accesibilidad y seguridad.",
+      "order": 4,
+      "topics": [
+        "Optimización de renders",
+        "Testing con Testing Library",
+        "Accesibilidad",
+        "Seguridad (XSS y datos no confiables)",
+        "Arquitectura frontend"
+      ]
+    }
+  ]
+}

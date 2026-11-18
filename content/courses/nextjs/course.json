@@ -1,0 +1,58 @@
+{
+  "id": "nextjs",
+  "slug": "nextjs",
+  "title": "Next.js App Router",
+  "description": "Server y Client Components, caching, Server Actions, Route Handlers y despliegue en Vercel, comparados con una SPA tradicional.",
+  "areaId": "frontend",
+  "difficulty": "intermediate",
+  "order": 2,
+  "prerequisites": ["react", "nodejs"],
+  "tags": ["nextjs", "rsc", "vercel"],
+  "modules": [
+    {
+      "id": "nextjs.routing-rendering",
+      "slug": "routing-y-renderizado",
+      "title": "Routing y renderizado",
+      "description": "App Router, layouts y el ciclo de una request hasta el HTML.",
+      "order": 1,
+      "topics": [
+        "App Router, nested layouts y route groups",
+        "Dynamic routes",
+        "Server Components y Client Components",
+        "Rendering, hydration y streaming",
+        "Suspense y loading states",
+        "Error handling"
+      ]
+    },
+    {
+      "id": "nextjs.data",
+      "slug": "datos-y-mutaciones",
+      "title": "Datos y mutaciones",
+      "description": "Data fetching, caching, revalidación y escritura de datos.",
+      "order": 2,
+      "topics": [
+        "Data fetching",
+        "Caching y revalidation",
+        "Server Actions",
+        "Route Handlers",
+        "Middleware o mecanismos equivalentes"
+      ]
+    },
+    {
+      "id": "nextjs.production",
+      "slug": "produccion",
+      "title": "Producción",
+      "description": "Autenticación, seguridad, SEO, observabilidad y despliegue.",
+      "order": 3,
+      "topics": [
+        "Autenticación, autorización, cookies y sesiones",
+        "Protección de rutas",
+        "SEO y metadata",
+        "Optimización de imágenes",
+        "Variables de entorno",
+        "Despliegue en Vercel",
+        "Observabilidad, seguridad y performance"
+      ]
+    }
+  ]
+}

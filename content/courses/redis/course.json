@@ -1,0 +1,49 @@
+{
+  "id": "redis",
+  "slug": "redis",
+  "title": "Redis: estructuras, caching y coordinación",
+  "description": "Tipos de datos, expiración, caching, rate limiting y mensajería, y cuándo Redis no es la herramienta adecuada.",
+  "areaId": "data",
+  "difficulty": "intermediate",
+  "order": 2,
+  "prerequisites": [],
+  "tags": ["redis", "caching", "rate limiting"],
+  "modules": [
+    {
+      "id": "redis.data-types",
+      "slug": "tipos-de-datos",
+      "title": "Tipos de datos y expiración",
+      "description": "Las estructuras de Redis y su ciclo de vida.",
+      "order": 1,
+      "topics": [
+        "Strings, Hashes, Sets, Sorted sets y Lists",
+        "Streams",
+        "TTL y expiración",
+        "Persistencia y eviction policies"
+      ]
+    },
+    {
+      "id": "redis.patterns",
+      "slug": "patrones",
+      "title": "Patrones de uso",
+      "description": "Caching, rate limiting, idempotencia y coordinación.",
+      "order": 2,
+      "topics": [
+        "Caching y Cache Aside",
+        "Cache invalidation y cache stampede",
+        "Rate limiting",
+        "Idempotencia",
+        "Locks distribuidos y sus limitaciones",
+        "Pub/Sub y Redis Streams"
+      ]
+    },
+    {
+      "id": "redis.tradeoffs",
+      "slug": "compromisos",
+      "title": "Compromisos",
+      "description": "Comparaciones para elegir la herramienta adecuada.",
+      "order": 3,
+      "topics": ["Redis frente a PostgreSQL", "Redis frente a un message broker"]
+    }
+  ]
+}

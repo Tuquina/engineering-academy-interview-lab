@@ -1,0 +1,71 @@
+{
+  "id": "nodejs",
+  "slug": "nodejs",
+  "title": "Node.js: internals, backend y performance",
+  "description": "Cómo funciona Node.js por dentro (V8, libuv, event loop) y cómo construir backends robustos, observables y eficientes.",
+  "areaId": "languages-runtime",
+  "difficulty": "intermediate",
+  "order": 2,
+  "prerequisites": ["typescript"],
+  "tags": ["nodejs", "backend", "event loop"],
+  "modules": [
+    {
+      "id": "nodejs.internals",
+      "slug": "fundamentos-internos",
+      "title": "Fundamentos internos",
+      "description": "Arquitectura del runtime, event loop, concurrencia y memoria.",
+      "order": 1,
+      "topics": [
+        "Arquitectura de Node.js y V8",
+        "Event loop y call stack",
+        "Microtasks y macrotasks",
+        "Timers, process.nextTick y setImmediate",
+        "libuv y thread pool",
+        "Concurrencia frente a paralelismo",
+        "I/O-bound frente a CPU-bound",
+        "Worker threads",
+        "Streams, Buffers y backpressure",
+        "EventEmitter",
+        "Memoria y garbage collection"
+      ]
+    },
+    {
+      "id": "nodejs.backend",
+      "slug": "backend-profesional",
+      "title": "Backend profesional",
+      "description": "APIs HTTP mantenibles, seguras e integrables.",
+      "order": 2,
+      "topics": [
+        "REST APIs y arquitectura por capas",
+        "Route Handlers, controllers y casos de uso",
+        "Validación y errores HTTP",
+        "Middleware",
+        "Autenticación y autorización",
+        "Logging estructurado y correlation IDs",
+        "Rate limiting y timeouts",
+        "Webhooks e idempotencia",
+        "Versionado de APIs y OpenAPI",
+        "Testing de integración"
+      ]
+    },
+    {
+      "id": "nodejs.performance",
+      "slug": "performance",
+      "title": "Performance",
+      "description": "Diagnosticar y resolver cuellos de botella con mediciones.",
+      "order": 3,
+      "topics": [
+        "Operaciones bloqueantes y event loop lag",
+        "Uso de streams",
+        "Control de concurrencia",
+        "Uso eficiente de memoria",
+        "Connection pooling",
+        "Caching",
+        "Optimización de consultas",
+        "Profiling y métricas",
+        "Load testing",
+        "Escalabilidad horizontal"
+      ]
+    }
+  ]
+}

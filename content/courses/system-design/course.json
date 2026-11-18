@@ -1,0 +1,67 @@
+{
+  "id": "system-design",
+  "slug": "system-design",
+  "title": "System Design para entrevistas",
+  "description": "Escalabilidad, consistencia, mensajería y resiliencia aplicadas a escenarios reales de cobranzas y plataformas de agentes.",
+  "areaId": "system-design",
+  "difficulty": "advanced",
+  "order": 1,
+  "prerequisites": ["software-architecture"],
+  "tags": ["system design", "escalabilidad", "distribuidos"],
+  "modules": [
+    {
+      "id": "system-design.scalability",
+      "slug": "escalabilidad",
+      "title": "Escalabilidad y disponibilidad",
+      "description": "Cómo crece un sistema y qué se sacrifica en cada decisión.",
+      "order": 1,
+      "topics": [
+        "Escalabilidad vertical y horizontal",
+        "Load balancing y reverse proxies",
+        "Stateless services",
+        "Replicación, sharding y partitioning",
+        "Capacity planning y estimación de carga",
+        "Latencia y throughput",
+        "SLO, SLA y SLI"
+      ]
+    },
+    {
+      "id": "system-design.consistency",
+      "slug": "consistencia",
+      "title": "Consistencia y concurrencia",
+      "description": "CAP, consistencia eventual y control de carreras en sistemas distribuidos.",
+      "order": 2,
+      "topics": [
+        "CAP theorem",
+        "Consistencia fuerte y eventual",
+        "Idempotencia",
+        "Race conditions",
+        "Distributed locking"
+      ]
+    },
+    {
+      "id": "system-design.messaging-resilience",
+      "slug": "mensajeria-y-resiliencia",
+      "title": "Mensajería y resiliencia",
+      "description": "Colas, reintentos, backpressure y fallos parciales.",
+      "order": 3,
+      "topics": [
+        "Mensajería",
+        "Retries y Dead Letter Queues",
+        "Circuit Breakers",
+        "Backpressure",
+        "Rate limiting",
+        "Webhooks",
+        "Disaster recovery"
+      ]
+    },
+    {
+      "id": "system-design.platform",
+      "slug": "plataformas-multi-tenant",
+      "title": "Plataformas multi-tenant",
+      "description": "Aislamiento, seguridad y observabilidad en plataformas SaaS.",
+      "order": 4,
+      "topics": ["Multi-tenancy", "Autenticación y autorización", "Seguridad de APIs", "Observabilidad"]
+    }
+  ]
+}

@@ -1,0 +1,485 @@
+---
+id: typescript.runtime-vs-type-system
+moduleId: typescript.fundamentals
+title: "Runtime vs sistema de tipos: type erasure y tipado estructural"
+description: "Qué garantiza el compilador de TypeScript, qué desaparece al ejecutar y por qué los datos externos deben validarse en los límites. Con comparaciones directas con C# y Java."
+difficulty: intermediate
+order: 1
+objectives:
+  - "Distinguir el espacio de tipos del espacio de valores y saber qué construcciones existen en runtime."
+  - "Explicar type erasure en TypeScript y contrastarlo con los genéricos borrados de Java y reificados de C#."
+  - "Razonar sobre compatibilidad de tipos con tipado estructural y reconocer sus riesgos (IDs intercambiables)."
+  - "Validar datos externos en los límites del sistema con Zod, derivando el tipo del esquema."
+  - "Decidir cuándo una type assertion (`as`) es aceptable y cuándo oculta un bug."
+prerequisites: []
+estimatedMinutes: 35
+tags: ["type erasure", "tipado estructural", "zod", "validación", "c#", "java"]
+version: "1.0.0"
+comparesWith: ["csharp", "java"]
+references:
+  - title: "TypeScript Handbook — Type Compatibility"
+    url: "https://www.typescriptlang.org/docs/handbook/type-compatibility.html"
+  - title: "TypeScript Handbook — Narrowing"
+    url: "https://www.typescriptlang.org/docs/handbook/2/narrowing.html"
+  - title: "TypeScript 5.8 — opción erasableSyntaxOnly"
+    url: "https://www.typescriptlang.org/docs/handbook/release-notes/typescript-5-8.html"
+  - title: "Node.js — Modules: TypeScript (type stripping)"
+    url: "https://nodejs.org/api/typescript.html"
+  - title: "Zod — documentación oficial"
+    url: "https://zod.dev"
+  - title: "Java Tutorials — Type Erasure"
+    url: "https://docs.oracle.com/javase/tutorial/java/generics/erasure.html"
+  - title: "C# — Generics in the runtime"
+    url: "https://learn.microsoft.com/en-us/dotnet/csharp/programming-guide/generics/generics-in-the-run-time"
+relatedExercises: []
+relatedChallenges: []
+diagrams: []
+interviewQuestions:
+  - question: "¿Qué es type erasure y qué consecuencias prácticas tiene en TypeScript?"
+    keyPoints:
+      - "Los tipos sólo existen durante la compilación; el JavaScript que se ejecuta no los contiene."
+      - "No hay reflection de tipos: no se puede usar instanceof con interfaces ni obtener el tipo de un genérico T en runtime."
+      - "Todo dato externo (HTTP, JSON, base de datos, colas, salidas de un LLM) debe validarse en runtime en los límites del sistema."
+      - "Contraste: Java borra los argumentos genéricos pero conserva clases e interfaces; C# reifica los genéricos (typeof(T) funciona)."
+  - question: "¿Qué significa que TypeScript tenga tipado estructural? ¿Qué riesgos introduce?"
+    keyPoints:
+      - "La compatibilidad se decide por la forma (propiedades y tipos), no por el nombre declarado ni por la herencia."
+      - "Ventajas: modela bien objetos JSON, simplifica mocks y la interoperabilidad entre módulos."
+      - "Riesgo: alias como CustomerId y DebtId (ambos string) son intercambiables; se mitiga con branded types."
+      - "Matices: los excess property checks sólo aplican a literales frescos; las clases con miembros private se comportan de forma nominal."
+  - question: "¿Cómo validarías el payload de un webhook en un backend TypeScript?"
+    keyPoints:
+      - "Tratar el body como unknown, nunca como el tipo esperado mediante as."
+      - "Definir un esquema (por ejemplo, con Zod) como fuente única de validación y tipo (z.infer)."
+      - "Responder 4xx con errores útiles sin filtrar detalles internos."
+      - "Además: verificar la firma del emisor y aplicar idempotencia antes de producir efectos."
+  - question: "¿Cuándo es aceptable usar una type assertion (as)?"
+    keyPoints:
+      - "Cuando el programador sabe algo que el compilador no puede inferir y la justificación es local y verificable."
+      - "Ejemplo legítimo: el constructor de un branded type, después de validar el valor."
+      - "Nunca para datos externos: la aserción no ejecuta ninguna verificación."
+      - "as unknown as X es una señal de alarma; preferir narrowing, satisfies o validación."
+summary:
+  - "TypeScript son dos lenguajes superpuestos: el sistema de tipos (compile time) y JavaScript (runtime)."
+  - "Interfaces, alias, genéricos y aserciones se borran; clases, enums y parameter properties generan código."
+  - "Java borra genéricos pero conserva clases; C# conserva todo. TypeScript borra todo lo que es sólo de tipos."
+  - "La compatibilidad es estructural: misma forma implica tipos compatibles, aunque los nombres difieran."
+  - "Los datos externos se tratan como unknown y se validan en el límite; dentro del núcleo los tipos son confiables."
+  - "Un esquema de Zod es un valor en runtime que lleva el tipo consigo: una sola fuente para validar y tipar."
+---
+
+## ¿Qué problema resuelve?
+
+Imaginá un endpoint que recibe el webhook de un proveedor de pagos y aplica el pago a una deuda. En C# o Java,
+deserializar el JSON a una clase `PaymentReceivedEvent` ya es una primera barrera: el deserializador conoce el tipo
+destino en tiempo de ejecución, y si `amountCents` llega como `"150000"` (string), `System.Text.Json` lanza una
+`JsonException` por defecto, mientras que Jackson intenta convertirlo a número usando la clase destino.
+
+En TypeScript es tentador escribir lo "equivalente":
+
+```ts
+const event = (await request.json()) as PaymentReceivedEvent;
+let totalCents = 0;
+totalCents += event.amountCents; // si llegó "150000", totalCents ahora es "0150000"
+```
+
+Compila sin errores. Y si el proveedor cambia el formato, el bug aparece lejos de su causa: un total concatenado
+como string, un `NaN` en un reporte o, peor, una deuda marcada como pagada con un monto incorrecto. **El compilador
+no se equivocó: le dijimos que confiara en algo que nunca verificó.** Entender por qué es el objetivo de esta lección.
+
+<Callout type="info" title="Por qué importa en plataformas de agentes">
+  En una plataforma de agentes de IA los datos externos están en todas partes: webhooks de pagos, respuestas
+  de APIs de clientes, mensajes de colas y argumentos de tool calls generados por un LLM. Ninguno de ellos fue
+  verificado por el compilador.
+</Callout>
+
+## Dos lenguajes en uno
+
+TypeScript es JavaScript más una capa de anotaciones de tipos. El compilador hace dos trabajos independientes:
+
+1. **Chequeo de tipos:** analiza el programa y reporta inconsistencias. No modifica el comportamiento.
+2. **Emisión:** produce JavaScript quitando las anotaciones. Esto lo puede hacer `tsc`, pero también esbuild, SWC o
+   las versiones recientes de Node.js, que ejecutan archivos `.ts` quitando los tipos (_type stripping_).
+
+<FlowDiagram
+  steps={[
+    { title: "Código .ts", detail: "Tipos y lógica conviven en el mismo archivo." },
+    {
+      title: "Type checker",
+      detail: "Verifica la consistencia interna. Si hay errores, avisa; no cambia el programa.",
+    },
+    { title: "Emisión / stripping", detail: "Se borran las anotaciones. Lo que queda es JavaScript." },
+    {
+      title: "JavaScript en V8",
+      detail: "En runtime sólo existen valores: no hay interfaces ni genéricos.",
+      tone: "runtime",
+    },
+    {
+      title: "Datos externos",
+      detail: "HTTP, JSON, DB, colas o LLMs llegan en runtime: nadie los verificó.",
+      tone: "boundary",
+    },
+  ]}
+  caption="El chequeo de tipos razona sobre el código; los datos que entran al ejecutar quedan fuera de su alcance."
+/>
+
+Por eso conviene pensar en dos espacios:
+
+- **Espacio de tipos:** `interface`, `type`, anotaciones, genéricos. Sólo existe para el compilador.
+- **Espacio de valores:** variables, funciones, objetos. Es lo que ejecuta V8.
+
+Algunas declaraciones crean algo en ambos espacios: una `class` es un tipo **y** una función constructora; un `enum`
+es un tipo **y** un objeto. Una `interface` sólo existe en el espacio de tipos.
+
+## Type erasure: qué desaparece y qué sobrevive
+
+```ts
+interface Debt {
+  id: string;
+  amountCents: number;
+  dueDate: string; // ISO 8601
+}
+
+type DebtStatus = "pending" | "promised" | "paid";
+
+/** Indica si la deuda está vencida respecto de la fecha dada. */
+function isOverdue(debt: Debt, today: string): boolean {
+  return debt.dueDate < today;
+}
+
+class PaymentPromise {
+  constructor(
+    readonly debtId: string,
+    readonly promisedFor: string,
+  ) {}
+}
+```
+
+El JavaScript emitido (simplificado) es:
+
+```js
+function isOverdue(debt, today) {
+  return debt.dueDate < today;
+}
+
+class PaymentPromise {
+  constructor(debtId, promisedFor) {
+    this.debtId = debtId;
+    this.promisedFor = promisedFor;
+  }
+}
+```
+
+`Debt` y `DebtStatus` desaparecieron por completo. La clase sobrevive, y sus _parameter properties_ se convirtieron en
+asignaciones: no son sólo tipos, generan código.
+
+| Construcción                                  | ¿Existe en runtime?                                |
+| --------------------------------------------- | -------------------------------------------------- |
+| `interface`, `type`                           | No                                                 |
+| Anotaciones y argumentos genéricos (`<T>`)    | No                                                 |
+| `as`, `!` (non-null assertion), `satisfies`   | No: no ejecutan ninguna verificación               |
+| `class`                                       | Sí, como función constructora (sus anotaciones no) |
+| `enum`                                        | Sí, como objeto                                    |
+| `namespace` con valores, parameter properties | Sí: generan código                                 |
+
+<Callout type="tip" title="erasableSyntaxOnly">
+  Desde TypeScript 5.8, la opción `erasableSyntaxOnly` marca como error las construcciones que generan código
+  (enums, namespaces con valores, parameter properties). Es útil si ejecutás TypeScript con type stripping,
+  porque esas herramientas sólo pueden borrar anotaciones, no transformar código. Una unión de literales como
+  `type DebtStatus = "pending" | "paid"` es la alternativa borrable a un `enum`.
+</Callout>
+
+### La comparación con Java y C#
+
+Si venís de Java, ya conocés el término: Java borra los **argumentos genéricos** (`List<String>` y `List<Integer>`
+son ambos `List` en runtime), pero conserva clases e interfaces, por lo que `obj instanceof Debt` funciona y la
+reflection conoce el tipo de cada campo. C# va más allá: los genéricos están **reificados**, así que `typeof(T)` y
+`List<string>` frente a `List<int>` son distinguibles en runtime.
+
+TypeScript borra **todo** lo que pertenece al espacio de tipos. Consecuencia directa:
+
+```ts
+// En C#, un método genérico puede usar T en runtime: JsonSerializer.Deserialize<T>(json).
+// En TypeScript, esta firma es una promesa vacía: T no existe al ejecutar.
+function parseJson<T>(json: string): T {
+  return JSON.parse(json); // JSON.parse devuelve any, así que compila
+}
+
+// El diseño correcto pasa un valor de runtime que represente el tipo: un esquema.
+function parseWith<T>(json: string, schema: { parse(data: unknown): T }): T {
+  return schema.parse(JSON.parse(json));
+}
+```
+
+## Tipado estructural
+
+Java y C# usan **tipado nominal**: dos tipos son compatibles si uno declara que es el otro (herencia o
+implementación). TypeScript usa **tipado estructural**: dos tipos son compatibles si tienen la forma requerida.
+
+```ts
+interface Customer {
+  id: string;
+  name: string;
+}
+
+interface CollectionAgent {
+  id: string;
+  name: string;
+}
+
+function notifyCustomer(customer: Customer): void {
+  // ...
+}
+
+const agent: CollectionAgent = { id: "agt_1", name: "Recordatorio de pago" };
+notifyCustomer(agent); // compila: CollectionAgent tiene la forma de Customer
+```
+
+En C# o Java esa llamada no compilaría. El tipado estructural encaja muy bien con objetos JSON y simplifica los
+tests (cualquier objeto con la forma correcta sirve como doble de prueba), pero tiene un costo concreto con los IDs:
+
+```ts
+type CustomerId = string;
+type DebtId = string;
+
+declare function cancelDebt(id: DebtId): Promise<void>;
+
+const customerId: CustomerId = "cus_123";
+await cancelDebt(customerId); // compila: ambos alias son string
+```
+
+Un alias no crea un tipo nuevo. La mitigación habitual son los **branded types**, que se estudian en el módulo de
+sistema de tipos avanzado:
+
+```ts
+type Brand<T, B extends string> = T & { readonly __brand: B };
+type DebtId = Brand<string, "DebtId">;
+
+/** Único punto donde un string se convierte en DebtId: valida antes de afirmar el tipo. */
+function toDebtId(raw: string): DebtId {
+  if (!/^debt_[a-z0-9]+$/.test(raw)) throw new Error(`DebtId inválido: ${raw}`);
+  return raw as DebtId;
+}
+```
+
+<Callout type="warning" title="Dos matices del tipado estructural">
+**Excess property checks:** pasar un literal con propiedades de más (`notifyCustomer({ id, name, email })`) da error,
+pero pasar una variable con la misma forma no. El chequeo sólo aplica a literales "frescos".
+
+**Clases con miembros privados:** si una clase declara un miembro `private` o `protected`, sólo es compatible con
+instancias que lo hereden de la misma declaración. En ese caso el comportamiento se acerca al nominal.
+
+</Callout>
+
+## Ejemplo incorrecto
+
+```ts
+interface PaymentReceivedEvent {
+  debtId: string;
+  amountCents: number;
+  paidAt: string;
+}
+
+// ❌ Confía en el tipo declarado para datos que llegan por la red.
+export async function POST(request: Request): Promise<Response> {
+  const event = (await request.json()) as PaymentReceivedEvent;
+  await ledger.applyPayment(event.debtId, event.amountCents);
+  return Response.json({ ok: true });
+}
+```
+
+Por qué falla:
+
+1. `request.json()` devuelve `Promise<any>`. Incluso sin el `as`, escribir `const event: PaymentReceivedEvent = await request.json()`
+   compila, porque `any` es asignable a cualquier tipo.
+2. La aserción `as` no ejecuta nada: si falta `debtId` o `amountCents` es un string, el error viaja hacia el
+   núcleo del dominio y aparece lejos de su causa.
+3. Intentar "verificarlo" como en Java tampoco funciona: `event instanceof PaymentReceivedEvent` produce el error
+   _"'PaymentReceivedEvent' only refers to a type, but is being used as a value here"_, porque la interfaz no existe
+   en runtime.
+
+## Implementación recomendada
+
+Tratar lo externo como `unknown` y convertirlo en un valor tipado en el límite del sistema. Con Zod, el esquema es un
+valor de runtime y el tipo se deriva de él, así que validación y tipo no pueden desincronizarse:
+
+```ts
+import { z } from "zod";
+
+const PaymentReceivedEventSchema = z.object({
+  debtId: z.string().startsWith("debt_"),
+  amountCents: z.number().int().positive(),
+  paidAt: z.iso.datetime(),
+});
+
+/** Tipo derivado del esquema: una sola fuente de verdad. */
+type PaymentReceivedEvent = z.infer<typeof PaymentReceivedEventSchema>;
+
+export async function POST(request: Request): Promise<Response> {
+  const body: unknown = await request.json().catch(() => null);
+  const parsed = PaymentReceivedEventSchema.safeParse(body);
+
+  if (!parsed.success) {
+    return Response.json(
+      { error: "invalid_payload", fields: z.flattenError(parsed.error).fieldErrors },
+      { status: 422 },
+    );
+  }
+
+  // A partir de aquí el tipo describe datos verificados.
+  await applyPayment(parsed.data);
+  return Response.json({ ok: true });
+}
+```
+
+Sin dependencias, la alternativa es un **type predicate**:
+
+```ts
+function isPaymentReceivedEvent(value: unknown): value is PaymentReceivedEvent {
+  if (typeof value !== "object" || value === null) return false;
+  const candidate = value as Record<string, unknown>;
+  return (
+    typeof candidate.debtId === "string" &&
+    typeof candidate.amountCents === "number" &&
+    Number.isInteger(candidate.amountCents) &&
+    candidate.amountCents > 0 &&
+    typeof candidate.paidAt === "string"
+  );
+}
+```
+
+Funciona, pero el compilador **confía** en el predicado: si olvidás un campo o te equivocás en una condición, nadie
+te avisa, y la interfaz y la verificación pueden divergir con el tiempo. Por eso, para contratos de entrada, se
+prefiere un esquema del que se derive el tipo.
+
+<Callout type="info" title="Un webhook real necesita más">
+  Validar la forma es el primer paso. Un webhook confiable además verifica la firma del emisor, es idempotente
+  frente a reintentos y registra el evento para auditoría. Esos temas se cubren en el curso de Node.js y en
+  System Design.
+</Callout>
+
+## Casos límite y errores frecuentes
+
+- **`JSON.parse` devuelve `any`.** Asignalo explícitamente a `unknown` (`const data: unknown = JSON.parse(raw)`)
+  para que el compilador te obligue a validar antes de usarlo.
+- **`any` es contagioso.** Una propiedad leída de un `any` también es `any`, y se propaga silenciosamente. El modo
+  `strict` evita los `any` implícitos; reglas como `@typescript-eslint/no-unsafe-assignment` detectan los explícitos.
+- **Dinero con `number`.** Los números de JavaScript son IEEE-754 de doble precisión: `0.1 + 0.2 === 0.3` es `false`.
+  En cobranzas usá enteros en centavos (como `amountCents`) o una representación decimal con una librería dedicada.
+- **Fechas.** JSON no tiene tipo fecha: `paidAt` llega como string. Tiparlo como `Date` sin convertirlo es otra
+  mentira al compilador; validalo como fecha ISO y convertilo explícitamente.
+- **`private` no es privado en runtime.** El modificador `private` de TypeScript se borra; los campos `#privados` de
+  JavaScript sí son inaccesibles desde fuera de la clase.
+- **Genéricos sin valor de runtime.** `new T()` es imposible: pasá una fábrica o un esquema como argumento.
+- **Salidas de un LLM.** Los argumentos de un tool call generados por un modelo son datos externos: validalos con el
+  mismo rigor que un payload HTTP.
+- **Costo de validar.** Validá en los límites (entrada HTTP, mensajes, variables de entorno, almacenamiento local),
+  no en cada función interna: dentro del núcleo, los tipos ya describen datos verificados.
+
+## Comparación con C# y Java
+
+| Aspecto                          | C# (.NET)                         | Java                                   | TypeScript                                  |
+| -------------------------------- | --------------------------------- | -------------------------------------- | ------------------------------------------- |
+| Tipos en runtime                 | Sí, completos (reflection)        | Sí para clases e interfaces            | No: sólo existen valores de JavaScript      |
+| Genéricos                        | Reificados: `typeof(T)` funciona  | Borrados: `List<String>` pasa a `List` | Borrados por completo                       |
+| Compatibilidad                   | Nominal                           | Nominal                                | Estructural                                 |
+| Chequear una interfaz en runtime | `obj is IDebt`                    | `obj instanceof Debt`                  | Imposible: hay que validar la forma         |
+| Deserializar JSON                | El serializer usa el tipo destino | Jackson usa la clase destino           | `JSON.parse` devuelve `any`                 |
+| Validación de entrada habitual   | DataAnnotations, FluentValidation | Bean Validation (Jakarta)              | Zod u otra librería de esquemas, predicados |
+
+### Cuándo usar cada herramienta
+
+- **Esquema (Zod):** en todo límite de confianza: requests, webhooks, mensajes de colas, variables de entorno,
+  `localStorage`, respuestas de APIs de terceros y salidas de modelos.
+- **Type predicate:** para chequeos pequeños o para discriminar uniones internas, cuando no se justifica una dependencia.
+- **`satisfies`:** para verificar que un literal de configuración cumple un tipo sin perder sus tipos literales.
+- **`as`:** sólo cuando sabés algo que el compilador no puede inferir y la justificación es local (por ejemplo, el
+  constructor de un branded type después de validar). Nunca para datos externos.
+
+<Callout type="interview" title="Cómo explicarlo en una entrevista">
+  "TypeScript me da garantías sobre la consistencia interna del código, pero no sobre los datos que entran en
+  runtime, porque los tipos se borran al compilar. Por eso trato todo lo externo como `unknown` y lo parseo en
+  el límite con un esquema del que derivo el tipo. A diferencia de C#, donde el deserializador conoce el tipo
+  destino, acá esa barrera la tengo que construir explícitamente."
+</Callout>
+
+## Ejercicio interactivo
+
+<KnowledgeCheck
+  question="Tenés `const body: unknown = await request.json()`. ¿Cuál es la forma correcta de obtener un `PaymentReceivedEvent` confiable?"
+  options={[
+    {
+      text: "`const event = body as PaymentReceivedEvent`",
+      explanation:
+        "Compila, pero la aserción no ejecuta ninguna verificación: si el payload es inválido, el error aparece más adelante y lejos de su causa.",
+    },
+    {
+      text: "`if (body instanceof PaymentReceivedEvent) { ... }`",
+      explanation:
+        "No compila: una interface sólo existe en el espacio de tipos y no hay nada contra qué comparar en runtime.",
+    },
+    {
+      text: "`const event = PaymentReceivedEventSchema.parse(body)`",
+      correct: true,
+      explanation:
+        "Correcto: el esquema verifica los datos en runtime y el tipo resultante se deriva del propio esquema (z.infer).",
+    },
+    {
+      text: "`const event: PaymentReceivedEvent = body`",
+      explanation:
+        "No compila, y eso es bueno: `unknown` no es asignable a otros tipos sin narrowing. Con `any` sí compilaría, y ese es el peligro de `any`.",
+    },
+  ]}
+/>
+
+<KnowledgeCheck
+  question="Con `type CustomerId = string` y `type DebtId = string`, ¿qué ocurre al llamar `cancelDebt(customerId)` si la función espera un `DebtId`?"
+  options={[
+    {
+      text: "Error de compilación: los alias tienen nombres distintos.",
+      explanation:
+        "Un alias no crea un tipo nuevo; ambos son exactamente `string`. El nombre no participa en la compatibilidad.",
+    },
+    {
+      text: "Compila: ambos alias son el mismo tipo `string`.",
+      correct: true,
+      explanation:
+        "Correcto. Para que el compilador distinga IDs hace falta un branded type, que agrega una marca de tipo sin costo en runtime.",
+    },
+    {
+      text: "Compila, pero lanza un TypeError en runtime.",
+      explanation:
+        "En runtime no queda ningún rastro de los alias, así que nada puede detectar el error: la cancelación se ejecuta con el ID equivocado.",
+    },
+    {
+      text: "Sólo compila si `strict` está desactivado.",
+      explanation: "`strict` no cambia la compatibilidad entre alias de un mismo tipo.",
+    },
+  ]}
+/>
+
+<KnowledgeCheck
+  question="¿Por qué no se puede escribir `function create<T>(): T { return new T(); }` en TypeScript, cuando en C# existe `new T()` con la restricción `where T : new()`?"
+  options={[
+    {
+      text: "Porque TypeScript no soporta genéricos con restricciones.",
+      explanation:
+        "Sí los soporta (`T extends ...`), pero las restricciones también viven sólo en el espacio de tipos.",
+    },
+    {
+      text: "Porque `T` no existe en runtime: no hay ningún valor constructor al que llamar.",
+      correct: true,
+      explanation:
+        "Correcto. La solución idiomática es recibir el constructor o una fábrica como argumento: `create<T>(factory: () => T)`.",
+    },
+    {
+      text: "Porque `new` sólo funciona con clases abstractas.",
+      explanation: "Es al revés: las clases abstractas no se pueden instanciar con `new`.",
+    },
+    {
+      text: "Funciona si se activa `emitDecoratorMetadata`.",
+      explanation:
+        "Esa opción emite metadatos de tipos para parámetros decorados, no reifica genéricos: `T` sigue sin existir.",
+    },
+  ]}
+/>

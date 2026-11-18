@@ -1,0 +1,66 @@
+{
+  "id": "postgresql",
+  "slug": "postgresql",
+  "title": "PostgreSQL para backends de producción",
+  "description": "Modelado, índices, planner, transacciones y concurrencia, con datasets de cobranzas para practicar.",
+  "areaId": "data",
+  "difficulty": "intermediate",
+  "order": 1,
+  "prerequisites": [],
+  "tags": ["postgresql", "sql", "transacciones"],
+  "modules": [
+    {
+      "id": "postgresql.modeling",
+      "slug": "modelado",
+      "title": "Modelado relacional",
+      "description": "Diseñar esquemas correctos y protegidos por constraints.",
+      "order": 1,
+      "topics": [
+        "Modelado relacional",
+        "Normalización y desnormalización",
+        "Primary keys, foreign keys y constraints",
+        "JSONB",
+        "Migrations"
+      ]
+    },
+    {
+      "id": "postgresql.queries-indexes",
+      "slug": "consultas-e-indices",
+      "title": "Consultas e índices",
+      "description": "Escribir consultas expresivas y hacerlas rápidas con evidencia.",
+      "order": 2,
+      "topics": [
+        "Joins, subqueries y CTEs",
+        "Window functions",
+        "Índices B-tree, compuestos, parciales y de cobertura",
+        "Selectividad y query planner",
+        "EXPLAIN y EXPLAIN ANALYZE",
+        "Pagination",
+        "N+1 y query optimization"
+      ]
+    },
+    {
+      "id": "postgresql.transactions",
+      "slug": "transacciones-y-concurrencia",
+      "title": "Transacciones y concurrencia",
+      "description": "Consistencia bajo concurrencia real.",
+      "order": 3,
+      "topics": [
+        "Transactions y ACID",
+        "Isolation levels y MVCC",
+        "Locks y deadlocks",
+        "Optimistic y pessimistic locking",
+        "UPSERT e idempotencia con constraints",
+        "Outbox pattern"
+      ]
+    },
+    {
+      "id": "postgresql.operations",
+      "slug": "operacion-y-seguridad",
+      "title": "Operación y seguridad",
+      "description": "Conexiones, particionado y seguridad.",
+      "order": 4,
+      "topics": ["Connection pooling", "Partitioning", "SQL injection y prepared statements"]
+    }
+  ]
+}

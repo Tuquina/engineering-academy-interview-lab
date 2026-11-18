@@ -1,0 +1,80 @@
+{
+  "id": "llm-agents",
+  "slug": "llms-y-agentes",
+  "title": "LLMs y agentes de IA",
+  "description": "De los fundamentos de los LLMs a la ingeniería de agentes en producción: tool calling, memoria, orquestación y, sobre todo, evaluaciones.",
+  "areaId": "ai-agents",
+  "difficulty": "advanced",
+  "order": 1,
+  "prerequisites": ["typescript"],
+  "tags": ["llm", "agentes", "evals"],
+  "modules": [
+    {
+      "id": "llm-agents.fundamentals",
+      "slug": "fundamentos",
+      "title": "Fundamentos de LLMs",
+      "description": "Cómo funcionan los modelos y qué implica para el software que los usa.",
+      "order": 1,
+      "topics": [
+        "Qué es un LLM",
+        "Tokens y context window",
+        "Temperature, sampling y variabilidad",
+        "Latencia y costos",
+        "Prompt engineering y system prompts",
+        "Structured outputs y JSON Schema",
+        "Function calling y tool calling",
+        "Hallucinations y prompt injection",
+        "RAG y embeddings"
+      ]
+    },
+    {
+      "id": "llm-agents.engineering",
+      "slug": "ingenieria-de-agentes",
+      "title": "Ingeniería de agentes",
+      "description": "Configuración, versionado, orquestación y seguridad de agentes.",
+      "order": 2,
+      "topics": [
+        "Configuración y versionado",
+        "Prompts por cliente",
+        "Tools permitidas y seguridad de herramientas",
+        "Model routing",
+        "Retries, timeouts y fallbacks",
+        "State machines y orquestación",
+        "Políticas y guardrails",
+        "Human in the loop",
+        "Trazabilidad, observabilidad y costos por conversación"
+      ]
+    },
+    {
+      "id": "llm-agents.memory",
+      "slug": "memoria",
+      "title": "Memoria y contexto",
+      "description": "Memoria conversacional, estado de negocio e historial de eventos.",
+      "order": 3,
+      "topics": [
+        "Context management",
+        "Memoria de corto plazo",
+        "Memoria persistente",
+        "Estado estructurado del negocio frente a historial de eventos",
+        "Información contradictoria y desactualizada"
+      ]
+    },
+    {
+      "id": "llm-agents.evals",
+      "slug": "evaluaciones",
+      "title": "Evaluaciones de agentes",
+      "description": "Cómo saber si un cambio mejora o empeora un agente no determinista.",
+      "order": 4,
+      "topics": [
+        "Test cases, golden datasets y ground truth",
+        "Regression suites y prompt regression",
+        "Evaluación determinista y semántica",
+        "LLM as Judge y scoring",
+        "Tool calling correctness",
+        "Evaluaciones de seguridad y cumplimiento",
+        "Pruebas repetidas y evaluación estadística",
+        "Model drift y comparación de versiones"
+      ]
+    }
+  ]
+}

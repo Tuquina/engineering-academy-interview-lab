@@ -1,0 +1,44 @@
+[
+  {
+    "id": "languages-runtime",
+    "slug": "lenguajes-y-runtime",
+    "title": "Lenguajes y runtime",
+    "description": "TypeScript y Node.js en profundidad: sistema de tipos, asincronía, event loop y backend profesional.",
+    "order": 1
+  },
+  {
+    "id": "frontend",
+    "slug": "frontend",
+    "title": "Frontend",
+    "description": "React y Next.js: modelo de renderizado, estado, Server Components y arquitectura frontend.",
+    "order": 2
+  },
+  {
+    "id": "architecture",
+    "slug": "arquitectura-y-diseno",
+    "title": "Arquitectura y diseño",
+    "description": "Principios, patrones de diseño y patrones de arquitectura aplicados con criterio pragmático.",
+    "order": 3
+  },
+  {
+    "id": "system-design",
+    "slug": "system-design",
+    "title": "System Design",
+    "description": "Diseño de sistemas escalables, distribuidos, multi-tenant y event-driven para entrevistas y producción.",
+    "order": 4
+  },
+  {
+    "id": "ai-agents",
+    "slug": "ia-y-agentes",
+    "title": "IA y agentes",
+    "description": "LLMs, tool calling, memoria, orquestación y evaluación de agentes conversacionales.",
+    "order": 5
+  },
+  {
+    "id": "data",
+    "slug": "datos",
+    "title": "Datos",
+    "description": "PostgreSQL y Redis: modelado, índices, transacciones, concurrencia y caching.",
+    "order": 6
+  }
+]
