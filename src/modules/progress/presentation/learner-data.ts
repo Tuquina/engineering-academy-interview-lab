@@ -18,6 +18,8 @@ export interface LearnerData {
   readonly lessons: LessonIndex;
   readonly prerequisites: Readonly<Record<string, readonly string[]>>;
   readonly cards: ReadonlyArray<{ id: string; front: string; lessonId: string | null; deckTitle: string }>;
+  /** Challenges en el orden del catálogo (de menor a mayor dificultad). */
+  readonly challenges: ReadonlyArray<{ id: string; title: string; href: string }>;
 }
 
 export interface LearnerSnapshot {

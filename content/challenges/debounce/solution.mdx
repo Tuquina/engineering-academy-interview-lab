@@ -1,0 +1,26 @@
+## Enfoque
+
+El estado que hay que recordar entre llamadas es **el temporizador pendiente**. Vive en el closure de `debounce`, así
+cada función devuelta tiene el suyo. En cada llamada:
+
+1. Se cancela el temporizador anterior (si existe).
+2. Se programa uno nuevo con los argumentos actuales.
+
+Si llega otra llamada antes de `waitMs`, el paso 1 descarta la ejecución anterior: sólo sobrevive la última.
+
+## Complejidad
+
+- **Tiempo:** O(1) por llamada.
+- **Memoria:** O(1): un temporizador y los argumentos de la última llamada.
+
+## Errores frecuentes
+
+- Guardar el timer en una variable global o de módulo: dos funciones debounced se pisarían entre sí.
+- Olvidar limpiar `timer` al ejecutarse, lo que puede confundir lógica posterior (por ejemplo, un `flush()`).
+- Ejecutar con los argumentos de la **primera** llamada en lugar de la última.
+
+## Alternativas
+
+- **`leading: true`:** ejecutar al inicio de la ráfaga y no al final (útil para botones: evita dobles clics).
+- **`maxWait`:** garantizar una ejecución cada cierto tiempo aunque la ráfaga no termine (así lo combina Lodash).
+- **Throttle:** si lo que importa es limitar la frecuencia (por ejemplo, eventos de scroll), y no esperar al final.

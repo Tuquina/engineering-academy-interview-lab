@@ -31,17 +31,20 @@ Navegador ──► src/app (Server Components / Route Handlers: adaptadores del
 
 Estas reglas se verifican automáticamente en `tests/architecture/dependency-rules.test.ts`.
 
-## 3. Módulos (estado en Fase 2)
+## 3. Módulos (estado en Fase 3)
 
-| Módulo                                                                                                 | Estado               | Responsabilidad                                                                               |
-| ------------------------------------------------------------------------------------------------------ | -------------------- | --------------------------------------------------------------------------------------------- |
-| `learning`                                                                                             | Implementado         | Catálogo (áreas, cursos, módulos, lecciones, rutas), integridad, lecciones y cheatsheets MDX. |
-| `progress`                                                                                             | Implementado (local) | Progreso, respuestas a quizzes, tiempo de estudio, estadísticas y recomendaciones.            |
-| `flashcards`                                                                                           | Implementado (local) | Mazos en `content/flashcards`, repetición espaciada (SM-2 adaptado, ADR-0005).                |
-| `notebook`                                                                                             | Implementado (local) | Notas por lección, marcadores y cheatsheets favoritas.                                        |
-| `preferences`                                                                                          | Implementado (local) | Tamaño de lectura, ruta activa, tarjetas nuevas por día.                                      |
-| `search`                                                                                               | Implementado         | Índice y búsqueda local (Ctrl/Cmd + K).                                                       |
-| `exercises`, `challenges`, `interviews`, `architecture-lab`, `agent-lab`, `content-management`, `auth` | Planificados         | Se crean cuando una fase los necesita; no existen carpetas vacías.                            |
+| Módulo                                                                      | Estado               | Responsabilidad                                                                               |
+| --------------------------------------------------------------------------- | -------------------- | --------------------------------------------------------------------------------------------- |
+| `learning`                                                                  | Implementado         | Catálogo (áreas, cursos, módulos, lecciones, rutas), integridad, lecciones y cheatsheets MDX. |
+| `progress`                                                                  | Implementado (local) | Progreso, respuestas a quizzes, tiempo de estudio, estadísticas y recomendaciones.            |
+| `flashcards`                                                                | Implementado (local) | Mazos en `content/flashcards`, repetición espaciada (SM-2 adaptado, ADR-0005).                |
+| `notebook`                                                                  | Implementado (local) | Notas por lección, marcadores y cheatsheets favoritas.                                        |
+| `preferences`                                                               | Implementado (local) | Tamaño de lectura, ruta activa, tarjetas nuevas por día.                                      |
+| `search`                                                                    | Implementado         | Índice y búsqueda local (Ctrl/Cmd + K).                                                       |
+| `exercises`                                                                 | Implementado         | Harness de tests, ejecución de TypeScript en Web Worker, Monaco, intentos y borradores.       |
+| `challenges`                                                                | Implementado         | Desafíos de código, React (Sandpack), SQL y diseño con rúbrica; catálogo y filtros.           |
+| `sql-lab`                                                                   | Implementado         | PostgreSQL (PGlite) en Web Worker, dataset, ejercicios y corrección por resultado o estado.   |
+| `interviews`, `architecture-lab`, `agent-lab`, `content-management`, `auth` | Planificados         | Se crean cuando una fase los necesita; no existen carpetas vacías.                            |
 
 ## 4. Modelo de contenido
 
@@ -53,7 +56,14 @@ content/
   courses/<curso>/course.json        # metadatos del curso + módulos (con temario)
   courses/<curso>/lessons/*.mdx      # lecciones: frontmatter validado con Zod + cuerpo MDX
   paths/*.json                       # rutas de aprendizaje (etapas que referencian lecciones o cursos)
+  challenges/<slug>/                 # challenge.mdx + starter/tests/hidden-tests/solution (Fase 3)
+  sql/dataset.sql, sql/exercises/*.md  # dataset del Database Lab y ejercicios SQL
+  playground/*.ts                    # ejemplos del Laboratorio de código
 ```
+
+Formato de challenges y ejercicios: [guides/adding-exercises.md](guides/adding-exercises.md). La ejecución de código
+del usuario ocurre siempre en el navegador, aislada en Web Workers o iframes
+([ADR-0006](adr/0006-isolated-code-execution-in-browser.md)).
 
 - El curso de una lección se deduce de su carpeta; el área, del curso.
 - Los IDs son estables (`typescript.runtime-vs-type-system`); el progreso se guarda por ID, no por slug.
@@ -100,4 +110,5 @@ decide la implementación; en la Fase 6 se agregará una respaldada por la API a
 | `eal:flashcards`  | flashcards  | Planificación SM-2 por tarjeta y repasos por día                |
 | `eal:notebook`    | notebook    | Notas, marcadores y cheatsheets favoritas                       |
 | `eal:preferences` | preferences | Tamaño de lectura, ruta activa, tarjetas nuevas por día         |
+| `eal:practice`    | exercises   | Intentos, borradores, respuestas de diseño y soluciones vistas  |
 | `eal:theme`       | shared      | Tema claro/oscuro (aplicado antes del primer pintado)           |

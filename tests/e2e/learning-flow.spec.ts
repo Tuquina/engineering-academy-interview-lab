@@ -12,7 +12,10 @@ test.describe("flujo de aprendizaje (modo invitado)", () => {
     );
     // Las acciones de fases futuras no deben aparentar funcionar.
     await expect(page.getByRole("button", { name: /Practicar para entrevista/ })).toBeDisabled();
-    await expect(page.getByRole("button", { name: /Resolver un desafío/ })).toBeDisabled();
+    await expect(page.getByRole("link", { name: /Resolver un desafío/ })).toHaveAttribute(
+      "href",
+      "/challenges/debounce",
+    );
   });
 
   test("entrar en la ruta, completar la lección y ver el progreso reflejado", async ({ page }) => {

@@ -1,0 +1,59 @@
+---
+id: challenge.debounce
+kind: code
+title: "Implementar debounce"
+summary: "Agrupar ráfagas de llamadas en una sola ejecución, con cancelación."
+difficulty: basic
+durationMinutes: 20
+technologies: ["typescript"]
+topics: ["asincronía", "timers", "closures"]
+skills: ["implementar una función", "manejo de estado en closures"]
+interviewType: live-coding
+order: 1
+constraints:
+  - "No usar librerías: sólo TypeScript y la API de timers."
+  - "La función devuelta debe conservar los tipos de los argumentos de `fn`."
+acceptanceCriteria:
+  - "`fn` se ejecuta una sola vez, `waitMs` después de la última llamada de una ráfaga."
+  - "Se ejecuta con los argumentos de la última llamada."
+  - "`cancel()` descarta la ejecución pendiente."
+  - "Ráfagas separadas por más de `waitMs` producen ejecuciones separadas."
+hints:
+  - "Necesitás recordar entre llamadas algo que identifique la ejecución pendiente."
+  - "Cada llamada nueva debe cancelar el temporizador anterior y crear uno nuevo."
+  - "`setTimeout` devuelve un identificador que podés guardar en una variable del closure y pasar a `clearTimeout`."
+followUpQuestions:
+  - "¿Cómo agregarías una opción `leading` para ejecutar al inicio de la ráfaga?"
+  - "¿Qué diferencia hay entre debounce y throttle? ¿Cuándo usarías cada uno?"
+  - "¿Cómo implementarías un `flush()` que ejecute de inmediato la llamada pendiente?"
+relatedLessons: ["typescript.promises-task-completablefuture", "nodejs.event-loop"]
+---
+
+## Contexto
+
+El buscador de clientes del panel de operadores consulta la API en cada tecla. Con un operador escribiendo rápido,
+eso son decenas de requests por segundo que no aportan nada: sólo interesa el texto final. **Debounce** agrupa una
+ráfaga de llamadas y ejecuta la función una sola vez, cuando las llamadas dejan de llegar durante `waitMs`.
+
+## Qué tenés que implementar
+
+```ts
+export type Debounced<A extends unknown[]> = ((...args: A) => void) & { cancel(): void };
+
+export function debounce<A extends unknown[]>(fn: (...args: A) => void, waitMs: number): Debounced<A>;
+```
+
+## Ejemplo
+
+```ts
+const search = debounce((term: string) => api.search(term), 300);
+search("d");
+search("de");
+search("deu"); // 300 ms después de esta llamada se ejecuta api.search("deu") una sola vez
+```
+
+## Casos límite a considerar
+
+- Llamar a `cancel()` sin nada pendiente no debe fallar.
+- Con `waitMs = 0` la ejecución igual es asíncrona (no ocurre dentro de la llamada).
+- Después de ejecutarse, una llamada nueva inicia una ráfaga nueva.

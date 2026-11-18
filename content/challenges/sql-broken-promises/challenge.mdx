@@ -1,0 +1,47 @@
+---
+id: challenge.sql-broken-promises
+kind: sql
+sqlExerciseId: sql.broken-promises
+title: "Query compleja: promesas de pago incumplidas"
+summary: "Detectar promesas vencidas sin pagos suficientes en su ventana, con PostgreSQL real."
+difficulty: intermediate
+durationMinutes: 25
+technologies: ["postgresql", "sql"]
+topics: ["subconsultas", "agregaciones", "fechas", "NULL"]
+skills: ["SQL", "modelado de reglas de negocio"]
+interviewType: live-coding
+order: 9
+constraints:
+  - "Una sola consulta (podés usar CTEs y subconsultas)."
+  - "Fecha de referencia: 2026-11-15."
+acceptanceCriteria:
+  - "Devuelve sólo promesas vencidas cuya ventana de pago no alcanza el monto prometido."
+  - "Incluye las promesas sin ningún pago."
+  - "Columnas: promise_id, full_name, due_date, amount_cents."
+hints:
+  - "Primero filtrá las promesas vencidas; después calculá lo pagado en su ventana."
+  - "Los pagos se relacionan con la promesa por el préstamo (loan_id), no por el cliente."
+  - "Cuidado con SUM sobre cero filas: devuelve NULL, no 0."
+followUpQuestions:
+  - "¿Qué índice agregarías si la tabla payments tuviera 100 millones de filas?"
+  - "¿Cómo lo convertirías en un job que marque las promesas como incumplidas sin procesarlas dos veces?"
+  - "¿Qué pasa con un pago registrado con un día de demora por el proveedor?"
+relatedLessons: []
+---
+
+## Contexto
+
+El orquestador de campañas necesita la lista de **promesas incumplidas** para que el agente cambie de estrategia
+("promesa incumplida" en lugar de "recordatorio"). Es una consulta típica de entrevista porque combina un filtro
+temporal, una agregación condicional y el manejo de `NULL`.
+
+Trabajás sobre el dataset del Database Lab (PostgreSQL real en tu navegador). Usá el explorador de esquema del
+[Database Lab](/database-lab) si necesitás ver las tablas.
+
+## Definición
+
+Una promesa (`payment_promises`) está **incumplida** si:
+
+1. Su `due_date` es anterior al 2026-11-15, y
+2. La suma de los pagos (`payments`) del **mismo préstamo**, con fecha UTC de `paid_at` entre `promised_at` y
+   `due_date` (inclusive), es menor que `amount_cents`.

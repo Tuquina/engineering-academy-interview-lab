@@ -13,6 +13,7 @@ import {
   Timer,
 } from "lucide-react";
 import Link from "next/link";
+import { usePracticeState } from "@/modules/exercises/presentation/practice-context";
 import { useIsClient } from "@/shared/lib/use-is-client";
 import { Button } from "@/shared/ui/button";
 import { Card, CardDescription, CardTitle } from "@/shared/ui/card";
@@ -57,6 +58,10 @@ export function DashboardOverview({ data }: { data: LearnerData }) {
   const nextLesson = nextLessonId ? data.lessons[nextLessonId] : undefined;
   const recent = recentLessons(state, 5).filter((r) => data.lessons[r.id]);
   const show = (value: string) => (snapshot.ready ? value : "–");
+  const practice = usePracticeState();
+  // Siguiente challenge sugerido: el primero del catálogo (ordenado por dificultad creciente) sin resolver.
+  const nextChallenge = data.challenges.find((c) => !practice.attempts[c.id]?.solvedAt);
+  const solvedChallenges = data.challenges.filter((c) => practice.attempts[c.id]?.solvedAt).length;
 
   return (
     <div className="flex flex-col gap-6">
@@ -96,13 +101,17 @@ export function DashboardOverview({ data }: { data: LearnerData }) {
           <Button size="lg" variant="secondary" disabled title="Interview Arena llega en la Fase 4">
             <MessagesSquare /> Practicar para entrevista
           </Button>
-          <Button size="lg" variant="secondary" disabled title="Challenges llega en la Fase 3">
-            <Swords /> Resolver un desafío
+          <Button asChild size="lg" variant="secondary">
+            <Link href={nextChallenge?.href ?? "/challenges"} title={nextChallenge?.title}>
+              <Swords /> Resolver un desafío
+            </Link>
           </Button>
         </div>
         <p className="text-muted text-xs">
-          «Practicar para entrevista» y «Resolver un desafío» se habilitan cuando existan Interview Arena
-          (Fase 4) y Challenges (Fase 3).
+          «Practicar para entrevista» se habilita con Interview Arena (Fase 4).
+          {snapshot.ready && data.challenges.length > 0
+            ? ` Challenges resueltos: ${solvedChallenges}/${data.challenges.length}${nextChallenge ? ` · siguiente: ${nextChallenge.title}` : ""}.`
+            : ""}
         </p>
       </Card>
 

@@ -1734,14 +1734,14 @@ La aplicación es amplia. Organizar el desarrollo en fases ejecutables, con entr
 
 ### Fase 3 — Laboratorios
 
-- [ ] Editor de código.
-- [ ] Sandpack.
-- [ ] Playground de TypeScript.
-- [ ] SQL Playground.
-- [ ] Corrección de ejercicios.
-- [ ] Tests.
-- [ ] Challenges.
-- [ ] Guardado de intentos.
+- [x] Editor de código.
+- [x] Sandpack.
+- [x] Playground de TypeScript.
+- [x] SQL Playground.
+- [x] Corrección de ejercicios.
+- [x] Tests.
+- [x] Challenges.
+- [x] Guardado de intentos.
 
 **Resultado:** plataforma útil para practicar programación.
 

@@ -1,0 +1,30 @@
+## Enfoque
+
+`Result<T, E>` es una **unión discriminada**: la propiedad `ok` permite al compilador estrechar el tipo, así que
+dentro de `if (result.ok)` sólo existe `value`, y en el `else` sólo `error`. `map` y `andThen` siguen el mismo
+patrón: si es un error, se devuelve tal cual (el tipo `Result<never, E>` es asignable a `Result<U, E>`).
+
+Para el monto, la clave es **validar antes de convertir** y **operar con enteros**:
+
+1. Una expresión regular describe exactamente los formatos aceptados (miles bien agrupados, coma decimal).
+2. Parte entera y decimales se convierten por separado: `"0,29"` es `0 × 100 + 29`, sin pasar por el float `0.29`
+   (que multiplicado por 100 da `28.999999999999996`).
+
+## Complejidad
+
+O(n) en la longitud de la entrada.
+
+## Excepciones o Result
+
+- **Result:** errores esperables del dominio (validación, "saldo insuficiente", "cliente no encontrado"). Quedan en
+  la firma y el compilador obliga a considerarlos.
+- **Excepciones:** fallas inesperadas o de infraestructura (la base no responde, un bug). Se propagan hasta un
+  manejador central.
+
+Comparación: `Either` en Haskell/Scala y `Result<T, E>` en Rust son la misma idea; en C# se suele modelar con un
+`Result<T>` propio o librerías como FluentResults, y en Java con tipos sellados (`sealed interface`) desde Java 17.
+
+## Variante
+
+Para validar formularios con varios campos, se combinan Results acumulando **todos** los errores (patrón
+`Validation`) en lugar de cortar en el primero como hace `andThen`.

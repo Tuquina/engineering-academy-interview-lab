@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { usePracticeState } from "@/modules/exercises/presentation/practice-context";
 import { useIsClient } from "@/shared/lib/use-is-client";
 import { Card, CardDescription, CardTitle } from "@/shared/ui/card";
 import { InlineCodeText } from "@/shared/ui/inline-code-text";
@@ -19,6 +20,7 @@ export function StatsOverview({ data }: { data: LearnerData }) {
   const isClient = useIsClient();
   const state = useProgressState();
   const snapshot = useLearnerSnapshot(data, isClient);
+  const practice = usePracticeState();
 
   if (!snapshot.ready || !snapshot.today) {
     return <div className="border-border bg-surface h-96 animate-pulse rounded-lg border" aria-hidden />;
@@ -37,12 +39,16 @@ export function StatsOverview({ data }: { data: LearnerData }) {
 
   return (
     <div className="flex flex-col gap-6">
-      <dl className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <dl className="grid grid-cols-2 gap-3 lg:grid-cols-5">
         {[
           { label: "Racha actual", value: `${snapshot.streakDays} días` },
           { label: "Minutos (30 días)", value: String(totalMinutes(state.studySeconds, today, 30)) },
           { label: "Lecciones completadas", value: `${lessonSummary.completed}/${lessonSummary.total}` },
           { label: "Repasos de flashcards", value: String(snapshot.reviewedFlashcards) },
+          {
+            label: "Challenges resueltos",
+            value: `${data.challenges.filter((c) => practice.attempts[c.id]?.solvedAt).length}/${data.challenges.length}`,
+          },
         ].map((stat) => (
           <div key={stat.label} className="border-border bg-surface rounded-lg border p-4">
             <dt className="text-muted text-xs">{stat.label}</dt>

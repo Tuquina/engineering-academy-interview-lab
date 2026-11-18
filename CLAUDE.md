@@ -10,6 +10,8 @@ Documentos de trabajo:
 - [docs/STATUS.md](docs/STATUS.md): qué está implementado, verificado y pendiente por fase.
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) y [docs/adr/](docs/adr/): arquitectura y decisiones.
 - [docs/guides/adding-a-course.md](docs/guides/adding-a-course.md): cómo agregar contenido.
+- [docs/guides/adding-exercises.md](docs/guides/adding-exercises.md): cómo agregar challenges, ejercicios SQL y
+  ejemplos del playground.
 
 ## Entorno: sólo Docker
 
@@ -39,4 +41,5 @@ No correr `pnpm build` en el contenedor mientras `app` está levantado: comparte
 
 - Fase 1 — Fundaciones: **completada**.
 - Fase 2 — Aprendizaje: **completada** (ver docs/STATUS.md).
-- Siguiente: **Fase 3 — Laboratorios**.
+- Fase 3 — Laboratorios: **completada** (ver docs/STATUS.md y docs/adr/0006).
+- Siguiente: **Fase 4 — Arquitectura y entrevistas**.

@@ -18,7 +18,12 @@ La máquina de desarrollo no tiene Node.js y no se desea instalar software en el
 - El servidor de desarrollo en Docker usa **webpack** (`pnpm dev:docker` → `next dev --webpack`) con
   `WATCHPACK_POLLING`. Se verificó que Turbopack, incluso con `watchOptions.pollIntervalMs`, no detectaba de forma
   confiable los cambios a través del bind mount de Windows, mientras que webpack con polling los refleja en ~3 s.
-  El build de producción sigue usando Turbopack (`next build`).
+  El build de producción sigue usando Turbopack (`next build`). Como webpack no resuelve los imports `node:` que
+  PGlite referencia sólo para Node, `next.config.ts` los reemplaza y los marca como vacíos en el bundle del cliente.
+- El servicio `e2e` comparte la red de `web-e2e` (`network_mode: "service:web-e2e"`) y abre la app en
+  `http://localhost:3000`. Así el navegador la trata como **contexto seguro** (necesario para `crypto.subtle`, que
+  usa Sandpack); con un hostname de la red de Compose no lo es, y el flag
+  `--unsafely-treat-insecure-origin-as-secure` de Chromium no resultó suficiente.
 
 ## Consecuencias
 

@@ -1,0 +1,61 @@
+---
+id: challenge.concurrency-limiter
+kind: code
+title: "Concurrency limiter"
+summary: "Ejecutar tareas asíncronas con un máximo de N simultáneas, en orden de llegada."
+difficulty: intermediate
+durationMinutes: 30
+technologies: ["typescript"]
+topics: ["asincronía", "concurrencia", "colas"]
+skills: ["implementar una función", "diseño de APIs", "concurrencia"]
+interviewType: live-coding
+order: 4
+constraints:
+  - "No usar librerías (p-limit y similares)."
+  - "Las tareas se inician en orden de llegada (FIFO)."
+acceptanceCriteria:
+  - "Nunca hay más de `concurrency` tareas en ejecución simultánea."
+  - "`limit(task)` devuelve una promesa con el resultado (o el error) de esa tarea."
+  - "Una tarea que falla libera su lugar y no detiene la cola."
+  - "`activeCount` y `pendingCount` reflejan el estado actual."
+  - "`concurrency` menor a 1 lanza `RangeError`."
+hints:
+  - "Necesitás una cola de tareas pendientes y un contador de tareas activas."
+  - "Cada llamada a `limit` devuelve una promesa nueva cuyos `resolve`/`reject` guardás junto con la tarea."
+  - "Cuando una tarea termina (bien o mal), decrementá el contador y arrancá la siguiente de la cola, en un `finally`."
+followUpQuestions:
+  - "¿Cómo agregarías prioridades a la cola?"
+  - "¿Qué cambia si las tareas deben poder cancelarse con AbortSignal?"
+  - "¿Cómo limitarías la concurrencia entre varias instancias del servicio (no sólo dentro de un proceso)?"
+relatedLessons: ["typescript.promises-task-completablefuture"]
+---
+
+## Contexto
+
+Hay que enviar recordatorios a 10.000 clientes a través de una API que admite 10 requests simultáneas. Con
+`Promise.all` sobre todo el lote se dispararían 10.000 requests a la vez; con un `for` y `await` se tardaría
+demasiado. Un **limitador de concurrencia** ejecuta como máximo N tareas a la vez y encola el resto.
+
+## Qué tenés que implementar
+
+```ts
+export interface Limiter {
+  <T>(task: () => Promise<T>): Promise<T>;
+  readonly activeCount: number;
+  readonly pendingCount: number;
+}
+
+export function createLimiter(concurrency: number): Limiter;
+```
+
+## Ejemplo
+
+```ts
+const limit = createLimiter(10);
+const results = await Promise.all(customers.map((c) => limit(() => sendReminder(c))));
+```
+
+## Casos límite
+
+- Una tarea que lanza de forma síncrona (antes de devolver la promesa) también debe liberar su lugar.
+- `concurrency` mayor que la cantidad de tareas: todas corren a la vez.

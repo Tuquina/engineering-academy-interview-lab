@@ -1,0 +1,63 @@
+---
+id: challenge.retry-backoff
+kind: code
+title: "Reintentos con backoff exponencial"
+summary: "Reintentar operaciones fallidas con esperas crecientes, límite y cancelación."
+difficulty: intermediate
+durationMinutes: 30
+technologies: ["typescript"]
+topics: ["asincronía", "resiliencia", "reintentos"]
+skills: ["implementar una función", "diseño de APIs", "manejo de errores"]
+interviewType: live-coding
+order: 3
+constraints:
+  - "Las esperas se hacen con la función `sleep` recibida en las opciones (permite testear sin esperar de verdad)."
+  - "No reintentar errores que `shouldRetry` declare como no recuperables."
+acceptanceCriteria:
+  - "Devuelve el resultado del primer intento exitoso."
+  - "Hace como máximo `retries + 1` intentos y, si todos fallan, rechaza con el último error."
+  - "La espera antes del intento n+1 es `baseDelayMs × 2^(n−1)`, acotada por `maxDelayMs`."
+  - "Si la señal está abortada, deja de reintentar y rechaza con el motivo del abort."
+hints:
+  - "Un bucle `for` sobre el número de intento suele ser más claro que la recursión."
+  - "Calculá la espera con `Math.min(maxDelayMs, baseDelayMs * 2 ** (attempt - 1))`."
+  - "Revisá `signal?.aborted` antes de cada intento y antes de cada espera; `signal.reason` tiene el motivo."
+followUpQuestions:
+  - "¿Por qué conviene agregar jitter al backoff? ¿Qué es el thundering herd?"
+  - "¿Qué operaciones NO deberías reintentar automáticamente? Pensá en un cobro."
+  - "¿Cómo combinarías reintentos con un circuit breaker?"
+relatedLessons: ["typescript.promises-task-completablefuture"]
+---
+
+## Contexto
+
+La API del proveedor de mensajería que usan los agentes falla de forma intermitente (timeouts, 503). Un reintento
+inmediato suele volver a fallar y, si todos los clientes reintentan a la vez, empeoran la caída. La práctica estándar
+es **reintentar con esperas que crecen exponencialmente**, con un tope y un número máximo de intentos.
+
+## Qué tenés que implementar
+
+```ts
+export interface RetryOptions {
+  retries: number; // reintentos además del primer intento
+  baseDelayMs: number;
+  maxDelayMs?: number; // por defecto, sin tope
+  shouldRetry?: (error: unknown) => boolean; // por defecto, reintenta todo
+  signal?: AbortSignal;
+  sleep?: (ms: number) => Promise<void>; // por defecto, setTimeout
+}
+
+export function retry<T>(operation: (attempt: number) => Promise<T>, options: RetryOptions): Promise<T>;
+```
+
+`attempt` empieza en 1.
+
+## Ejemplo
+
+Con `retries: 3, baseDelayMs: 100, maxDelayMs: 250`: si fallan los intentos 1, 2 y 3, las esperas son 100, 200 y
+250 ms (la tercera, acotada), y el intento 4 es el último.
+
+## Casos límite
+
+- `retries: 0` hace un único intento.
+- Un error no recuperable (por ejemplo, un 400) se propaga sin esperar.

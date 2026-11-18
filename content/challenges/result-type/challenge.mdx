@@ -1,0 +1,66 @@
+---
+id: challenge.result-type
+kind: code
+title: "Diseñar un Result type"
+summary: "Modelar errores esperables como valores tipados en lugar de excepciones."
+difficulty: intermediate
+durationMinutes: 30
+technologies: ["typescript"]
+topics: ["tipos", "manejo de errores", "uniones discriminadas"]
+skills: ["diseño de tipos", "programación funcional", "validación"]
+interviewType: technical-deep-dive
+order: 5
+constraints:
+  - "`Result<T, E>` debe ser una unión discriminada por la propiedad `ok`."
+  - "No usar `any` ni type assertions en la implementación."
+acceptanceCriteria:
+  - "`ok(value)` y `err(error)` construyen los dos casos."
+  - "`map` transforma el valor sólo en el caso exitoso; `andThen` encadena operaciones que pueden fallar."
+  - "`unwrapOr` devuelve el valor o el valor por defecto."
+  - "`parseAmountCents` convierte un monto escrito por un operador en centavos o devuelve un error tipado."
+hints:
+  - "Empezá por el tipo: `{ ok: true; value: T } | { ok: false; error: E }`. El compilador hace narrowing con `if (result.ok)`."
+  - "`map` y `andThen` son casi iguales: la diferencia es si la función devuelve `U` o `Result<U, E>`."
+  - "Para el monto, validá con una expresión regular antes de convertir, y trabajá con enteros: nunca multipliques un float por 100."
+followUpQuestions:
+  - "¿Cuándo preferís excepciones y cuándo Result? ¿Qué errores son 'esperables'?"
+  - "¿Cómo se compara con `Either` en lenguajes funcionales o con `Result<T>` en C#?"
+  - "¿Cómo combinarías varios Result (por ejemplo, validar todos los campos de un formulario)?"
+relatedLessons: ["typescript.runtime-vs-type-system"]
+---
+
+## Contexto
+
+Al registrar un pago manual, el operador escribe el monto como texto ("1500", "1500,50", "1.500,50"). Que el texto
+sea inválido **no es excepcional**: es un caso esperable que la UI debe mostrar. Con excepciones, el compilador no
+obliga a manejarlo; con un `Result` tipado, el error forma parte de la firma.
+
+## Qué tenés que implementar
+
+```ts
+export type Result<T, E> = { ok: true; value: T } | { ok: false; error: E };
+
+export function ok<T>(value: T): Result<T, never>;
+export function err<E>(error: E): Result<never, E>;
+export function map<T, U, E>(result: Result<T, E>, fn: (value: T) => U): Result<U, E>;
+export function andThen<T, U, E, F>(result: Result<T, E>, fn: (value: T) => Result<U, F>): Result<U, E | F>;
+export function unwrapOr<T, E>(result: Result<T, E>, fallback: T): T;
+
+export type AmountError = "empty" | "invalid-format" | "too-many-decimals" | "not-positive";
+export function parseAmountCents(input: string): Result<number, AmountError>;
+```
+
+## Reglas de `parseAmountCents`
+
+| Entrada      | Resultado                     |
+| ------------ | ----------------------------- |
+| `"1500"`     | `ok(150000)`                  |
+| `"1500,5"`   | `ok(150050)`                  |
+| `"1.500,50"` | `ok(150050)` (punto de miles) |
+| `"  42,10 "` | `ok(4210)` (ignora espacios)  |
+| `""`         | `err("empty")`                |
+| `"12a"`      | `err("invalid-format")`       |
+| `"10,999"`   | `err("too-many-decimals")`    |
+| `"0"`        | `err("not-positive")`         |
+
+La coma es el separador decimal y el punto, el de miles (formato habitual en Argentina).

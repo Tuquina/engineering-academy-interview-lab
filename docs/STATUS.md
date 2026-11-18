@@ -92,12 +92,69 @@ Registro explícito de lo implementado y lo pendiente (MASTER_PROMPT §37.18). S
 - La importación del respaldo JSON no está implementada todavía (sólo exportación).
 - No hay todavía una ruta de preparación de 7 días: requiere más lecciones publicadas para ser útil (§35).
 
+## Fase 3 — Laboratorios · ✅ completada (2026-11-18)
+
+Decisiones de ejecución aislada en [ADR-0006](adr/0006-isolated-code-execution-in-browser.md); formato del contenido
+en [guides/adding-exercises.md](guides/adding-exercises.md).
+
+### Implementado y verificado
+
+- **Editor de código:** Monaco 0.57 auto-hospedado (funciona sin internet), chequeo de tipos en vivo, tema claro/oscuro,
+  `Ctrl + Enter` para ejecutar, paneles redimensionables y modo pantalla completa.
+- **Ejecución aislada (módulo `exercises`):** cada ejecución corre en un Web Worker nuevo sin APIs de red, con
+  `require` restringido, 2 s por test y corte duro a los 15 s (un bucle infinito no congela la página). Consola
+  capturada (hasta 200 entradas).
+- **Tests y corrección:** harness propio (`test`, `expect`, `mockFn`, `sleep`) compartido entre el navegador y
+  Vitest; tests públicos y ocultos agrupados por categoría (correctitud, casos límite, robustez, concurrencia).
+- **Playground de TypeScript (`/lab`):** consola, JavaScript emitido y 3 ejemplos (`content/playground`).
+- **SQL Playground (`/database-lab`):** PostgreSQL real (PGlite/WASM) en un Web Worker con un dataset de cobranzas
+  (clientes, préstamos, cuotas, pagos, promesas, campañas, conversaciones), explorador de esquema, errores con
+  SQLSTATE y posición, timeout de 10 s con reinicio y "Restablecer dataset".
+- **6 ejercicios SQL autocorregidos** (`content/sql/exercises`): joins, window functions, subconsultas, `FILTER`,
+  `DISTINCT ON` y un `UPSERT` idempotente (modo `state`). La corrección compara contra la solución dentro de
+  transacciones con `ROLLBACK`.
+- **Challenges (módulo `challenges`, `/challenges`):** 12 desafíos con filtros por tipo, tecnología, dificultad y tipo
+  de entrevista; pistas progresivas, solución de referencia explicada y preguntas de seguimiento.
+  - 8 de código: debounce, throttle, retry con backoff, concurrency limiter, Result type, webhook idempotente,
+    carrera en un cobro, memoria de un agente de cobranzas.
+  - 1 de React (Sandpack + Jest + Testing Library): corregir un `useEffect` problemático.
+  - 1 de SQL (promesas de pago incumplidas).
+  - 2 de diseño con rúbrica y autoevaluación: rate limiting y agentes multi-tenant.
+- **Guardado de intentos (`eal:practice`):** intentos (tests aprobados / total, resuelto), borradores por challenge,
+  respuestas y rúbricas de diseño, y soluciones reveladas. El catálogo marca los resueltos.
+- **Dashboard y estadísticas:** "Resolver un desafío" lleva al primer challenge sin resolver; `/stats` suma
+  "Challenges resueltos". La navegación habilita Laboratorio de código, Challenges y Database Lab.
+
+### Verificación
+
+| Comando                                           | Resultado                                                                 |
+| ------------------------------------------------- | ------------------------------------------------------------------------- |
+| `pnpm typecheck`                                  | ✅                                                                        |
+| `pnpm lint`                                       | ✅                                                                        |
+| `pnpm test`                                       | ✅ 118 tests en 21 archivos (incluye soluciones de referencia y SQL real) |
+| `pnpm build`                                      | ✅ 47 páginas estáticas                                                   |
+| E2E (`docker compose --profile e2e run --rm e2e`) | ✅ 30 tests (8 de laboratorios omitidos en móvil a propósito)             |
+
+Los E2E de laboratorios cubren: starter que falla y solución que pasa (con tests ocultos), corte de un bucle
+infinito, playground, corrección SQL, errores de PostgreSQL, persistencia de un challenge de diseño y los tests de
+React ejecutados de verdad en Sandpack.
+
+### Limitaciones conocidas
+
+- Los challenges de React **requieren internet** (bundler de CodeSandbox) y un contexto seguro (`localhost` o HTTPS).
+  El resto de los laboratorios funciona sin conexión.
+- Los tests ocultos viajan al navegador: no son secretos, sólo no se muestran por defecto.
+- Los challenges de diseño son **autoevaluados** con rúbrica; no hay corrección automática.
+- No hay un sandbox de Node.js real (`fs`, procesos): el código corre en un Web Worker.
+- Hay un solo challenge de React; los laboratorios con editor se usan en escritorio (en móvil son navegables pero no
+  se verifican en E2E).
+
 ## Próximas fases
 
 | Fase                                                                          | Estado     |
 | ----------------------------------------------------------------------------- | ---------- |
 | 2 — Aprendizaje                                                               | Completada |
-| 3 — Laboratorios (editor, Sandpack, SQL Playground con PGlite, challenges)    | Pendiente  |
+| 3 — Laboratorios (editor, Sandpack, SQL Playground con PGlite, challenges)    | Completada |
 | 4 — Arquitectura y entrevistas (System Design Studio, Interview Arena)        | Pendiente  |
 | 5 — Agentes IA (configuración, tool calling, memoria, evals)                  | Pendiente  |
 | 6 — Persistencia y administración (PostgreSQL, auth, contenido personalizado) | Pendiente  |
@@ -108,10 +165,10 @@ Registro explícito de lo implementado y lo pendiente (MASTER_PROMPT §37.18). S
 | Elemento                    | Actual                                          | Objetivo |
 | --------------------------- | ----------------------------------------------- | -------- |
 | Lecciones sustantivas       | 3                                               | 40       |
-| Challenges                  | 0                                               | 25       |
+| Challenges                  | 12 (+ 6 ejercicios SQL)                         | 25       |
 | Preguntas de evaluación     | 9 knowledge checks + 12 preguntas de entrevista | 60       |
 | Flashcards                  | 32                                              | 30 ✅    |
 | Diagramas                   | 3 (1 flujo + 2 Mermaid)                         | 12       |
-| Simuladores o laboratorios  | 0                                               | 5        |
+| Simuladores o laboratorios  | 3 (playground TS, SQL Lab, React/Sandpack)      | 5        |
 | Escenarios de System Design | 0                                               | 5        |
 | Ruta de 7 días operativa    | No                                              | 1        |

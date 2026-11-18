@@ -1,0 +1,59 @@
+---
+id: challenge.throttle
+kind: code
+title: "Implementar throttle con ejecución final"
+summary: "Limitar la frecuencia de ejecución sin perder la última llamada."
+difficulty: intermediate
+durationMinutes: 25
+technologies: ["typescript"]
+topics: ["asincronía", "timers", "rate limiting"]
+skills: ["implementar una función", "razonar sobre tiempo"]
+interviewType: live-coding
+order: 2
+constraints:
+  - "No usar librerías."
+  - "Usar `Date.now()` y la API de timers."
+acceptanceCriteria:
+  - "La primera llamada se ejecuta de inmediato (leading)."
+  - "Dentro de una ventana de `intervalMs` no se ejecuta más de una vez."
+  - "Si hubo llamadas durante la ventana, al terminarla se ejecuta una vez con los últimos argumentos (trailing)."
+  - "`cancel()` descarta la ejecución final pendiente."
+hints:
+  - "Guardá el instante de la última ejecución para calcular cuánto falta para que termine la ventana."
+  - "Si todavía no terminó la ventana, recordá los argumentos y programá una sola ejecución para el final."
+  - "No programes un temporizador nuevo si ya hay uno pendiente: sólo actualizá los argumentos."
+followUpQuestions:
+  - "¿En qué se diferencia este throttle de un rate limiter de API con token bucket?"
+  - "¿Qué pasa si `fn` tarda más que `intervalMs`? ¿Debería el throttle esperarla?"
+  - "¿Cómo lo testearías sin depender del tiempo real?"
+relatedLessons: ["nodejs.event-loop"]
+---
+
+## Contexto
+
+Un agente de voz envía eventos de "el cliente está hablando" decenas de veces por segundo. El panel de supervisión
+quiere actualizar su indicador como máximo cada 100 ms, pero sin perder el **último** estado. Eso es un throttle con
+ejecución inicial (leading) y final (trailing).
+
+## Qué tenés que implementar
+
+```ts
+export type Throttled<A extends unknown[]> = ((...args: A) => void) & { cancel(): void };
+
+export function throttle<A extends unknown[]>(fn: (...args: A) => void, intervalMs: number): Throttled<A>;
+```
+
+## Ejemplo con `intervalMs = 100`
+
+| Tiempo | Llamada     | Ejecución                         |
+| ------ | ----------- | --------------------------------- |
+| 0 ms   | `update(1)` | `fn(1)` inmediato                 |
+| 20 ms  | `update(2)` | —                                 |
+| 60 ms  | `update(3)` | —                                 |
+| 100 ms |             | `fn(3)` (trailing)                |
+| 250 ms | `update(4)` | `fn(4)` inmediato (ventana nueva) |
+
+## Casos límite
+
+- Una sola llamada no debe producir una ejecución final adicional.
+- `cancel()` sin nada pendiente no falla.

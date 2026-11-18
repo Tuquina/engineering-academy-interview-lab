@@ -1,0 +1,32 @@
+## Enfoque
+
+Tres responsabilidades separadas:
+
+1. **Validar** el payload en el límite (`unknown` → `PaymentEvent` o 400). Nada se aplica sin validar.
+2. **Deduplicar** en dos niveles:
+   - Eventos **terminados**: el `EventStore` (persistente) responde si ya se procesaron.
+   - Eventos **en curso**: un `Map<eventId, Promise>` en memoria. La segunda entrega simultánea no vuelve a
+     procesar: espera la promesa de la primera.
+3. **Aplicar y marcar**, en ese orden. Si aplicar falla, el evento no queda marcado y un reenvío puede procesarlo.
+
+## Complejidad
+
+O(1) por evento, más el costo de las operaciones del store y del ledger. Memoria O(eventos en curso).
+
+## Limitaciones y cómo resolverlas en producción
+
+- **Varias instancias:** el `Map` en memoria sólo deduplica dentro de un proceso. Con varias instancias hace falta
+  que la base resuelva la carrera: una tabla `processed_events` con `PRIMARY KEY (event_id)` e
+  `INSERT ... ON CONFLICT DO NOTHING`, en **la misma transacción** que aplica el pago. Si el insert no inserta
+  nada, otro proceso ya lo tomó.
+- **Atomicidad:** aplicar y luego marcar en dos pasos tiene una ventana: si el proceso muere entre ambos, un reenvío
+  aplicaría el pago de nuevo. Por eso, con una base de datos, ambas escrituras van en una sola transacción.
+- **Firma:** antes de validar el contenido se verifica la firma HMAC del proveedor (con comparación en tiempo
+  constante); un evento sin firma válida se rechaza con 401 sin tocar nada.
+- **Responder rápido:** si el procesamiento es lento, se persiste el evento (inbox) y se responde 200; un worker lo
+  procesa después. Así se evitan reenvíos por timeout.
+
+## ¿Por qué 200 para los duplicados?
+
+Porque el objetivo del proveedor es saber si **recibimos** el evento. Un 4xx puede interpretarse como error y
+generar más reenvíos o alertas. Para el emisor, un duplicado ya procesado es un éxito.

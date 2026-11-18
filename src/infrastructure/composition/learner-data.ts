@@ -1,4 +1,5 @@
 import type { LearnerData } from "@/modules/progress/presentation/learner-data";
+import { getChallenges } from "./challenges";
 import { getDecks } from "./flashcards";
 import { getCatalog } from "./learning";
 import { buildLessonIndex } from "./lesson-index";
@@ -11,7 +12,7 @@ export const DEFAULT_PATH_ID = "full-stack-ai-platform-engineer";
  * con el progreso local del usuario.
  */
 export async function getLearnerData(): Promise<LearnerData> {
-  const [catalog, decks] = await Promise.all([getCatalog(), getDecks()]);
+  const [catalog, decks, challenges] = await Promise.all([getCatalog(), getDecks(), getChallenges()]);
   const prerequisites: Record<string, readonly string[]> = {};
   for (const course of catalog.courses) {
     for (const lesson of catalog.getLessonsOfCourse(course.id))
@@ -33,6 +34,7 @@ export async function getLearnerData(): Promise<LearnerData> {
     })),
     lessons: buildLessonIndex(catalog),
     prerequisites,
+    challenges: challenges.map((c) => ({ id: c.id, title: c.title, href: `/challenges/${c.slug}` })),
     cards: decks.flatMap((deck) =>
       deck.cards.map((card) => ({
         id: card.id,

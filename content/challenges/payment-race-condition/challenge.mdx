@@ -1,0 +1,60 @@
+---
+id: challenge.payment-race-condition
+kind: code
+title: "Evitar una carrera durante un cobro"
+summary: "Dos débitos simultáneos sobre la misma cuenta no deben dejarla en negativo."
+difficulty: advanced
+durationMinutes: 35
+technologies: ["typescript", "nodejs"]
+topics: ["concurrencia", "race conditions", "locks"]
+skills: ["detectar condiciones de carrera", "concurrencia", "diseño"]
+interviewType: technical-deep-dive
+order: 7
+constraints:
+  - "El repositorio de saldos es asíncrono (simula una base de datos) y no ofrece transacciones."
+  - "Las operaciones sobre cuentas distintas deben poder correr en paralelo."
+acceptanceCriteria:
+  - "Dos cobros simultáneos sobre la misma cuenta nunca dejan el saldo por debajo de 0."
+  - "Un cobro sin saldo suficiente rechaza con `InsufficientFundsError` y no modifica el saldo."
+  - "Cobros sobre cuentas distintas no se esperan entre sí."
+  - "Si un cobro falla de forma inesperada, la cuenta no queda bloqueada para los siguientes."
+hints:
+  - "El problema es el patrón leer → esperar → escribir: entre la lectura y la escritura se cuela otro cobro."
+  - "Necesitás serializar los cobros **por cuenta**: un lock por clave."
+  - "Podés encadenar promesas por cuenta en un Map: cada cobro espera a que termine el anterior de esa cuenta."
+followUpQuestions:
+  - "Si hubiera varias instancias del servicio, ¿cómo lo resolverías con PostgreSQL?"
+  - "¿Qué diferencia hay entre bloqueo pesimista (SELECT ... FOR UPDATE) y optimista (versión)?"
+  - "¿Por qué JavaScript, siendo de un solo hilo, igual tiene condiciones de carrera?"
+relatedLessons: ["nodejs.event-loop", "typescript.promises-task-completablefuture"]
+---
+
+## Contexto
+
+El servicio de cobros descuenta saldo de una cuenta prepaga cuando un agente confirma un pago con tarjeta. Una
+noche, dos confirmaciones del mismo cliente llegaron casi a la vez y la cuenta quedó en **−40**: ambas leyeron
+saldo 100, ambas verificaron que alcanzaba para 70 y ambas escribieron 30.
+
+## Código actual (con el bug)
+
+```ts
+async charge(accountId: string, amount: number) {
+  const balance = await this.repo.getBalance(accountId); // ambos leen 100
+  if (balance < amount) throw new InsufficientFundsError(accountId);
+  await this.repo.setBalance(accountId, balance - amount); // ambos escriben 30
+}
+```
+
+## Qué tenés que implementar
+
+```ts
+export class PaymentService {
+  constructor(repo: BalanceRepository);
+  charge(accountId: string, amount: number): Promise<number>; // devuelve el saldo nuevo
+}
+```
+
+## Casos límite
+
+- Muchos cobros concurrentes sobre la misma cuenta: el saldo final debe ser exacto.
+- Un error del repositorio en un cobro no debe impedir los siguientes.

@@ -1,0 +1,25 @@
+## Enfoque
+
+Un bucle por número de intento con tres puntos de decisión:
+
+1. **Antes de intentar:** si la señal está abortada, se corta (`signal.throwIfAborted()` lanza `signal.reason`).
+2. **Ante un error:** se relanza si era el último intento o si `shouldRetry` dice que no es recuperable.
+3. **Antes de esperar:** se vuelve a revisar la cancelación, y se espera `min(maxDelayMs, base × 2^(n−1))`.
+
+Inyectar `sleep` desacopla la lógica del tiempo real: los tests verifican las esperas sin esperar de verdad. Es el
+mismo principio que inyectar un reloj o un repositorio.
+
+## Complejidad
+
+O(retries) intentos; memoria O(1).
+
+## Lo que separa una respuesta senior
+
+- **Jitter:** en producción la espera debería ser aleatoria dentro de un rango (por ejemplo, "full jitter":
+  `random(0, delay)`) para que miles de clientes no reintenten sincronizados.
+- **Idempotencia:** sólo es seguro reintentar operaciones idempotentes. Un cobro sin clave de idempotencia puede
+  duplicarse si el primer intento sí llegó al servidor pero la respuesta se perdió.
+- **Presupuesto de reintentos:** en sistemas distribuidos, reintentar en cada capa multiplica la carga
+  (3 capas × 3 reintentos = 27 llamadas). Conviene reintentar en un solo lugar.
+- **Circuit breaker:** si la dependencia está caída, dejar de intentar por un tiempo en lugar de seguir reintentando.
+- **Respetar `Retry-After`** cuando el servidor lo indica (429, 503).

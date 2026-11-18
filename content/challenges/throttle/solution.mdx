@@ -1,0 +1,28 @@
+## Enfoque
+
+Se mantienen tres datos en el closure:
+
+- `lastRun`: instante de la última ejecución.
+- `timer`: la ejecución final programada, si existe.
+- `pendingArgs`: los argumentos más recientes recibidos durante la ventana.
+
+En cada llamada se calcula cuánto falta para terminar la ventana (`remaining`). Si ya terminó y no hay nada
+programado, se ejecuta de inmediato. Si no, se guardan los argumentos y, **sólo si no hay un temporizador**, se
+programa la ejecución final para cuando termine la ventana. Las llamadas siguientes sólo actualizan `pendingArgs`.
+
+Iniciar `lastRun` en `-Infinity` evita un caso sutil: con `0`, si `Date.now()` fuera pequeño (por ejemplo, con
+relojes falsos en tests) la primera llamada podría no ejecutarse.
+
+## Complejidad
+
+O(1) en tiempo y memoria por llamada.
+
+## Alternativas y compromisos
+
+- **Sólo leading:** más simple, pero se pierde el último estado (el problema del starter).
+- **Sólo trailing:** introduce latencia en la primera actualización.
+- **requestAnimationFrame:** en UI, para sincronizar con el repintado en lugar de un intervalo fijo.
+- **Rate limiter (token bucket):** en APIs, cuando hay que **rechazar** el exceso en lugar de diferirlo.
+
+Para testear sin tiempo real se inyecta un reloj (o se usan fake timers de Vitest/Jest), lo que hace los tests
+deterministas y rápidos.

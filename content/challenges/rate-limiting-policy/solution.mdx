@@ -1,0 +1,31 @@
+## Una respuesta sólida
+
+**Qué se limita.** La clave es `tenant + clase de endpoint` (por ejemplo, `rl:{tenantId}:read` y
+`rl:{tenantId}:batch`), no la IP: varios tenants pueden compartir IP y un tenant puede usar muchas. El batch tiene un
+costo mayor: se descuentan más tokens por request o tiene su propio límite.
+
+**Algoritmo: token bucket.** Modela directamente "10 req/s sostenidas con ráfagas de 20": el balde tiene capacidad 20
+y se recarga a 10 tokens por segundo. La **fixed window** es más simple pero permite el doble de tráfico en el borde
+de la ventana (fin de una y comienzo de la siguiente); la **sliding window log** es exacta pero guarda un timestamp
+por request.
+
+**Estado compartido.** Las instancias son stateless: el estado vive en Redis. La actualización debe ser **atómica**
+(leer tokens, recargar según el tiempo transcurrido, descontar y guardar) en un script Lua: con dos comandos separados,
+dos instancias podrían leer el mismo saldo. Clave con TTL para que los tenants inactivos no ocupen memoria.
+
+**Contrato HTTP.** `429 Too Many Requests` con `Retry-After` y headers de cuota (`RateLimit-Limit`,
+`RateLimit-Remaining`, `RateLimit-Reset`), para que el cliente pueda adaptarse en lugar de reintentar a ciegas.
+
+**Si Redis falla.** Timeout corto (pocos ms) hacia Redis. Para lecturas, _fail open_ con un límite local por
+instancia como red de contención; para operaciones costosas (batch), _fail closed_. Se registra una métrica y se
+alerta.
+
+**Configuración y observabilidad.** Los límites por plan se leen de configuración (con caché), así ventas puede
+cambiar un plan sin desplegar. Métricas de requests aceptadas y rechazadas por tenant; alerta si un tenant vive en
+429 (integración rota) o si muchos tenants chocan el límite (límite mal calibrado).
+
+## Más allá del rate limit
+
+El rate limiting protege la puerta de entrada, pero un tenant con un batch legítimo enorme igual puede saturar
+workers. Complementos: colas por tenant con concurrencia acotada (**bulkhead**), prioridades y límites también para
+las llamadas salientes (por ejemplo, al proveedor de LLM).

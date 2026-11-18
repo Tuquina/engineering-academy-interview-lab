@@ -1,0 +1,80 @@
+---
+id: challenge.rate-limiting-policy
+kind: design
+title: "Diseñar una política de rate limiting"
+summary: "Limitar requests a la API pública por tenant y por endpoint, con varias instancias detrás de un balanceador."
+difficulty: intermediate
+durationMinutes: 35
+technologies: ["redis", "nodejs", "system design"]
+topics: ["rate limiting", "multi-tenancy", "Redis", "APIs"]
+skills: ["diseño de sistemas", "comunicar compromisos"]
+interviewType: system-design
+order: 10
+constraints:
+  - "La API corre en varias instancias stateless detrás de un balanceador."
+  - "Hay Redis disponible; la base principal es PostgreSQL."
+acceptanceCriteria:
+  - "Elegir y justificar un algoritmo (fixed window, sliding window, token bucket)."
+  - "Definir la clave de límite y los límites por plan."
+  - "Explicar cómo se comparte el estado entre instancias y qué pasa si Redis falla."
+  - "Especificar la respuesta HTTP y los headers al cliente."
+hints:
+  - "Pensá primero qué se limita: ¿por tenant, por API key, por IP, por endpoint?"
+  - "Comparar fixed window con token bucket: ¿qué pasa en el borde de la ventana?"
+  - "Una operación atómica en Redis (script Lua o INCR + EXPIRE) evita carreras entre instancias."
+followUpQuestions:
+  - "¿Fail open o fail closed si Redis no responde? ¿Depende del endpoint?"
+  - "¿Cómo limitarías también las llamadas salientes a un proveedor de LLM con su propio límite?"
+  - "¿Cómo evitarías que un tenant grande perjudique a los demás (noisy neighbor) más allá del rate limit?"
+relatedLessons: []
+rubric:
+  - id: what-to-limit
+    criterion: "Clave y alcance del límite"
+    description: "Limita por tenant/API key (no sólo por IP) y distingue endpoints costosos de baratos."
+    weight: 2
+  - id: algorithm
+    criterion: "Algoritmo justificado"
+    description: "Elige token bucket o sliding window y explica el problema de ráfagas en el borde de la fixed window."
+    weight: 3
+  - id: shared-state
+    criterion: "Estado compartido y atomicidad"
+    description: "Usa Redis con operaciones atómicas (Lua o INCR+EXPIRE en una transacción) para evitar carreras entre instancias."
+    weight: 3
+  - id: failure-mode
+    criterion: "Comportamiento ante fallas"
+    description: "Define fail open/closed según el endpoint, con timeouts cortos hacia Redis y métricas."
+    weight: 2
+  - id: http-contract
+    criterion: "Contrato HTTP"
+    description: "Responde 429 con Retry-After y headers de cuota (límite, restante, reinicio)."
+    weight: 2
+  - id: plans
+    criterion: "Límites por plan y configuración"
+    description: "Los límites dependen del plan del tenant y se cambian sin desplegar (configuración)."
+    weight: 1
+  - id: observability
+    criterion: "Observabilidad"
+    description: "Métricas de requests limitadas por tenant y alertas para detectar abuso o límites mal calibrados."
+    weight: 1
+---
+
+## Contexto
+
+La plataforma expone una API pública para que cada empresa cliente (tenant) cargue deudas y consulte el estado de las
+gestiones. Un tenant integró mal un cron y envía miles de requests por minuto: degrada la API para todos.
+
+## Lo que se pide
+
+Diseñá la política de **rate limiting** de la API:
+
+- Qué se limita y con qué clave.
+- Qué algoritmo usarías y por qué.
+- Cómo funciona con varias instancias de la API.
+- Qué ve el cliente cuando supera el límite.
+- Qué pasa si el componente de rate limiting falla.
+
+## Datos para estimar
+
+- 200 tenants; los más grandes hacen picos de 50 requests/segundo legítimas.
+- Plan básico: 10 req/s sostenidas con ráfagas de 20. Plan enterprise: 100 req/s con ráfagas de 200.
+- La carga masiva de deudas (`POST /debts:batch`) es 50 veces más costosa que una consulta.

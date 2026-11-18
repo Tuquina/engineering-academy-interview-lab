@@ -1,3 +1,5 @@
+import { EMPTY_PRACTICE, type PracticeState } from "@/modules/exercises/domain/practice";
+import { createLocalPracticeStore } from "@/modules/exercises/infrastructure/local-storage-practice-store";
 import { createLocalFlashcardsStore } from "@/modules/flashcards/infrastructure/local-storage-flashcards-store";
 import { EMPTY_FLASHCARDS, type FlashcardsState } from "@/modules/flashcards/domain/spaced-repetition";
 import { EMPTY_NOTEBOOK, type NotebookState } from "@/modules/notebook/domain/notebook";
@@ -15,6 +17,7 @@ export interface ClientStores {
   readonly notebook: ExternalStore<NotebookState>;
   readonly flashcards: ExternalStore<FlashcardsState>;
   readonly preferences: ExternalStore<PreferencesState>;
+  readonly practice: ExternalStore<PracticeState>;
 }
 
 let browserStores: ClientStores | null = null;
@@ -33,6 +36,7 @@ export function getClientStores(): ClientStores {
       notebook: createServerSnapshotStore(EMPTY_NOTEBOOK),
       flashcards: createServerSnapshotStore(EMPTY_FLASHCARDS),
       preferences: createServerSnapshotStore(DEFAULT_PREFERENCES),
+      practice: createServerSnapshotStore(EMPTY_PRACTICE),
     };
   }
   if (!browserStores) {
@@ -42,6 +46,7 @@ export function getClientStores(): ClientStores {
       notebook: createLocalNotebookStore(storage, window),
       flashcards: createLocalFlashcardsStore(storage, window),
       preferences: createLocalPreferencesStore(storage, window),
+      practice: createLocalPracticeStore(storage, window),
     };
   }
   return browserStores;

@@ -1,0 +1,72 @@
+---
+id: challenge.conversation-memory
+kind: code
+title: "Memoria entre conversaciones de un agente de cobranzas"
+summary: "Decidir si un agente debe contactar a un cliente según promesas, pagos y eventos previos."
+difficulty: advanced
+durationMinutes: 40
+technologies: ["typescript"]
+topics: ["agentes", "memoria", "reglas de negocio", "eventos"]
+skills: ["modelado de dominio", "diseño", "casos límite"]
+interviewType: take-home
+order: 8
+constraints:
+  - "La función debe ser pura: recibe los eventos y la fecha de hoy; no usa `Date.now()`."
+  - "Los eventos pueden llegar desordenados."
+  - "Las fechas son strings `YYYY-MM-DD` (día local del cliente)."
+acceptanceCriteria:
+  - "Con una disputa abierta, nunca se contacta."
+  - "Si ya hubo un intento de contacto hoy, se espera."
+  - "Con una promesa vigente, se espera hasta el día anterior al vencimiento, en el que se envía un recordatorio."
+  - "Si la promesa venció sin pagos que la cubran, se contacta con estrategia de promesa incumplida."
+  - "Una promesa cumplida (pagos desde la promesa ≥ monto prometido) no genera contacto."
+  - "La información más reciente prevalece: una promesa nueva reemplaza a la anterior y una cancelación la anula."
+  - "Cada decisión incluye un motivo legible."
+hints:
+  - "Empezá ordenando los eventos por fecha: así 'el más reciente' es simplemente el último."
+  - "Resolvé primero las reglas que bloquean (disputa, contacto de hoy) y después la lógica de promesas."
+  - "Para saber si una promesa se cumplió, sumá los pagos con fecha posterior o igual a la de la promesa."
+followUpQuestions:
+  - "¿Por qué la promesa de pago no debería vivir sólo en el historial del chat del agente?"
+  - "¿Qué harías si el cliente dice por teléfono que ya pagó pero el pago todavía no aparece?"
+  - "¿Cómo versionarías estas reglas por cliente (tenant) sin desplegar código?"
+relatedLessons: []
+---
+
+## Contexto
+
+Un agente de IA de cobranzas habla con un cliente el día 1 y obtiene una **promesa de pago** para el día 15. El día 5,
+el orquestador de campañas intenta incluirlo en una campaña nueva. Si el agente lo contacta, el cliente recibe un
+mensaje que contradice lo acordado: mala experiencia y, en algunos mercados, un problema regulatorio.
+
+La decisión no debe depender de lo que "recuerde" el modelo en su contexto, sino del **estado del negocio**
+reconstruido a partir de eventos: promesas, pagos, intentos de contacto y disputas.
+
+## Qué tenés que implementar
+
+```ts
+export type MemoryEvent =
+  | { type: "promise-made"; at: string; dueDate: string; amountCents: number }
+  | { type: "promise-cancelled"; at: string }
+  | { type: "payment-received"; at: string; amountCents: number }
+  | { type: "contact-attempt"; at: string }
+  | { type: "dispute-opened"; at: string };
+
+export type ContactDecision =
+  | { action: "contact"; strategy: "standard" | "promise-reminder" | "broken-promise"; reason: string }
+  | { action: "wait"; reason: string }
+  | { action: "do-not-contact"; reason: string };
+
+export function decideNextContact(events: readonly MemoryEvent[], today: string): ContactDecision;
+```
+
+## Ejemplo
+
+| Eventos                             | Hoy        | Decisión                       |
+| ----------------------------------- | ---------- | ------------------------------ |
+| Promesa el 01 para el 15 por $1.500 | 2026-03-05 | `wait` (promesa vigente)       |
+| (igual)                             | 2026-03-14 | `contact` / `promise-reminder` |
+| (igual), sin pagos                  | 2026-03-16 | `contact` / `broken-promise`   |
+| (igual) + pago de $1.500 el 12      | 2026-03-16 | `wait` (promesa cumplida)      |
+
+El helper `addDays(day, n)` ya está implementado en el starter.

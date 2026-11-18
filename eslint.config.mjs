@@ -13,6 +13,9 @@ const config = [
       "playwright-report/**",
       "test-results/**",
       "next-env.d.ts",
+      "public/monaco/**",
+      // Código de ejercicios: los starters tienen parámetros sin usar a propósito y los ejemplos usan console.
+      "content/**",
     ],
   },
   {
@@ -20,6 +23,12 @@ const config = [
       "@typescript-eslint/consistent-type-imports": ["error", { prefer: "type-imports" }],
       "@typescript-eslint/no-unused-vars": ["error", { argsIgnorePattern: "^_", varsIgnorePattern: "^_" }],
       "no-console": ["warn", { allow: ["warn", "error"] }],
+    },
+  },
+  {
+    files: ["scripts/**"],
+    rules: {
+      "no-console": "off",
     },
   },
 ];

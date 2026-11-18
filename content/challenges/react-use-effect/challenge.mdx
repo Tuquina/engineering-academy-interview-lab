@@ -1,0 +1,46 @@
+---
+id: challenge.react-use-effect
+kind: react
+title: "Corregir un useEffect problemático"
+summary: "Un componente que carga deudas muestra datos de otro cliente: dependencias, carreras y limpieza."
+difficulty: intermediate
+durationMinutes: 30
+technologies: ["react", "typescript"]
+topics: ["useEffect", "race conditions", "data fetching"]
+skills: ["corregir un bug", "React hooks", "concurrencia"]
+interviewType: live-coding
+order: 12
+constraints:
+  - "Mantené la API del componente: props `customerId` y `fetchDebts`."
+  - "No agregues librerías de data fetching: el objetivo es entender el efecto."
+acceptanceCriteria:
+  - "Muestra las deudas del cliente indicado."
+  - "Vuelve a cargar cuando cambia `customerId`."
+  - "Una respuesta lenta de un cliente anterior nunca reemplaza a la del cliente actual."
+  - "Muestra «Cargando…» mientras espera los datos del cliente actual."
+hints:
+  - "Revisá el arreglo de dependencias: ¿cuándo se vuelve a ejecutar el efecto?"
+  - "Si el usuario cambia de cliente rápido, hay dos requests en vuelo. ¿Cuál termina primero?"
+  - "La función de limpieza del efecto corre antes del siguiente: usala para marcar la respuesta anterior como obsoleta (`let ignore = false`)."
+followUpQuestions:
+  - "¿Cómo cancelarías la request anterior en lugar de ignorar su respuesta?"
+  - "¿Qué resuelven TanStack Query o los Server Components de Next.js en este escenario?"
+  - "¿Por qué React ejecuta los efectos dos veces en desarrollo con StrictMode?"
+relatedLessons: []
+---
+
+## Contexto
+
+En el panel de operadores, al pasar rápido de un cliente a otro, a veces se ven **las deudas del cliente anterior**.
+El componente vive en `App.tsx`; el preview incluye una API falsa en la que "Ana" responde lento y "Bruno" rápido,
+para reproducir el problema: elegí Ana y enseguida Bruno.
+
+## Qué tenés que hacer
+
+Corregí `CustomerDebts` para que:
+
+1. Cargue las deudas cuando se monta **y cada vez que cambia `customerId`**.
+2. Ignore respuestas de un `customerId` anterior (condición de carrera).
+3. Muestre «Cargando…» mientras espera.
+
+Los tests (`App.test.tsx`) se ejecutan con Jest en el navegador desde el panel de tests.

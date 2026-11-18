@@ -1,0 +1,72 @@
+---
+id: challenge.idempotent-webhook
+kind: code
+title: "Webhook de pagos idempotente"
+summary: "Procesar cada evento de pago exactamente una vez aunque el proveedor lo reenvíe, incluso en paralelo."
+difficulty: advanced
+durationMinutes: 40
+technologies: ["typescript", "nodejs"]
+topics: ["webhooks", "idempotencia", "concurrencia", "validación"]
+skills: ["diseño de APIs", "concurrencia", "manejo de errores"]
+interviewType: take-home
+order: 6
+constraints:
+  - "El payload llega como `unknown`: validalo sin librerías."
+  - "Usá el `EventStore` provisto para registrar eventos procesados; no lo modifiques."
+acceptanceCriteria:
+  - "Un payload inválido responde 400 y no aplica el pago."
+  - "El primer envío de un evento aplica el pago y responde 200 con `{ processed: true }`."
+  - "Los reenvíos del mismo `eventId` responden 200 con `{ processed: false, duplicate: true }` y no aplican el pago."
+  - "Dos entregas simultáneas del mismo evento aplican el pago una sola vez."
+  - "Si aplicar el pago falla, responde 500 y el evento NO queda marcado: un reenvío posterior debe procesarlo."
+hints:
+  - "Separá el problema en tres: validar, deduplicar y aplicar."
+  - "El store sólo dice qué eventos terminaron. Para entregas simultáneas necesitás recordar también los que están en curso."
+  - "Guardá en un Map la promesa en curso por `eventId`: la segunda entrega espera esa misma promesa en lugar de procesar de nuevo."
+followUpQuestions:
+  - "Con varias instancias del servicio, el Map en memoria no alcanza. ¿Cómo lo resolverías con PostgreSQL?"
+  - "¿Por qué responder 200 a los duplicados y no 409?"
+  - "¿Dónde verificarías la firma del proveedor y por qué antes de todo lo demás?"
+relatedLessons: ["typescript.runtime-vs-type-system", "typescript.promises-task-completablefuture"]
+---
+
+## Contexto
+
+El proveedor de pagos notifica cada pago con un webhook y garantiza entrega **al menos una vez**: si no recibe
+un 2xx a tiempo, reenvía, y a veces envía el mismo evento dos veces en paralelo. Aplicar un pago dos veces deja una
+deuda con saldo negativo y un cliente que recibe mensajes incorrectos del agente.
+
+## Qué tenés que implementar
+
+```ts
+export interface PaymentEvent {
+  eventId: string;
+  debtId: string;
+  amountCents: number; // entero > 0
+}
+
+export interface EventStore {
+  wasProcessed(eventId: string): Promise<boolean>;
+  markProcessed(eventId: string): Promise<void>;
+}
+
+export interface Ledger {
+  applyPayment(debtId: string, amountCents: number): Promise<void>;
+}
+
+export type WebhookResponse =
+  | { status: 200; body: { processed: true } | { processed: false; duplicate: true } }
+  | { status: 400; body: { error: string } }
+  | { status: 500; body: { error: string } };
+
+export function createPaymentWebhookHandler(deps: {
+  store: EventStore;
+  ledger: Ledger;
+}): (payload: unknown) => Promise<WebhookResponse>;
+```
+
+## Casos límite
+
+- `amountCents` decimal, negativo o como string: inválido.
+- Un evento cuyo procesamiento falló puede reintentarse con éxito.
+- Eventos distintos se procesan de forma independiente (y pueden correr en paralelo).

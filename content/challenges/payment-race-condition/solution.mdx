@@ -1,0 +1,31 @@
+## Por qué hay una carrera en un lenguaje de un solo hilo
+
+JavaScript no ejecuta dos callbacks a la vez, pero **cada `await` es un punto donde otra tarea puede avanzar**. El
+patrón leer → `await` → escribir deja una ventana: dos cobros leen el mismo saldo antes de que cualquiera escriba.
+Es la misma anomalía que un _lost update_ entre dos transacciones de base de datos.
+
+## Enfoque
+
+Serializar la sección crítica **por cuenta** con un lock por clave (`KeyedMutex`):
+
+- Se guarda, por cuenta, la promesa del último cobro encolado (`tail`).
+- Cada cobro nuevo se encadena detrás de esa promesa, ignorando si falló (`catch(() => undefined)`), para que un error
+  no bloquee la cola.
+- Cuentas distintas tienen colas distintas: corren en paralelo.
+- Al terminar, si nadie se encoló detrás, se elimina la entrada del Map para no acumular memoria.
+
+## Complejidad
+
+O(1) por cobro más la espera de los cobros previos de la misma cuenta. Memoria O(cuentas con cobros en curso).
+
+## En producción, con varias instancias
+
+Un lock en memoria sólo protege dentro de un proceso. Con varias instancias, la base de datos debe resolverlo:
+
+- **Actualización atómica condicional** (la opción más simple):
+  `UPDATE accounts SET balance = balance - $1 WHERE id = $2 AND balance >= $1 RETURNING balance;`
+  Si no devuelve filas, no había saldo. Sin lecturas previas, no hay ventana.
+- **Bloqueo pesimista:** `SELECT ... FOR UPDATE` dentro de una transacción.
+- **Bloqueo optimista:** columna `version`; el `UPDATE ... WHERE version = $v` falla si otro escribió antes, y se reintenta.
+
+Y siempre, **idempotencia**: una clave por intento de cobro para que un reintento no descuente dos veces.

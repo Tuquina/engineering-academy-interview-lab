@@ -1,0 +1,23 @@
+## Tres bugs en tres líneas
+
+1. **Dependencias faltantes.** Con `[]` el efecto sólo corre al montar: cambiar `customerId` no vuelve a cargar.
+   Todo lo que el efecto usa del render (`customerId`, `fetchDebts`) va en las dependencias; la regla
+   `react-hooks/exhaustive-deps` lo detecta.
+2. **Condición de carrera.** Con dependencias correctas aparece el segundo bug: si Ana tarda más que Bruno, su
+   respuesta llega **después** y pisa los datos de Bruno. La limpieza del efecto marca la request anterior como
+   obsoleta (`ignore = true`) antes de lanzar la siguiente.
+3. **Estado de carga.** Guardar los datos junto con el `customerId` al que pertenecen permite derivar "cargando"
+   (`state.customerId !== customerId`) sin un `useState` extra que haya que mantener sincronizado.
+
+## Alternativas
+
+- **Cancelar en lugar de ignorar:** pasar un `AbortController` a `fetch` y llamar a `abort()` en la limpieza; además
+  de descartar la respuesta, libera la conexión.
+- **Librerías de server state** (TanStack Query, SWR): resuelven caché, deduplicación, carreras y reintentos. Para un
+  caso real, son la opción recomendada.
+- **Server Components (Next.js):** si los datos pueden cargarse en el servidor, el problema desaparece del cliente.
+
+## StrictMode
+
+En desarrollo, React monta, desmonta y vuelve a montar el componente para revelar efectos sin limpieza. Con la
+limpieza correcta, el primer request queda ignorado y el comportamiento es el mismo que en producción.

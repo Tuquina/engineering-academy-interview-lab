@@ -1,0 +1,27 @@
+## Enfoque
+
+Dos piezas de estado: una **cola FIFO** de tareas pendientes y un **contador** de tareas activas.
+
+- `limit(task)` crea una promesa, encola una función `run` que conoce su `resolve`/`reject`, e intenta arrancar.
+- `next()` arranca la siguiente tarea si hay lugar.
+- Al terminar cada tarea (bien o mal) se libera el lugar en un `finally` y se llama a `next()`.
+
+`Promise.resolve().then(task)` es un detalle importante: si `task` lanza de forma síncrona, el error se convierte en
+un rechazo en lugar de escapar y dejar el contador incrementado para siempre.
+
+¿Por qué no hay condiciones de carrera con `active++`? Porque en JavaScript el código entre dos `await` no se
+interrumpe: no existe otro hilo que modifique `active` en medio.
+
+## Complejidad
+
+- `limit`: O(1) amortizado (`shift` sobre arrays es O(n) en teoría; para colas enormes conviene una cola con
+  índices o una lista enlazada).
+- Memoria: O(tareas pendientes).
+
+## Alternativas
+
+- **Workers fijos** que consumen de un iterador compartido (`mapWithConcurrency` de la lección de Promises): más
+  simple cuando el lote es conocido de antemano.
+- **Librerías** como `p-limit` o `p-queue` (prioridades, timeouts, pausas).
+- **Límite distribuido:** si hay varias instancias del servicio, el límite por proceso no alcanza. Hace falta un
+  semáforo compartido (por ejemplo, en Redis) o una cola con consumidores de concurrencia controlada.
