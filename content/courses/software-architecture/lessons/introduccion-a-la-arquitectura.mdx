@@ -1,0 +1,257 @@
+---
+id: software-architecture.introduction
+moduleId: software-architecture.intro
+title: "Introducción a la arquitectura de software: decisiones, atributos de calidad y compromisos"
+description: "Qué es la arquitectura de software en la práctica: las decisiones difíciles de cambiar, los atributos de calidad que las guían, por qué toda decisión es un compromiso, cómo distinguir decisiones reversibles de irreversibles, cómo documentarlas con ADRs y cómo dibujar un sistema con el modelo C4."
+difficulty: basic
+order: 1
+objectives:
+  - "Definir arquitectura como el conjunto de decisiones importantes y difíciles de cambiar."
+  - "Usar atributos de calidad para comparar alternativas de forma concreta."
+  - "Explicar una decisión en términos de compromisos, no de 'mejores prácticas'."
+  - "Distinguir decisiones reversibles de irreversibles y ajustar el esfuerzo de análisis."
+  - "Documentar decisiones con ADRs y dibujar sistemas con el modelo C4."
+prerequisites: []
+estimatedMinutes: 30
+tags: ["arquitectura", "atributos de calidad", "compromisos", "adr", "c4", "introducción"]
+version: "1.0.0"
+comparesWith: ["csharp", "java"]
+references:
+  - title: "Martin Fowler — Software Architecture Guide"
+    url: "https://martinfowler.com/architecture/"
+  - title: "Michael Nygard — Documenting Architecture Decisions"
+    url: "https://cognitect.com/blog/2011/11/15/documenting-architecture-decisions"
+  - title: "The C4 model for visualising software architecture"
+    url: "https://c4model.com/"
+  - title: "ISO/IEC 25010 — Product quality model"
+    url: "https://iso25000.com/index.php/en/iso-25000-standards/iso-25010"
+  - title: "AWS Well-Architected Framework"
+    url: "https://docs.aws.amazon.com/wellarchitected/latest/framework/welcome.html"
+interviewQuestions:
+  - question: "¿Qué es la arquitectura de software para vos?"
+    keyPoints:
+      - "Las decisiones estructurales importantes y difíciles de cambiar: límites de módulos, comunicación, datos, despliegue."
+      - "Guiadas por atributos de calidad (disponibilidad, escalabilidad, mantenibilidad, seguridad) y restricciones del negocio."
+      - "Cada decisión es un compromiso explícito, documentado con sus alternativas."
+      - "No es un documento inicial: evoluciona con el sistema y el equipo."
+  - question: "¿Cómo documentás una decisión de arquitectura?"
+    keyPoints:
+      - "Un ADR breve: contexto, decisión, alternativas consideradas y consecuencias."
+      - "Versionado junto al código; inmutable (una decisión nueva reemplaza a la anterior)."
+      - "Permite entender después por qué se eligió algo y cuándo revisarlo."
+summary:
+  - "Arquitectura = decisiones importantes y costosas de revertir, no diagramas bonitos."
+  - "Los atributos de calidad (disponibilidad, rendimiento, seguridad, mantenibilidad, costo) son los criterios de comparación."
+  - "Toda decisión gana algo y paga algo: se explica el compromiso, no la 'mejor práctica'."
+  - "Decisiones reversibles se toman rápido; las irreversibles merecen análisis y prototipos."
+  - "Un ADR registra contexto, decisión, alternativas y consecuencias, junto al código."
+  - "El modelo C4 dibuja el sistema en niveles: contexto, contenedores, componentes y código."
+---
+
+## Qué vas a aprender en este curso
+
+En la entrevista para una plataforma de agentes van a pedirte que **defiendas decisiones**: por qué un monolito
+modular y no microservicios, por qué un outbox, cómo aislar tenants, qué pasa si un proveedor se cae. Este curso da el
+vocabulario y los criterios.
+
+| Módulo                   | Qué vas a poder hacer                                                                               |
+| ------------------------ | --------------------------------------------------------------------------------------------------- |
+| Introducción             | Razonar sobre decisiones con atributos de calidad y documentarlas.                                  |
+| Principios fundamentales | Aplicar SOLID, acoplamiento y cohesión, inversión de dependencias y DDD con criterio.               |
+| Patrones de diseño       | Reconocer y aplicar los patrones clásicos en TypeScript, sin sobreingeniería.                       |
+| Patrones de arquitectura | Elegir estilos (hexagonal, monolito modular, microservicios, event-driven) y patrones distribuidos. |
+
+La **Pattern Library** (`/patterns`) complementa el curso con diagramas interactivos, ejemplos y el comparador de
+arquitecturas.
+
+## Qué es arquitectura (y qué no)
+
+Una definición útil, popularizada por Martin Fowler: la arquitectura son **las decisiones importantes**, y "importante"
+suele significar **difícil de cambiar después**. Ejemplos en una plataforma de cobranzas:
+
+| Decisión arquitectónica                            | Decisión de diseño local               |
+| -------------------------------------------------- | -------------------------------------- |
+| Monolito modular o microservicios                  | Nombre de una función                  |
+| Base compartida o base por tenant                  | Estructura de un componente de React   |
+| Comunicación síncrona o por eventos entre módulos  | Algoritmo para formatear montos        |
+| Dónde vive la lógica del agente y cómo se versiona | Un helper de fechas                    |
+| Proveedor de nube y modelo de despliegue           | Orden de los parámetros de una función |
+
+La arquitectura **no** es un diagrama inicial que se congela: evoluciona con el producto, el equipo y lo que se
+aprende en producción.
+
+## Atributos de calidad
+
+Las decisiones se comparan con **atributos de calidad** (también llamados requisitos no funcionales):
+
+| Atributo       | Pregunta concreta en cobranzas                                           |
+| -------------- | ------------------------------------------------------------------------ |
+| Disponibilidad | ¿Qué pasa con las campañas si cae el proveedor de LLM?                   |
+| Rendimiento    | ¿El agente responde en menos de 3 segundos por WhatsApp?                 |
+| Escalabilidad  | ¿Soportamos 20 veces más conversaciones en fin de mes?                   |
+| Seguridad      | ¿Un tenant puede ver datos de otro bajo algún fallo?                     |
+| Mantenibilidad | ¿Un equipo puede cambiar las reglas de negociación sin romper los pagos? |
+| Observabilidad | ¿Podemos explicar por qué el agente dijo algo?                           |
+| Costo          | ¿Cuánto cuesta una conversación y una promesa lograda?                   |
+| Cumplimiento   | ¿Respetamos horarios de contacto y retención de datos?                   |
+
+Un atributo sólo sirve si se vuelve **medible**: "alta disponibilidad" no ayuda a decidir; "99,9 % mensual para
+recibir webhooks de pagos" sí.
+
+## Compromisos: no hay decisiones gratis
+
+<MermaidDiagram
+  caption="Cada decisión mejora algunos atributos a costa de otros: el trabajo arquitectónico es elegir qué se paga."
+  chart={`
+flowchart LR
+  D["Microservicios"] -->|"gana"| G1["Despliegue independiente<br/>escalado por servicio"]
+  D -->|"paga"| P1["Red, consistencia eventual,<br/>operación y observabilidad"]
+  M["Monolito modular"] -->|"gana"| G2["Simplicidad, transacciones locales,<br/>refactors baratos"]
+  M -->|"paga"| P2["Un solo despliegue,<br/>escalado conjunto"]
+`}
+/>
+
+Una respuesta arquitectónica madura **nombra lo que se pierde**. "Uso microservicios porque escalan" es una respuesta
+débil; "uso un monolito modular porque el equipo es chico y las transacciones entre deudas y pagos son críticas;
+acepto escalar todo junto, y dejo los límites de módulos claros para extraer un servicio si los datos lo justifican"
+es una respuesta fuerte. El comparador de arquitecturas de la plataforma (`/patterns/compare`) presenta estos
+compromisos dimensión por dimensión.
+
+## Decisiones reversibles e irreversibles
+
+No todas las decisiones merecen el mismo análisis:
+
+- **Reversibles** ("puertas de dos sentidos"): una librería de logging, la estructura de una carpeta, un formato
+  interno. Se deciden rápido y se corrigen si hace falta.
+- **Irreversibles o costosas de revertir** ("puertas de un sentido"): el modelo de datos de pagos, el esquema de
+  aislamiento de tenants, un contrato público de API, la elección de base de datos. Merecen alternativas escritas,
+  prototipos y revisión.
+
+Una buena arquitectura además **hace más decisiones reversibles**: un puerto propio para el LLM vuelve reversible la
+elección del proveedor; un límite de módulo claro vuelve reversible la decisión de no tener microservicios.
+
+## Architecture Decision Records
+
+Un **ADR** es un documento breve que registra una decisión. Formato habitual:
+
+```text
+# ADR-0012: Outbox para publicar eventos de pagos
+
+Estado: Aceptado — 2026-11-19
+
+## Contexto
+Los pagos se registran en PostgreSQL y otros módulos deben reaccionar (detener recordatorios, notificar).
+Publicar directo al broker después del commit pierde eventos si el proceso cae entre ambos pasos.
+
+## Decisión
+Guardar los eventos en una tabla outbox en la misma transacción y publicarlos con un relay.
+
+## Alternativas consideradas
+- Publicar después del commit: simple, pierde eventos ante caídas.
+- Transacciones distribuidas (2PC): el broker no las soporta y acopla disponibilidades.
+
+## Consecuencias
+- Entrega al menos una vez: los consumidores deben ser idempotentes.
+- Un proceso más que operar (relay) y una tabla que purgar.
+```
+
+Los ADRs se guardan **junto al código** (este proyecto los tiene en `docs/adr/`), son **inmutables** (una decisión
+nueva crea un ADR que reemplaza al anterior) y responden la pregunta que siempre aparece meses después: **"¿por qué
+se hizo así?"**.
+
+## Diagramas: el modelo C4
+
+El **modelo C4** propone dibujar un sistema en cuatro niveles de zoom, cada uno para una audiencia distinta:
+
+<FlowDiagram
+  steps={[
+    {
+      title: "1. Contexto",
+      detail: "El sistema, sus usuarios y los sistemas externos (CRM del cliente, proveedor de pagos, LLM).",
+    },
+    {
+      title: "2. Contenedores",
+      detail: "Aplicaciones y almacenes: web Next.js, API, workers, PostgreSQL, Redis, cola.",
+    },
+    { title: "3. Componentes", detail: "Módulos dentro de un contenedor: agentes, campañas, pagos, evals." },
+    { title: "4. Código", detail: "Clases y funciones; rara vez se dibuja a mano.", tone: "runtime" },
+  ]}
+  caption="Cada nivel responde preguntas distintas; en una entrevista, los niveles 1 y 2 suelen alcanzar."
+/>
+
+El System Design Studio de la plataforma (`/system-design/canvas`) sirve para practicar diagramas de nivel 2.
+
+## Comparación con C# y Java
+
+Los conceptos de arquitectura son independientes del lenguaje. Lo que cambia es el ecosistema:
+
+| Aspecto                     | .NET                                           | Java                         | TypeScript / Node.js                                                    |
+| --------------------------- | ---------------------------------------------- | ---------------------------- | ----------------------------------------------------------------------- |
+| Frameworks con opinión      | ASP.NET Core, plantillas de Clean Architecture | Spring Boot, Spring Modulith | NestJS (opinado), Next.js; muchos equipos sin framework de arquitectura |
+| Verificar dependencias      | NetArchTest, ArchUnitNET                       | ArchUnit                     | dependency-cruiser, tests de arquitectura propios                       |
+| Documentación de decisiones | ADRs (igual)                                   | ADRs (igual)                 | ADRs (igual)                                                            |
+
+## Errores frecuentes
+
+- **Elegir por moda** ("todos usan microservicios") en lugar de por atributos de calidad.
+- **Atributos de calidad vagos** que no permiten decidir.
+- **Presentar una decisión sin su costo.**
+- **Analizar igual una decisión reversible que una irreversible.**
+- **No documentar el porqué** y perderlo con la rotación del equipo.
+- **Diagramas que mezclan niveles** de detalle y no sirven a nadie.
+
+## Ejercicio interactivo
+
+<KnowledgeCheck
+  id="software-architecture.introduction.q1"
+  question="¿Cuál de estas es una decisión arquitectónica?"
+  options={[
+    {
+      text: "Usar `map` o un bucle `for` para transformar una lista.",
+      explanation: "Es local y barata de cambiar.",
+    },
+    {
+      text: "Aislar tenants con una base compartida y Row Level Security, o con una base por tenant.",
+      correct: true,
+      explanation: "Correcto. Afecta seguridad, costo y operación, y es muy costosa de revertir.",
+    },
+    {
+      text: "El color del botón principal.",
+      explanation: "Es una decisión de diseño visual, fácil de cambiar.",
+    },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="software-architecture.introduction.q2"
+  question="¿Qué hace fuerte una justificación arquitectónica en una entrevista?"
+  options={[
+    {
+      text: "Citar que es una buena práctica de la industria.",
+      explanation: "No explica por qué conviene en este contexto.",
+    },
+    {
+      text: "Nombrar los atributos de calidad que prioriza, el costo que acepta y cuándo revisaría la decisión.",
+      correct: true,
+      explanation: "Correcto. Toda decisión es un compromiso explícito.",
+    },
+    { text: "Elegir la tecnología más nueva.", explanation: "La novedad no es un atributo de calidad." },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="software-architecture.introduction.q3"
+  question="¿Qué contiene un ADR?"
+  options={[
+    {
+      text: "El código fuente de la solución.",
+      explanation: "El código vive en el repositorio; el ADR explica la decisión.",
+    },
+    {
+      text: "Contexto, decisión, alternativas consideradas y consecuencias.",
+      correct: true,
+      explanation: "Correcto. Es breve, inmutable y vive junto al código.",
+    },
+    { text: "El cronograma del proyecto.", explanation: "No es un documento de planificación." },
+  ]}
+/>

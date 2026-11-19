@@ -10,6 +10,21 @@
   "tags": ["arquitectura", "patrones", "ddd"],
   "modules": [
     {
+      "id": "software-architecture.intro",
+      "slug": "introduccion",
+      "title": "Introducción",
+      "description": "Qué es la arquitectura de software, qué decisiones abarca, cómo se razona con atributos de calidad y compromisos, y cómo se documentan las decisiones.",
+      "order": 0,
+      "topics": [
+        "Qué es arquitectura y qué no",
+        "Atributos de calidad",
+        "Compromisos: no hay soluciones gratis",
+        "Decisiones reversibles e irreversibles",
+        "Architecture Decision Records",
+        "Diagramas: modelo C4"
+      ]
+    },
+    {
       "id": "software-architecture.principles",
       "slug": "principios",
       "title": "Principios fundamentales",

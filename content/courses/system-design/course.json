@@ -10,6 +10,21 @@
   "tags": ["system design", "escalabilidad", "distribuidos"],
   "modules": [
     {
+      "id": "system-design.intro",
+      "slug": "introduccion",
+      "title": "Introducción",
+      "description": "Qué evalúa una entrevista de System Design, cómo se estructura una respuesta en fases, cómo se estiman cargas y cómo se comunican los compromisos.",
+      "order": 0,
+      "topics": [
+        "Qué es System Design y qué se evalúa en una entrevista",
+        "Las fases de una respuesta",
+        "Requerimientos funcionales y no funcionales",
+        "Estimaciones de orden de magnitud",
+        "Bloques de construcción de un sistema",
+        "Cómo comunicar compromisos"
+      ]
+    },
+    {
       "id": "system-design.scalability",
       "slug": "escalabilidad",
       "title": "Escalabilidad y disponibilidad",

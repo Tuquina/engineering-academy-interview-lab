@@ -1,0 +1,315 @@
+---
+id: software-architecture.principles
+moduleId: software-architecture.principles
+title: "Principios de diseño: SOLID, acoplamiento y cohesión, inversión de dependencias y DDD"
+description: "Los principios que sostienen un código mantenible, aplicados a TypeScript y con criterio: SOLID uno por uno, DRY, KISS y YAGNI, separación de responsabilidades, acoplamiento y cohesión, composición sobre herencia, inversión e inyección de dependencias, la pirámide de testing y los conceptos centrales de Domain-Driven Design."
+difficulty: intermediate
+order: 1
+objectives:
+  - "Explicar cada principio SOLID con un ejemplo y reconocer cuándo se aplica de más."
+  - "Usar DRY, KISS y YAGNI para evitar tanto la duplicación como la sobreingeniería."
+  - "Evaluar un diseño en términos de acoplamiento y cohesión."
+  - "Aplicar inversión de dependencias e inyección con un composition root."
+  - "Describir la pirámide de testing y su relación con el diseño."
+  - "Usar los conceptos de DDD: lenguaje ubicuo, bounded contexts, agregados, entidades y value objects."
+prerequisites: ["software-architecture.introduction", "typescript.design-errors-testing"]
+estimatedMinutes: 50
+tags: ["solid", "dry", "kiss", "yagni", "acoplamiento", "cohesión", "inversión de dependencias", "ddd"]
+version: "1.0.0"
+comparesWith: ["csharp", "java"]
+references:
+  - title: "Martin Fowler — Inversion of Control Containers and the Dependency Injection pattern"
+    url: "https://martinfowler.com/articles/injection.html"
+  - title: "Martin Fowler — Bounded Context"
+    url: "https://martinfowler.com/bliki/BoundedContext.html"
+  - title: "Martin Fowler — The Practical Test Pyramid"
+    url: "https://martinfowler.com/articles/practical-test-pyramid.html"
+  - title: "Martin Fowler — Yagni"
+    url: "https://martinfowler.com/bliki/Yagni.html"
+  - title: "Martin Fowler — DDD Aggregate"
+    url: "https://martinfowler.com/bliki/DDD_Aggregate.html"
+interviewQuestions:
+  - question: "Explicá los principios SOLID con ejemplos."
+    keyPoints:
+      - "S: una razón para cambiar por módulo (separar cálculo de cuotas de envío de notificaciones)."
+      - "O: extender comportamiento sin modificar lo existente (estrategias de canal nuevas)."
+      - "L: un subtipo debe poder reemplazar al tipo base sin romper contratos."
+      - "I: interfaces chicas y específicas; D: depender de abstracciones definidas por el núcleo."
+  - question: "¿Qué es un agregado en DDD y cómo influye en las transacciones?"
+    keyPoints:
+      - "Un grupo de entidades y value objects que se modifica como una unidad y protege sus invariantes."
+      - "Tiene una raíz por la que se accede; desde afuera se referencia por ID."
+      - "Una transacción modifica un solo agregado; la consistencia entre agregados es eventual (eventos)."
+      - "Ejemplo: Debt con sus promesas de pago; la regla de una sola promesa activa vive en el agregado."
+  - question: "¿Cuándo aplicar DRY puede ser un error?"
+    keyPoints:
+      - "Cuando se unifica código que se parece por casualidad pero representa conceptos distintos."
+      - "El acoplamiento resultante obliga a cambios coordinados que no deberían estarlo."
+      - "La duplicación es más barata que la abstracción equivocada; se abstrae con la tercera repetición real."
+summary:
+  - "SOLID: responsabilidad única, abierto/cerrado, sustitución de Liskov, segregación de interfaces e inversión de dependencias."
+  - "DRY elimina duplicación de conocimiento, no de texto; KISS y YAGNI frenan la sobreingeniería."
+  - "Alta cohesión (lo que cambia junto, vive junto) y bajo acoplamiento (pocas dependencias, estables y explícitas)."
+  - "Composición sobre herencia: combinar comportamientos en lugar de jerarquías profundas."
+  - "Inversión de dependencias: el núcleo define interfaces; la infraestructura las implementa; un composition root conecta."
+  - "Pirámide de testing: muchos unitarios del núcleo, algunos de integración, pocos end-to-end."
+  - "DDD: lenguaje ubicuo, bounded contexts, agregados que protegen invariantes, entidades y value objects."
+---
+
+## ¿Qué problema resuelve?
+
+Un sistema de cobranzas cambia todo el tiempo: reglas de negociación por cliente, nuevos canales, nuevas normativas,
+nuevos proveedores de pagos y de modelos. Los principios de diseño existen para que **esos cambios sean baratos y
+localizados**: que agregar WhatsApp no obligue a tocar el cálculo de cuotas, y que cambiar el proveedor de LLM no
+toque las reglas de negocio. Esta lección presenta los principios clásicos **con criterio**: cuándo ayudan y cuándo
+se convierten en ceremonia.
+
+## SOLID
+
+| Principio                 | Idea                                                            | Ejemplo en cobranzas                                                                |
+| ------------------------- | --------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| **S**ingle Responsibility | Un módulo tiene una sola razón para cambiar                     | El cálculo de un plan de cuotas no sabe nada de cómo se envía un mensaje            |
+| **O**pen/Closed           | Abierto a extensión, cerrado a modificación                     | Agregar un canal (RCS) implementando `Notifier`, sin tocar el orquestador           |
+| **L**iskov Substitution   | Un subtipo puede reemplazar al tipo base sin romper el contrato | Un `Notifier` que "a veces no envía y no avisa" rompe a quien confía en el contrato |
+| **I**nterface Segregation | Interfaces chicas y específicas                                 | `DebtReader` y `DebtWriter` en lugar de un `DebtService` con 30 métodos             |
+| **D**ependency Inversion  | Los módulos de alto nivel dependen de abstracciones             | El caso de uso depende de `PaymentGateway`, no del SDK del proveedor                |
+
+```ts
+// Open/Closed + Dependency Inversion: el orquestador depende de una abstracción
+export interface Notifier {
+  readonly channel: Channel;
+  send(message: OutboundMessage, signal: AbortSignal): Promise<SendResult>;
+}
+
+export class ReminderDispatcher {
+  constructor(private readonly notifiers: ReadonlyMap<Channel, Notifier>) {}
+
+  async dispatch(reminder: Reminder, signal: AbortSignal): Promise<SendResult> {
+    const notifier = this.notifiers.get(reminder.channel);
+    if (!notifier) return { ok: false, error: "channel_not_configured" };
+    return notifier.send(reminder.message, signal); // agregar un canal = registrar otro Notifier
+  }
+}
+```
+
+**Con criterio:** SOLID aplicado mecánicamente produce interfaces con una sola implementación y capas de indirección
+sin beneficio. La pregunta útil es "¿esto va a cambiar por razones distintas?" y "¿necesito sustituir esta pieza?".
+
+## DRY, KISS y YAGNI
+
+- **DRY** (_Don't Repeat Yourself_): cada **conocimiento** del sistema tiene una única representación. La regla de
+  "monto mínimo de cuota" vive en un solo lugar. Ojo: DRY trata de **conocimiento**, no de texto. Dos funciones que
+  se parecen pero representan conceptos distintos (un recordatorio de pago y un aviso legal) no deben unificarse: van
+  a cambiar por motivos distintos. **La duplicación es más barata que la abstracción equivocada.**
+- **KISS** (_Keep It Simple_): la solución más simple que cumple los requisitos. Un `switch` claro puede ser mejor que
+  una jerarquía de estrategias.
+- **YAGNI** (_You Aren't Gonna Need It_): no construir para requisitos hipotéticos. "Por si algún día usamos otra
+  base" no justifica una capa genérica de persistencia.
+
+## Separación de responsabilidades, acoplamiento y cohesión
+
+**Cohesión** es cuánto tienen que ver entre sí las cosas que están juntas; **acoplamiento** es cuánto depende un
+módulo de otro.
+
+<MermaidDiagram
+  caption="El objetivo: módulos cohesivos con pocas dependencias, explícitas y hacia lo estable."
+  chart={`
+flowchart LR
+  subgraph BAD["Baja cohesión, alto acoplamiento"]
+    U["utils.ts<br/>fechas, montos, SMS, SQL"] <--> X["services.ts<br/>todo el negocio"]
+    X <--> Y["helpers.ts"]
+    Y <--> U
+  end
+  subgraph GOOD["Alta cohesión, bajo acoplamiento"]
+    P["payments<br/>pagos y conciliación"] --> D["debts<br/>API pública"]
+    N["notifications<br/>canales y plantillas"] --> D
+    A["agents<br/>conversación"] --> D
+    A --> N
+  end
+`}
+/>
+
+Formas de acoplamiento, de peor a más aceptable: compartir tablas de la base entre módulos, depender de detalles
+internos de otro módulo, llamar a su API pública, y comunicarse por eventos. Regla práctica: **lo que cambia junto,
+vive junto** (cohesión) y **las dependencias apuntan hacia lo más estable** (el dominio).
+
+## Composición sobre herencia
+
+La herencia acopla fuertemente al hijo con los detalles del padre. La composición combina comportamientos pequeños:
+
+```ts
+// ❌ Herencia: cada combinación es una subclase
+class SmsReminder extends Reminder {}
+class SmsReminderWithRetry extends SmsReminder {}
+class SmsReminderWithRetryAndAudit extends SmsReminderWithRetry {}
+
+// ✅ Composición: decoradores combinables sobre la misma interfaz
+const notifier: Notifier = withAudit(withRetry(new SmsNotifier(client), { maxAttempts: 3 }), auditLog);
+```
+
+Es el patrón **Decorator**, que la Pattern Library detalla. En TypeScript, con funciones y objetos, la composición es
+todavía más natural que en C# o Java.
+
+## Inversión e inyección de dependencias
+
+- **Inversión de dependencias** (el principio): el núcleo define las interfaces que necesita (puertos); la
+  infraestructura las implementa (adaptadores). El dominio no importa nada de la infraestructura.
+- **Inyección de dependencias** (la técnica): las dependencias se reciben desde afuera (constructor o parámetros) en
+  lugar de crearse adentro.
+- **Composition root**: el único lugar donde se crean las implementaciones concretas y se conectan.
+
+```ts
+// infrastructure/composition/collections.ts: el único lugar que conoce las implementaciones
+export function createCollectionsModule(deps: { db: Database; smsClient: SmsClient; clock: Clock }) {
+  const debts = new PostgresDebtRepository(deps.db);
+  const notifier = withRetry(new SmsNotifier(deps.smsClient), { maxAttempts: 3 });
+  return {
+    registerPromise: new RegisterPaymentPromise(debts, deps.clock),
+    dispatchReminder: new ReminderDispatcher(new Map([["sms", notifier]])),
+  };
+}
+```
+
+En C# y Java es habitual un contenedor de DI (Microsoft.Extensions.DependencyInjection, Spring). En TypeScript suele
+alcanzar con constructores y fábricas; existen contenedores (o NestJS) cuando la aplicación crece mucho.
+
+## Clean code, refactoring y la pirámide de testing
+
+El diseño se sostiene con **refactoring continuo**: cambios pequeños que mejoran la estructura sin cambiar el
+comportamiento, protegidos por tests. La **pirámide de testing** indica la proporción:
+
+<FlowDiagram
+  steps={[
+    {
+      title: "Muchos unitarios",
+      detail: "Dominio y casos de uso con fakes: milisegundos, sin infraestructura.",
+    },
+    {
+      title: "Algunos de integración",
+      detail: "Adaptadores contra la base real, colas, HTTP.",
+      tone: "runtime",
+    },
+    {
+      title: "Pocos end-to-end",
+      detail: "Flujos críticos completos en el navegador o contra la API.",
+      tone: "boundary",
+    },
+  ]}
+  caption="Un diseño con dependencias invertidas hace posible la base ancha de la pirámide."
+/>
+
+Un buen diseño se nota en los tests: si para probar una regla de negocio hace falta levantar la base y un servidor
+HTTP, la lógica está mal ubicada.
+
+## Domain-Driven Design en lo esencial
+
+**DDD** propone que la estructura del software refleje el **dominio** del negocio, trabajando con los expertos.
+
+| Concepto          | Qué es                                                                  | Ejemplo en cobranzas                                    |
+| ----------------- | ----------------------------------------------------------------------- | ------------------------------------------------------- |
+| Lenguaje ubicuo   | Los mismos términos en el código y en las conversaciones con el negocio | "Promesa de pago", "quita", "cartera", "mora"           |
+| Bounded context   | Un límite dentro del cual un modelo y su lenguaje son consistentes      | "Deuda" en Cobranzas no es lo mismo que en Contabilidad |
+| Entidad           | Objeto con identidad que persiste en el tiempo                          | `Debt`, `Customer`                                      |
+| Value object      | Objeto definido por sus valores, inmutable                              | `Money`, `DateRange`, `PhoneNumber`                     |
+| Agregado          | Grupo que se modifica como unidad y protege invariantes, con una raíz   | `Debt` con sus `PaymentPromise`                         |
+| Evento de dominio | Algo relevante que ocurrió                                              | `PaymentPromiseRegistered`, `PaymentReceived`           |
+
+```ts
+/** Agregado Debt: la regla 'una sola promesa activa' vive acá, no en el handler ni en el repositorio. */
+export class Debt {
+  private constructor(
+    readonly id: DebtId,
+    private balance: Money,
+    private promises: PaymentPromise[],
+  ) {}
+
+  registerPromise(promise: NewPromise, today: LocalDate): Result<DomainEvent, PromiseError> {
+    if (this.promises.some((p) => p.isActive())) return err({ kind: "active_promise_exists" });
+    if (promise.amount.greaterThan(this.balance)) return err({ kind: "amount_exceeds_balance" });
+    if (promise.date.isBefore(today)) return err({ kind: "date_in_past" });
+    this.promises.push(PaymentPromise.create(promise));
+    return ok({ type: "PaymentPromiseRegistered", debtId: this.id, ...promise });
+  }
+}
+```
+
+Regla clave de los agregados: **una transacción modifica un solo agregado**; la consistencia entre agregados
+(registrar un pago y actualizar las métricas de la campaña) se logra con **eventos**, de forma eventual.
+
+## Comparación con C# y Java
+
+| Concepto                | C#                                         | Java                             | TypeScript                                                |
+| ----------------------- | ------------------------------------------ | -------------------------------- | --------------------------------------------------------- |
+| Inyección               | Contenedor integrado de .NET               | Spring                           | Constructores/fábricas; NestJS si se quiere un contenedor |
+| Value objects           | `record struct`                            | `record`                         | Objetos inmutables, branded types                         |
+| Interfaces              | Nominales, `I` como prefijo por convención | Nominales                        | Estructurales, sin prefijo por convención                 |
+| Herencia vs composición | Herencia frecuente en frameworks           | Herencia frecuente en frameworks | Composición y funciones más idiomáticas                   |
+
+## Errores frecuentes
+
+- **Interfaces para todo** aunque haya una sola implementación y ningún puerto real.
+- **DRY sobre código parecido** que representa conceptos distintos.
+- **Abstracciones para requisitos hipotéticos** (YAGNI).
+- **Módulos `utils` y `helpers`** que acoplan todo con todo.
+- **Jerarquías de herencia profundas.**
+- **Agregados gigantes** que bloquean demasiado o transacciones que modifican varios agregados.
+- **Reglas de negocio en el handler o en el repositorio** en lugar del dominio.
+
+## Ejercicio interactivo
+
+<KnowledgeCheck
+  id="software-architecture.principles.q1"
+  question="Agregar el canal RCS obliga a modificar un `switch` en cinco archivos distintos. ¿Qué principio se está violando y cómo se corrige?"
+  options={[
+    {
+      text: "DRY: hay que copiar el switch a un solo archivo.",
+      explanation: "Centraliza, pero cada canal nuevo seguiría tocando ese código.",
+    },
+    {
+      text: "Open/Closed: una interfaz Notifier con una implementación por canal, registrada en el composition root.",
+      correct: true,
+      explanation: "Correcto. Un canal nuevo es una extensión, no una modificación del código existente.",
+    },
+    {
+      text: "Liskov: hay que usar herencia.",
+      explanation: "La herencia no resuelve la dispersión de la lógica.",
+    },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="software-architecture.principles.q2"
+  question="El texto de un recordatorio de pago y el de un aviso legal se parecen mucho. ¿Los unificás en una sola función?"
+  options={[
+    {
+      text: "Sí, DRY lo exige.",
+      explanation: "DRY trata del conocimiento: son conceptos distintos que cambian por razones distintas.",
+    },
+    {
+      text: "No necesariamente: si representan conceptos distintos van a cambiar por motivos distintos, y unificarlos los acoplaría.",
+      correct: true,
+      explanation: "Correcto. La duplicación es más barata que la abstracción equivocada.",
+    },
+    {
+      text: "Sí, con herencia.",
+      explanation: "Agrega acoplamiento sin resolver la diferencia de conceptos.",
+    },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="software-architecture.principles.q3"
+  question="¿Dónde debería vivir la regla 'una deuda tiene a lo sumo una promesa activa'?"
+  options={[
+    {
+      text: "En el handler HTTP.",
+      explanation: "Otros puntos de entrada (el agente, un worker) la saltearían.",
+    },
+    {
+      text: "En el agregado Debt (y como constraint en la base como red de seguridad).",
+      correct: true,
+      explanation: "Correcto. El agregado protege sus invariantes; la base lo garantiza ante concurrencia.",
+    },
+    { text: "En el prompt del agente.", explanation: "Las reglas de negocio no se delegan al modelo." },
+  ]}
+/>

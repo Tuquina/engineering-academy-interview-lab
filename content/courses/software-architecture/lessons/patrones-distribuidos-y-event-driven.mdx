@@ -1,0 +1,327 @@
+---
+id: software-architecture.distributed-patterns
+moduleId: software-architecture.architecture-patterns
+title: "Arquitectura event-driven y patrones distribuidos: eventos, event sourcing, CQRS, sagas, outbox, resiliencia y gateways"
+description: "Los patrones que aparecen cuando un sistema se distribuye: arquitectura orientada a eventos, event sourcing, CQRS, sagas para procesos de varios pasos, outbox, inbox y consumidores idempotentes, dead letter queues, circuit breaker, retry y bulkhead, rate limiting, cache aside y write through, API Gateway y Backend for Frontend."
+difficulty: advanced
+order: 2
+objectives:
+  - "Diseñar comunicación por eventos y distinguir eventos de comandos."
+  - "Explicar event sourcing y CQRS y cuándo justifican su complejidad."
+  - "Coordinar procesos de varios pasos con sagas (orquestadas o coreografiadas) y compensaciones."
+  - "Garantizar entrega y procesamiento confiables con outbox, inbox, consumidores idempotentes y DLQ."
+  - "Aplicar circuit breaker, retry, bulkhead y rate limiting para contener fallas."
+  - "Ubicar API Gateway y BFF en una arquitectura."
+prerequisites: ["software-architecture.architecture-styles", "postgresql.transactions"]
+estimatedMinutes: 55
+tags:
+  [
+    "event-driven",
+    "event sourcing",
+    "cqrs",
+    "saga",
+    "outbox",
+    "circuit breaker",
+    "bulkhead",
+    "api gateway",
+    "bff",
+  ]
+version: "1.0.0"
+comparesWith: ["csharp", "java"]
+references:
+  - title: "Martin Fowler — What do you mean by Event-Driven?"
+    url: "https://martinfowler.com/articles/201701-event-driven.html"
+  - title: "Martin Fowler — CQRS"
+    url: "https://martinfowler.com/bliki/CQRS.html"
+  - title: "microservices.io — Saga"
+    url: "https://microservices.io/patterns/data/saga.html"
+  - title: "microservices.io — Idempotent Consumer"
+    url: "https://microservices.io/patterns/communication-style/idempotent-consumer.html"
+  - title: "Microsoft — Cloud Design Patterns"
+    url: "https://learn.microsoft.com/en-us/azure/architecture/patterns/"
+  - title: "Sam Newman — Backends For Frontends"
+    url: "https://samnewman.io/patterns/architectural/bff/"
+interviewQuestions:
+  - question: "¿Qué es una saga y cuándo la usarías?"
+    keyPoints:
+      - "Una secuencia de transacciones locales en distintos servicios o módulos, coordinada por eventos o por un orquestador."
+      - "Si un paso falla, se ejecutan compensaciones de los pasos anteriores (no hay rollback global)."
+      - "Orquestada: un coordinador central decide; coreografiada: cada participante reacciona a eventos."
+      - "Ejemplo: acuerdo de pago que reserva el plan, genera el link de pago y notifica; si falla el link, se libera el plan."
+  - question: "¿Qué es CQRS y cuándo vale la pena?"
+    keyPoints:
+      - "Separar el modelo de escritura (comandos, invariantes) del de lectura (consultas optimizadas)."
+      - "Útil cuando lecturas y escrituras tienen necesidades muy distintas: dashboards pesados, vistas desnormalizadas."
+      - "Las vistas de lectura suelen actualizarse por eventos y ser eventualmente consistentes."
+      - "No es obligatorio con event sourcing ni al revés; agrega complejidad que hay que justificar."
+  - question: "¿Cómo evitás que la caída de un proveedor tire abajo todo el sistema?"
+    keyPoints:
+      - "Timeouts en cada llamada y reintentos con backoff y jitter sólo para errores transitorios."
+      - "Circuit breaker para dejar de llamar a un proveedor que falla y recuperarse de forma controlada."
+      - "Bulkhead: aislar recursos (pools, colas) por dependencia o por tenant para que una falla no consuma todo."
+      - "Degradación planificada y colas para absorber picos."
+summary:
+  - "Un evento informa algo que ocurrió (pasado, inmutable); un comando pide que algo ocurra."
+  - "Event-driven desacopla productores y consumidores a cambio de consistencia eventual y trazabilidad más difícil."
+  - "Event sourcing guarda la secuencia de eventos como fuente de verdad; el estado se deriva."
+  - "CQRS separa escritura y lectura; las vistas de lectura se actualizan de forma eventual."
+  - "Saga: transacciones locales con compensaciones, orquestadas o coreografiadas."
+  - "Outbox para publicar, inbox o consumidor idempotente para recibir, DLQ para lo que no se puede procesar."
+  - "Circuit breaker, retry con jitter y bulkhead contienen fallas; rate limiting protege recursos."
+  - "API Gateway centraliza preocupaciones de borde; BFF adapta la API a cada cliente."
+---
+
+## ¿Qué problema resuelve?
+
+Una plataforma de cobranzas reacciona a eventos todo el tiempo: llega un pago, vence una promesa, el deudor responde,
+un proveedor de mensajería confirma la entrega. Varios módulos tienen que enterarse (detener recordatorios, actualizar
+el agente, recalcular métricas, notificar al cliente) sin que el que registra el pago los conozca a todos. Y cuando
+algo falla (un proveedor caído, un consumidor con un bug), el resto del sistema tiene que seguir funcionando. Los
+patrones de esta lección resuelven esos problemas.
+
+## Arquitectura orientada a eventos
+
+| Concepto    | Qué es                                     | Ejemplo           | Quién decide                       |
+| ----------- | ------------------------------------------ | ----------------- | ---------------------------------- |
+| **Evento**  | Algo que **ocurrió**, en pasado, inmutable | `PaymentReceived` | Los consumidores deciden qué hacer |
+| **Comando** | Un pedido de que algo **ocurra**           | `SendReminder`    | El emisor espera un efecto         |
+
+<MermaidDiagram
+  caption="El módulo de pagos publica un hecho; cada consumidor reacciona sin que pagos los conozca."
+  chart={`
+flowchart LR
+  PAY["Pagos<br/>registra el pago"] -->|"PaymentReceived"| BUS["Bus o broker de eventos"]
+  BUS --> REM["Recordatorios<br/>cancela los pendientes"]
+  BUS --> AG["Agentes<br/>actualiza el estado del deudor"]
+  BUS --> AN["Analítica<br/>recupero por campaña"]
+  BUS --> NT["Notificaciones<br/>confirma al deudor"]
+`}
+/>
+
+Ventajas: **bajo acoplamiento** (pagos no conoce a sus consumidores), extensibilidad (un consumidor nuevo no toca al
+productor), absorción de picos (la cola amortigua). Costos: **consistencia eventual** (durante un instante, analítica
+no refleja el pago), flujos más difíciles de seguir (hacen falta trazas y correlation IDs) y la necesidad de diseñar
+para duplicados y desorden.
+
+## Event sourcing
+
+En lugar de guardar el **estado actual**, se guarda la **secuencia de eventos**, y el estado se **deriva** de ellos:
+
+```text
+DebtCreated(amount: 150.000)
+PaymentPromiseRegistered(date: 2026-11-27, amount: 40.000)
+PaymentReceived(amount: 40.000)
+DiscountApplied(percent: 10)
+→ estado actual: saldo 99.000, sin promesa vigente
+```
+
+| Ventajas                                          | Costos                                                           |
+| ------------------------------------------------- | ---------------------------------------------------------------- |
+| Auditoría completa por diseño (ideal en finanzas) | Modelo mental y herramientas más complejos                       |
+| Reconstruir el estado a cualquier fecha           | Evolucionar el esquema de eventos viejos (versionado, upcasting) |
+| Nuevas proyecciones a partir de la historia       | Consultas requieren proyecciones (CQRS casi siempre)             |
+
+Es potente para dominios donde **la historia es el negocio** (cuentas, deudas, acuerdos), pero es una decisión costosa
+de revertir. Una alternativa más liviana: estado actual en tablas **más** una tabla de eventos de auditoría.
+
+## CQRS
+
+**CQRS** (_Command Query Responsibility Segregation_) separa el **modelo de escritura** (que protege invariantes) del
+**modelo de lectura** (optimizado para consultas):
+
+<FlowDiagram
+  steps={[
+    { title: "Comando", detail: "RegisterPaymentPromise llega al modelo de escritura." },
+    {
+      title: "Agregado",
+      detail: "Valida invariantes y persiste; emite PaymentPromiseRegistered.",
+      tone: "runtime",
+    },
+    {
+      title: "Proyección",
+      detail: "Un consumidor actualiza la vista de lectura (tabla desnormalizada del dashboard).",
+    },
+    {
+      title: "Consulta",
+      detail: "El dashboard lee la vista: rápida, eventualmente consistente.",
+      tone: "boundary",
+    },
+  ]}
+  caption="Escritura con reglas estrictas; lectura con vistas optimizadas."
+/>
+
+Vale la pena cuando lecturas y escrituras tienen necesidades **muy distintas** (dashboards sobre millones de
+conversaciones frente a escrituras con reglas complejas). En muchos sistemas, una versión liviana alcanza: consultas de
+lectura directas con SQL optimizado o vistas materializadas, sin un segundo modelo completo. La Pattern Library tiene
+el patrón [CQRS](/patterns/cqrs).
+
+## Sagas: procesos de varios pasos
+
+Cuando un proceso abarca varios servicios o módulos con sus propias transacciones, no hay rollback global. Una
+**saga** es una secuencia de transacciones locales con **compensaciones**:
+
+<MermaidDiagram
+  caption="Saga orquestada para formalizar un acuerdo de pago, con compensaciones si un paso falla."
+  chart={`
+sequenceDiagram
+  participant O as Orquestador
+  participant P as Planes de pago
+  participant L as Links de pago
+  participant N as Notificaciones
+  O->>P: reservar plan de 6 cuotas
+  P-->>O: plan reservado
+  O->>L: generar link de la primera cuota
+  L-->>O: error del proveedor
+  O->>P: compensar: liberar plan
+  P-->>O: plan liberado
+  O->>N: avisar al deudor que se reintentará
+`}
+/>
+
+| Estilo            | Cómo                                                | Cuándo                                         |
+| ----------------- | --------------------------------------------------- | ---------------------------------------------- |
+| **Orquestada**    | Un coordinador indica a cada participante qué hacer | Procesos con muchos pasos y lógica de decisión |
+| **Coreografiada** | Cada participante reacciona a eventos de los demás  | Pocos pasos, alta independencia                |
+
+Las compensaciones son **acciones de negocio** (liberar, anular, reembolsar), no un "deshacer" técnico. Ver
+[Saga](/patterns/saga) en la Pattern Library.
+
+## Entrega confiable: outbox, inbox y DLQ
+
+| Patrón                          | Problema                                                | Solución                                                                            |
+| ------------------------------- | ------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| **Transactional Outbox**        | Guardar y publicar son dos escrituras: una puede fallar | Guardar el evento en la misma transacción y publicarlo con un relay                 |
+| **Inbox / Idempotent Consumer** | El mismo mensaje llega más de una vez                   | Registrar los IDs procesados (con constraint) en la misma transacción que el efecto |
+| **Dead Letter Queue**           | Un mensaje falla siempre (bug, datos inválidos)         | Tras N intentos, moverlo a una cola aparte para revisión y reprocesamiento          |
+
+```ts
+/** Consumidor idempotente: el efecto y el registro del mensaje van en la misma transacción. */
+export async function handlePaymentReceived(message: PaymentReceivedMessage): Promise<void> {
+  await inTransaction(pool, async (client) => {
+    const fresh = await client.query(
+      "INSERT INTO processed_messages (consumer, message_id) VALUES ('reminders', $1) ON CONFLICT DO NOTHING",
+      [message.id],
+    );
+    if (fresh.rowCount === 0) return; // ya procesado: ignorar el duplicado
+    await client.query(
+      "UPDATE reminders SET status = 'cancelled' WHERE debt_id = $1 AND status = 'scheduled'",
+      [message.debtId],
+    );
+  });
+}
+```
+
+Un mensaje en la DLQ no es "basura": es un incidente a investigar. Hace falta alerta, una forma de inspeccionarlo y un
+mecanismo para reprocesarlo una vez corregido el problema.
+
+## Resiliencia: circuit breaker, retry y bulkhead
+
+| Patrón                         | Qué hace                                                                                                      |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------- |
+| **Timeout**                    | Ninguna llamada espera indefinidamente.                                                                       |
+| **Retry con backoff y jitter** | Reintenta errores transitorios sin sincronizar a los clientes.                                                |
+| **Circuit breaker**            | Tras muchas fallas, deja de llamar (abierto); prueba de a poco (semiabierto); vuelve a cerrar si se recupera. |
+| **Bulkhead**                   | Aísla recursos (pools, colas, concurrencia) por dependencia o tenant: una falla no consume todo.              |
+| **Fallback**                   | Respuesta degradada planificada: valor en caché, mensaje seguro, escalar a humano.                            |
+| **Rate limiting**              | Protege recursos propios y respeta los límites de terceros.                                                   |
+
+<MermaidDiagram
+  caption="Estados de un circuit breaker."
+  chart={`
+stateDiagram-v2
+  [*] --> Cerrado
+  Cerrado --> Abierto: fallas superan el umbral
+  Abierto --> SemiAbierto: pasa el tiempo de espera
+  SemiAbierto --> Cerrado: las llamadas de prueba funcionan
+  SemiAbierto --> Abierto: una llamada de prueba falla
+`}
+/>
+
+Un ejemplo de bulkhead en cobranzas: cada tenant tiene un límite de conversaciones concurrentes con el LLM, para que
+la campaña masiva de un cliente no deje sin capacidad a los demás (el problema del _noisy neighbor_). Los simuladores
+de [Circuit breaker](/system-design/simulators/circuit-breaker) y
+[Retry y backoff](/system-design/simulators/retry-backoff) muestran estos comportamientos.
+
+## Caché: cache aside y write through
+
+- **Cache aside:** la aplicación lee de la caché y, si falta, de la base, y la guarda (curso de Redis).
+- **Write through:** cada escritura actualiza la base y la caché en el mismo paso; las lecturas siempre encuentran el
+  dato, a costa de escrituras más lentas y caché llena de datos que quizá nadie lee.
+- **Write behind:** se escribe en la caché y se persiste después de forma asíncrona; rápido pero con riesgo de pérdida.
+
+## API Gateway y Backend for Frontend
+
+- **API Gateway:** un punto de entrada que centraliza preocupaciones de borde (autenticación, rate limiting, ruteo,
+  TLS, logging) delante de uno o varios servicios.
+- **Backend for Frontend (BFF):** un backend específico para cada tipo de cliente (panel web, app móvil, integración de
+  clientes) que adapta y agrega datos a lo que ese cliente necesita. En una aplicación Next.js, los Server Components y
+  Route Handlers suelen cumplir el rol de BFF del panel web.
+
+## Comparación con C# y Java
+
+| Patrón            | .NET                                     | Java                                 | Node.js / TypeScript                             |
+| ----------------- | ---------------------------------------- | ------------------------------------ | ------------------------------------------------ |
+| Mensajería, sagas | MassTransit, NServiceBus (sagas, outbox) | Axon, Spring Cloud Stream, Eventuate | BullMQ, colas gestionadas, implementación propia |
+| Resiliencia       | Polly                                    | Resilience4j                         | cockatiel, opossum, implementación propia        |
+| Event sourcing    | Marten, EventStoreDB                     | Axon Framework, EventStoreDB         | Implementación sobre PostgreSQL, EventStoreDB    |
+| API Gateway       | YARP, Azure API Management               | Spring Cloud Gateway                 | Gateways gestionados, Next.js como BFF           |
+
+## Errores frecuentes
+
+- **Eventos que son comandos encubiertos** ("NotificationShouldBeSent").
+- **Event sourcing o CQRS completos** sin un problema que los justifique.
+- **Sagas sin compensaciones** o compensaciones que no son idempotentes.
+- **Publicar eventos fuera de la transacción** y consumidores no idempotentes.
+- **DLQ sin alertas** ni proceso de reprocesamiento.
+- **Reintentos sin circuit breaker** que agravan la caída de un proveedor.
+- **Recursos compartidos sin bulkhead**: un tenant o una dependencia lenta consume todo.
+
+## Ejercicio interactivo
+
+<KnowledgeCheck
+  id="software-architecture.distributed-patterns.q1"
+  question="Un consumidor recibe dos veces el evento PaymentReceived del mismo pago. ¿Qué patrón evita cancelar recordatorios o notificar dos veces?"
+  options={[
+    { text: "Circuit breaker", explanation: "Contiene fallas de dependencias; no deduplica mensajes." },
+    {
+      text: "Consumidor idempotente (inbox): registrar el ID del mensaje con una constraint en la misma transacción que el efecto.",
+      correct: true,
+      explanation: "Correcto. La entrega es al menos una vez; el procesamiento debe ser idempotente.",
+    },
+    { text: "CQRS", explanation: "Separa lectura y escritura; no resuelve duplicados." },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="software-architecture.distributed-patterns.q2"
+  question="Formalizar un acuerdo reserva un plan, genera un link de pago y notifica. Si falla el link, ¿qué hace una saga?"
+  options={[
+    {
+      text: "Un rollback de la transacción global.",
+      explanation: "No hay transacción global entre módulos o servicios.",
+    },
+    {
+      text: "Ejecuta compensaciones de los pasos ya hechos, como liberar el plan reservado.",
+      correct: true,
+      explanation: "Correcto. Las compensaciones son acciones de negocio que deshacen el efecto.",
+    },
+    {
+      text: "Ignora el error y notifica igual.",
+      explanation: "Dejaría al deudor con un acuerdo sin forma de pago.",
+    },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="software-architecture.distributed-patterns.q3"
+  question="La campaña masiva de un tenant consume toda la concurrencia disponible hacia el LLM y los demás tenants quedan sin respuesta. ¿Qué patrón falta?"
+  options={[
+    { text: "Event sourcing", explanation: "No limita el uso de recursos." },
+    {
+      text: "Bulkhead: límites de concurrencia o colas por tenant para aislar el consumo.",
+      correct: true,
+      explanation: "Correcto. Es el problema del noisy neighbor.",
+    },
+    { text: "Write through", explanation: "Es un patrón de caché." },
+  ]}
+/>

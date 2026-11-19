@@ -1,0 +1,233 @@
+---
+id: system-design.scalability
+moduleId: system-design.scalability
+title: "Escalabilidad y disponibilidad: balanceo, servicios sin estado, réplicas, particiones, capacidad y SLOs"
+description: "Cómo crece un sistema y cómo se mantiene disponible: escalado vertical y horizontal, load balancers y reverse proxies, servicios sin estado, replicación, sharding y particionado de datos, planificación de capacidad, latencia frente a throughput y cómo definir disponibilidad con SLIs, SLOs y SLAs."
+difficulty: intermediate
+order: 1
+objectives:
+  - "Comparar escalado vertical y horizontal y diseñar servicios sin estado."
+  - "Explicar el rol de load balancers y reverse proxies y sus algoritmos."
+  - "Elegir entre réplicas de lectura, particionado y sharding según el cuello de botella."
+  - "Planificar capacidad a partir de estimaciones y mediciones."
+  - "Distinguir latencia de throughput y razonar con percentiles."
+  - "Definir SLIs, SLOs y SLAs y usar el presupuesto de error."
+prerequisites: ["system-design.introduction", "nodejs.performance-scaling"]
+estimatedMinutes: 45
+tags: ["escalabilidad", "load balancing", "stateless", "replicación", "sharding", "capacity planning", "slo"]
+version: "1.0.0"
+comparesWith: []
+references:
+  - title: "Google SRE Book — Service Level Objectives"
+    url: "https://sre.google/sre-book/service-level-objectives/"
+  - title: "Google SRE Book — Load Balancing in the Datacenter"
+    url: "https://sre.google/sre-book/load-balancing-datacenter/"
+  - title: "Martin Kleppmann — Designing Data-Intensive Applications (resumen del libro)"
+    url: "https://dataintensive.net/"
+  - title: "AWS — Elastic Load Balancing features"
+    url: "https://aws.amazon.com/elasticloadbalancing/features/"
+  - title: "The Twelve-Factor App"
+    url: "https://12factor.net/"
+interviewQuestions:
+  - question: "¿Cómo escalarías una API que no da abasto?"
+    keyPoints:
+      - "Medir primero dónde está el cuello de botella: CPU de la API, base, dependencias externas."
+      - "Si es la API: servicios sin estado detrás de un balanceador y escalado horizontal con autoscaling."
+      - "Si es la base en lecturas: caché y réplicas de lectura; en escrituras: optimizar, particionar o shardear."
+      - "Colas para absorber picos de trabajo asíncrono y rate limiting para proteger dependencias."
+  - question: "¿Qué es un SLO y cómo se usa?"
+    keyPoints:
+      - "Un objetivo sobre un indicador medido (SLI), por ejemplo 99,9 % de webhooks procesados en menos de 5 s por mes."
+      - "El presupuesto de error es lo que queda por debajo del 100 %: guía cuánto riesgo tomar en despliegues."
+      - "El SLA es un compromiso contractual, normalmente más laxo que el SLO interno."
+      - "Se alerta cuando el presupuesto se consume demasiado rápido."
+  - question: "¿Cuándo shardearías una base de datos?"
+    keyPoints:
+      - "Cuando el volumen de escrituras o datos supera lo que un nodo puede manejar, después de agotar optimizaciones más simples."
+      - "La clave de sharding (por ejemplo tenant) define qué consultas son locales y cuáles cruzan shards."
+      - "Costos: consultas y transacciones entre shards, rebalanceo, hot spots con tenants grandes."
+summary:
+  - "Escalado vertical: máquina más grande (simple, con techo). Horizontal: más instancias (requiere servicios sin estado)."
+  - "Un servicio sin estado guarda sesiones, archivos y trabajos en almacenes compartidos."
+  - "Los balanceadores reparten carga (round robin, least connections) y sacan instancias que fallan los health checks."
+  - "Lecturas: caché y réplicas. Escrituras: optimizar, particionar y, como último recurso, shardear."
+  - "Latencia es cuánto tarda una request; throughput, cuántas se atienden por segundo. Se mide en percentiles."
+  - "SLI = indicador medido; SLO = objetivo interno; SLA = compromiso contractual; presupuesto de error = 100 % − SLO."
+---
+
+## ¿Qué problema resuelve?
+
+Fin de mes: los deudores cobran, responden los mensajes y pagan. El tráfico se multiplica por diez durante tres días.
+Un sistema escalable atiende ese pico sin degradarse; uno disponible sigue funcionando aunque se caiga una instancia o
+una zona. Esta lección cubre las herramientas para ambas cosas y cómo **medir** si se está cumpliendo.
+
+## Escalado vertical y horizontal
+
+| Estrategia     | Cómo                                    | Ventajas                          | Límites                                           |
+| -------------- | --------------------------------------- | --------------------------------- | ------------------------------------------------- |
+| **Vertical**   | Una máquina más grande                  | Simple; sin cambios de diseño     | Techo físico y de costo; un único punto de falla  |
+| **Horizontal** | Más instancias detrás de un balanceador | Sin techo práctico; tolera fallas | Requiere servicios sin estado y estado compartido |
+
+Para escalar horizontalmente, los servicios deben ser **sin estado**: cualquier instancia puede atender cualquier
+request. Las sesiones van a Redis o a la base, los archivos a almacenamiento de objetos, los trabajos a colas (lección
+de performance del curso de Node.js).
+
+## Load balancers y reverse proxies
+
+<MermaidDiagram
+  caption="El balanceador reparte la carga entre instancias sin estado y saca de rotación a las que fallan."
+  chart={`
+flowchart LR
+  U["Clientes"] --> LB["Load balancer<br/>TLS, health checks"]
+  LB --> A1["API 1"]
+  LB --> A2["API 2"]
+  LB --> A3["API 3 (falla health check)"]
+  A1 --> PG["PostgreSQL primario"]
+  A2 --> PG
+  A1 --> RR["Réplica de lectura"]
+  A2 --> RR
+  A1 --> R["Redis"]
+  A2 --> R
+`}
+/>
+
+| Algoritmo         | Cómo reparte                                | Cuándo                                         |
+| ----------------- | ------------------------------------------- | ---------------------------------------------- |
+| Round robin       | En turnos                                   | Requests homogéneas                            |
+| Least connections | A la instancia con menos conexiones activas | Requests de duración variable (llamadas a LLM) |
+| Hash (por clave)  | Misma clave, misma instancia                | Afinidad (cachés locales, WebSockets)          |
+
+El simulador [Load balancing](/system-design/simulators/load-balancing) muestra cómo least connections reparte mejor
+cuando una réplica está degradada. Un **reverse proxy** (Nginx, Envoy, el balanceador de la nube) además termina TLS,
+comprime, aplica límites y enruta por ruta o dominio.
+
+## Datos: réplicas, particionado y sharding
+
+Escalar la API es fácil; el cuello de botella suele terminar en **los datos**.
+
+| Problema                       | Solución, de la más simple a la más compleja                    |
+| ------------------------------ | --------------------------------------------------------------- |
+| Muchas lecturas repetidas      | Caché (Redis, CDN para contenido público)                       |
+| Muchas lecturas variadas       | Réplicas de lectura (con lag de replicación)                    |
+| Tablas enormes                 | Particionado dentro de la misma base (por tiempo, por tenant)   |
+| Escrituras que superan un nodo | Sharding: distribuir los datos entre varias bases por una clave |
+
+<FlowDiagram
+  steps={[
+    { title: "Optimizar", detail: "Índices, consultas, N+1, pooling: suele resolver más de lo que se cree." },
+    { title: "Caché y réplicas", detail: "Descargan lecturas; aceptan datos levemente atrasados." },
+    { title: "Particionar", detail: "Tablas grandes divididas en la misma base.", tone: "runtime" },
+    {
+      title: "Shardear",
+      detail: "Varias bases; la clave define qué consultas son locales.",
+      tone: "boundary",
+    },
+  ]}
+  caption="Cada paso agrega complejidad: se avanza cuando las mediciones lo justifican."
+/>
+
+**Sharding por tenant** es natural en plataformas multi-tenant: casi todas las consultas son de un tenant. Sus
+costos: consultas globales (reportes de toda la plataforma) que cruzan shards, **hot spots** cuando un tenant es mucho
+más grande que el resto y el **rebalanceo** al agregar shards.
+
+## Capacidad, latencia y throughput
+
+- **Latencia:** cuánto tarda una request. Se mide en **percentiles** (p50, p95, p99): el promedio esconde la cola.
+- **Throughput:** cuántas requests se atienden por unidad de tiempo.
+- Relación útil (**ley de Little**): concurrencia = throughput × latencia. Si la API atiende 200 requests por segundo y
+  cada una tarda 2 s (porque espera al LLM), hay ~400 requests en vuelo: eso define pools, conexiones y memoria.
+
+**Planificar capacidad** es combinar estimaciones con mediciones: cuánto atiende una instancia (load test), cuál es el
+pico esperado, qué margen se deja (por ejemplo 2× el pico) y qué dependencias externas limitan (cuotas del proveedor de
+LLM, límites de mensajería, conexiones de la base).
+
+## Disponibilidad: SLI, SLO y SLA
+
+| Término | Qué es                                   | Ejemplo                                                |
+| ------- | ---------------------------------------- | ------------------------------------------------------ |
+| **SLI** | Indicador medido                         | % de webhooks de pago procesados en menos de 5 s       |
+| **SLO** | Objetivo interno sobre el SLI            | 99,9 % por mes                                         |
+| **SLA** | Compromiso contractual con consecuencias | 99,5 % mensual con créditos al cliente si no se cumple |
+
+El **presupuesto de error** es lo que queda: con un SLO de 99,9 % mensual, se "pueden" fallar 0,1 % de los eventos
+(unos 43 minutos de indisponibilidad total al mes). Si el presupuesto se agota, se prioriza estabilidad sobre
+funcionalidades nuevas; si sobra, se pueden tomar más riesgos en los despliegues.
+
+| Disponibilidad | Indisponibilidad aproximada por mes |
+| -------------- | ----------------------------------- |
+| 99 %           | ~7,3 horas                          |
+| 99,9 %         | ~43 minutos                         |
+| 99,99 %        | ~4,4 minutos                        |
+
+Cada "nueve" adicional cuesta mucho más (redundancia entre zonas o regiones, despliegues más cuidadosos, guardias).
+Se elige según el impacto real: recibir webhooks de pagos merece más nueves que el panel de reportes.
+
+La disponibilidad se construye con **redundancia** (varias instancias y zonas), **eliminación de puntos únicos de
+falla**, **health checks y failover** automáticos, y **degradación** planificada (servir lo esencial cuando una
+dependencia falla).
+
+## Errores frecuentes
+
+- **Escalar sin medir** el cuello de botella.
+- **Estado en memoria** que impide escalar horizontalmente.
+- **Leer de réplicas justo después de escribir** (lag de replicación).
+- **Shardear antes de agotar** optimizaciones, caché y particionado.
+- **Promedios** en lugar de percentiles.
+- **SLOs sin medición** o iguales para todo el sistema.
+- **Olvidar los límites de terceros** en la planificación de capacidad.
+
+## Ejercicio interactivo
+
+<KnowledgeCheck
+  id="system-design.scalability.q1"
+  question="La API tiene CPU baja pero la latencia subió; las trazas muestran el tiempo en consultas de lectura a la base, que está al 90 % de CPU. ¿Qué hacés primero?"
+  options={[
+    {
+      text: "Agregar más instancias de la API.",
+      explanation: "La API no es el cuello de botella: más instancias cargarían más a la base.",
+    },
+    {
+      text: "Optimizar las consultas e índices y, si sigue, agregar caché o réplicas de lectura.",
+      correct: true,
+      explanation: "Correcto. Se ataca el cuello de botella real, de lo más simple a lo más complejo.",
+    },
+    {
+      text: "Shardear la base por tenant.",
+      explanation: "Es el paso más costoso; primero van optimización, caché y réplicas.",
+    },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="system-design.scalability.q2"
+  question="Las requests de la API duran entre 100 ms y 20 s (algunas esperan al LLM). ¿Qué algoritmo de balanceo conviene?"
+  options={[
+    { text: "Round robin", explanation: "Puede acumular requests largas en una instancia." },
+    {
+      text: "Least connections",
+      correct: true,
+      explanation: "Correcto. Envía a la instancia con menos trabajo en vuelo.",
+    },
+    { text: "Hash por IP", explanation: "Da afinidad, no reparte por carga." },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="system-design.scalability.q3"
+  question="El SLO de procesamiento de webhooks es 99,9 % mensual y a mitad de mes ya se consumió el 90 % del presupuesto de error. ¿Qué implica?"
+  options={[
+    {
+      text: "Nada hasta fin de mes.",
+      explanation: "El presupuesto existe justamente para guiar decisiones durante el período.",
+    },
+    {
+      text: "Priorizar estabilidad: frenar despliegues riesgosos e investigar las causas de las fallas.",
+      correct: true,
+      explanation: "Correcto. El presupuesto de error equilibra velocidad de cambio y confiabilidad.",
+    },
+    {
+      text: "Bajar el SLO a 99 %.",
+      explanation: "Cambiar el objetivo para cumplirlo no mejora el servicio.",
+    },
+  ]}
+/>

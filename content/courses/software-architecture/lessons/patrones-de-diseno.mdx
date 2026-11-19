@@ -1,0 +1,327 @@
+---
+id: software-architecture.design-patterns
+moduleId: software-architecture.design-patterns
+title: "Patrones de diseño en TypeScript: creacionales, estructurales y de comportamiento"
+description: "Un recorrido por los patrones de diseño clásicos con ejemplos en TypeScript y del dominio de cobranzas: Factory, Builder, Adapter, Decorator, Facade, Proxy, Composite, Strategy, Observer, Mediator, Command, State, Template Method, Chain of Responsibility, Repository, Specification y Unit of Work. Para cada uno: qué problema resuelve y cuándo no usarlo."
+difficulty: intermediate
+order: 1
+objectives:
+  - "Reconocer los patrones creacionales, estructurales y de comportamiento y el problema que resuelve cada uno."
+  - "Implementarlos de forma idiomática en TypeScript, muchas veces con funciones en lugar de clases."
+  - "Elegir el patrón adecuado para problemas típicos de un backend de cobranzas."
+  - "Evitar aplicar patrones donde una solución más simple alcanza."
+prerequisites: ["software-architecture.principles"]
+estimatedMinutes: 50
+tags: ["patrones de diseño", "gof", "strategy", "factory", "decorator", "observer", "state", "repository"]
+version: "1.0.0"
+comparesWith: ["csharp", "java"]
+references:
+  - title: "Refactoring.Guru — Design Patterns"
+    url: "https://refactoring.guru/design-patterns"
+  - title: "Martin Fowler — Catalog of Patterns of Enterprise Application Architecture"
+    url: "https://martinfowler.com/eaaCatalog/"
+  - title: "Martin Fowler — Specification (con Eric Evans)"
+    url: "https://martinfowler.com/apsupp/spec.pdf"
+  - title: "Patterns.dev — Design patterns for JavaScript"
+    url: "https://www.patterns.dev/"
+interviewQuestions:
+  - question: "¿Qué patrón usarías para que cada tenant tenga su propia política de negociación?"
+    keyPoints:
+      - "Strategy: una interfaz NegotiationPolicy con una implementación por tipo de política."
+      - "Se selecciona según la configuración del tenant, sin condicionales dispersos."
+      - "En TypeScript puede ser simplemente una función o un objeto con la misma forma."
+      - "Una Factory o un registro elige la estrategia a partir de la configuración."
+  - question: "¿Cuál es la diferencia entre Adapter, Decorator, Facade y Proxy?"
+    keyPoints:
+      - "Adapter convierte una interfaz existente en la que el cliente espera (el SDK de un proveedor a tu puerto)."
+      - "Decorator agrega comportamiento manteniendo la misma interfaz (reintentos, auditoría, caché)."
+      - "Facade ofrece una interfaz simple sobre un subsistema complejo."
+      - "Proxy controla el acceso al objeto real con la misma interfaz (carga perezosa, permisos, caché)."
+  - question: "¿Cuándo un patrón de diseño es una mala idea?"
+    keyPoints:
+      - "Cuando el problema que resuelve no existe todavía (YAGNI)."
+      - "Cuando agrega indirección sin flexibilidad real: una sola implementación que nunca cambia."
+      - "Cuando el lenguaje ya resuelve el problema (funciones de primera clase reemplazan a muchos patrones de comportamiento)."
+summary:
+  - "Creacionales (Factory, Builder): encapsulan cómo se crean objetos válidos."
+  - "Estructurales (Adapter, Decorator, Facade, Proxy, Composite): cómo se combinan objetos e interfaces."
+  - "De comportamiento (Strategy, Observer, Mediator, Command, State, Template Method, Chain): cómo colaboran y varían."
+  - "De acceso a datos (Repository, Specification, Unit of Work): separan el dominio de la persistencia."
+  - "En TypeScript, muchas variantes se resuelven con funciones y objetos sin clases."
+  - "Un patrón se aplica cuando el problema existe; si no, es complejidad gratuita."
+---
+
+## ¿Qué problema resuelve?
+
+Los patrones de diseño son **soluciones con nombre** a problemas recurrentes. Su valor principal es el **vocabulario**:
+decir "un Decorator de reintentos sobre el Adapter del proveedor de SMS" comunica en una frase un diseño completo.
+En entrevistas se preguntan para evaluar si sabés **qué problema resuelve cada uno** y, sobre todo, **cuándo no
+usarlo**.
+
+La **Pattern Library** (`/patterns`) tiene versiones detalladas de varios (Strategy, Adapter, Decorator, Repository,
+State, Circuit Breaker, Outbox, Saga, CQRS, Hexagonal), con diagramas interactivos y ejercicios. Esta lección es el
+mapa completo.
+
+<MermaidDiagram
+  caption="Las familias de patrones y los ejemplos de esta lección."
+  chart={`
+flowchart TB
+  P["Patrones"] --> C["Creacionales<br/>Factory, Builder"]
+  P --> E["Estructurales<br/>Adapter, Decorator, Facade, Proxy, Composite"]
+  P --> B["De comportamiento<br/>Strategy, Observer, Mediator, Command,<br/>State, Template Method, Chain of Responsibility"]
+  P --> D["Acceso a datos<br/>Repository, Specification, Unit of Work"]
+`}
+/>
+
+## Creacionales
+
+### Factory
+
+Encapsula **qué** implementación crear según datos de entrada:
+
+```ts
+export function createNotifier(channel: Channel, deps: NotifierDeps): Notifier {
+  switch (channel) {
+    case "sms":
+      return new SmsNotifier(deps.smsClient);
+    case "whatsapp":
+      return new WhatsAppNotifier(deps.whatsAppClient, deps.templates);
+    case "email":
+      return new EmailNotifier(deps.emailClient);
+  }
+}
+```
+
+_Abstract Factory_ crea **familias** de objetos relacionados (todos los adaptadores de un proveedor). En TypeScript,
+una función fábrica suele alcanzar.
+
+### Builder
+
+Construye objetos complejos paso a paso, validando al final. Útil para configuraciones con muchos parámetros
+opcionales o para datos de prueba:
+
+```ts
+const config = AgentConfigBuilder.forTenant("tnt_1")
+  .withModel("claude-opus-5-5")
+  .withTools(["get_debt_summary", "register_payment_promise"])
+  .withPolicy({ maxDiscountPercent: 15 })
+  .build(); // valida con el esquema y devuelve un objeto inmutable
+```
+
+En TypeScript, un objeto literal con un esquema (Zod) muchas veces reemplaza al Builder; donde más brilla es en los
+**builders de datos de test**.
+
+## Estructurales
+
+| Patrón        | Qué hace                                                | Ejemplo                                                     |
+| ------------- | ------------------------------------------------------- | ----------------------------------------------------------- |
+| **Adapter**   | Convierte una interfaz en otra                          | El SDK del proveedor de pagos adaptado a `PaymentGateway`   |
+| **Decorator** | Agrega comportamiento con la misma interfaz             | `withRetry`, `withAudit`, `withCache` sobre un `Notifier`   |
+| **Facade**    | Interfaz simple sobre un subsistema complejo            | `CollectionsFacade.startCampaign()` coordina varios módulos |
+| **Proxy**     | Controla el acceso al objeto real                       | Carga perezosa, control de permisos, caché transparente     |
+| **Composite** | Trata grupos y elementos individuales de la misma forma | Reglas de elegibilidad compuestas por reglas simples        |
+
+```ts
+// Adapter: el dominio habla con su puerto; el adaptador traduce al proveedor
+export class AcmePaymentsAdapter implements PaymentGateway {
+  constructor(private readonly client: AcmeClient) {}
+
+  async createPaymentLink(request: PaymentLinkRequest): Promise<PaymentLink> {
+    const response = await this.client.checkout.sessions.create({
+      amount: request.amount.cents,
+      currency: request.amount.currency.toLowerCase(),
+      metadata: { debt_id: request.debtId },
+    });
+    return { url: response.url, expiresAt: new Date(response.expires_at * 1000) };
+  }
+}
+
+// Decorator: misma interfaz, comportamiento agregado
+export function withRetry(notifier: Notifier, options: RetryOptions): Notifier {
+  return {
+    channel: notifier.channel,
+    send: (message, signal) => retryTransient(() => notifier.send(message, signal), { ...options, signal }),
+  };
+}
+```
+
+## De comportamiento
+
+### Strategy
+
+Encapsula **algoritmos intercambiables** detrás de una misma interfaz. El ejemplo típico: políticas de negociación por
+tenant.
+
+```ts
+type NegotiationPolicy = (debt: Debt, profile: DebtorProfile) => PaymentOption[];
+
+const POLICIES: Record<PolicyKind, NegotiationPolicy> = {
+  conservative: (debt) => [fullPayment(debt), installments(debt, 3)],
+  flexible: (debt, profile) => [
+    fullPayment(debt),
+    installments(debt, profile.hardship ? 12 : 6),
+    discount(debt, 0.1),
+  ],
+};
+
+const options = POLICIES[tenant.policyKind](debt, profile);
+```
+
+En TypeScript, una estrategia suele ser **una función**: no hace falta una clase por algoritmo.
+
+### Observer y Mediator
+
+- **Observer:** un objeto notifica a sus suscriptores cuando algo ocurre (el `EventEmitter` de Node.js, los eventos de
+  dominio dentro de un proceso).
+- **Mediator:** un objeto central coordina la comunicación entre varios, para que no se conozcan entre sí (un bus de
+  eventos o de comandos en memoria).
+
+### Command
+
+Representa una **acción como un objeto**: se puede encolar, registrar, reintentar o deshacer. Las acciones de un
+agente (`RegisterPromiseCommand`), los trabajos de una cola y los mensajes de un bus son commands.
+
+### State
+
+Cambia el comportamiento según el **estado** interno, con transiciones explícitas. Las conversaciones del agente (la
+máquina de estados del curso de agentes) y el ciclo de vida de una deuda son casos de State. En TypeScript se modela
+muy bien con **discriminated unions** y funciones de transición.
+
+### Template Method y Chain of Responsibility
+
+- **Template Method:** un algoritmo con pasos fijos y algunos pasos variables. En TypeScript suele reemplazarse por una
+  función que recibe los pasos variables como funciones.
+- **Chain of Responsibility:** una solicitud pasa por una cadena de manejadores, cada uno decide si la procesa o la
+  pasa. Los **middlewares** HTTP y los **guardrails** de un agente son cadenas de responsabilidad.
+
+```ts
+type Guardrail = (message: OutboundMessage, context: TurnContext) => GuardrailResult;
+
+export function runGuardrails(chain: readonly Guardrail[], message: OutboundMessage, context: TurnContext) {
+  for (const guardrail of chain) {
+    const result = guardrail(message, context);
+    if (result.action !== "allow") return result; // el primero que bloquea corta la cadena
+  }
+  return { action: "allow" } as const;
+}
+```
+
+## Patrones de acceso a datos
+
+| Patrón            | Qué hace                                                                                        |
+| ----------------- | ----------------------------------------------------------------------------------------------- |
+| **Repository**    | Colección en memoria aparente de agregados: `findById`, `save`. Oculta la persistencia.         |
+| **Specification** | Encapsula un criterio de selección reutilizable y combinable ("deudas elegibles para campaña"). |
+| **Unit of Work**  | Agrupa los cambios de una operación y los confirma juntos (una transacción).                    |
+
+```ts
+export interface DebtRepository {
+  findById(tenantId: TenantId, id: DebtId): Promise<Debt | undefined>;
+  save(tenantId: TenantId, debt: Debt): Promise<void>;
+}
+
+// Specification como función componible
+type Spec<T> = (item: T) => boolean;
+const and =
+  <T>(...specs: Spec<T>[]): Spec<T> =>
+  (item) =>
+    specs.every((spec) => spec(item));
+
+const eligibleForCampaign = and<Debt>(isOverdueMoreThan(30), notOptedOut, hasNoActivePromise);
+```
+
+El repositorio es por **agregado**, no por tabla. Un ORM ya implementa Unit of Work (EF Core con `SaveChanges`,
+Hibernate con la sesión); en Node.js suele ser explícito con una transacción.
+
+<FlowDiagram
+  steps={[
+    {
+      title: "¿Existe el problema hoy?",
+      detail: "Variación real, varias implementaciones, cambios frecuentes.",
+    },
+    {
+      title: "¿El lenguaje ya lo resuelve?",
+      detail: "Funciones, closures y objetos literales cubren muchos patrones.",
+    },
+    {
+      title: "¿La indirección se paga?",
+      detail: "Más archivos y saltos de lectura a cambio de flexibilidad.",
+      tone: "boundary",
+    },
+    {
+      title: "Aplicar el patrón",
+      detail: "Con el nombre del patrón en el código, para comunicar la intención.",
+      tone: "runtime",
+    },
+  ]}
+  caption="Un patrón se justifica por el problema, no por el catálogo."
+/>
+
+## Comparación con C# y Java
+
+| Patrón          | C# / .NET                             | Java                       | TypeScript idiomático                   |
+| --------------- | ------------------------------------- | -------------------------- | --------------------------------------- |
+| Strategy        | Interfaz + clases, delegados `Func<>` | Interfaz + clases, lambdas | Función o `Record` de funciones         |
+| Observer        | `event`, `IObservable<T>`             | Listeners, `Flow`          | `EventEmitter`, callbacks               |
+| Decorator       | Clases que envuelven, middleware      | Clases que envuelven, AOP  | Funciones de orden superior             |
+| Template Method | Clase abstracta                       | Clase abstracta            | Función que recibe pasos como funciones |
+| Unit of Work    | `DbContext.SaveChanges`               | Sesión de Hibernate        | Transacción explícita                   |
+
+Muchos patrones del catálogo clásico nacieron en lenguajes sin funciones de primera clase. En TypeScript, una parte se
+simplifica mucho; el **concepto** (y el vocabulario) sigue siendo útil.
+
+## Errores frecuentes
+
+- **Patrones por el catálogo**, sin un problema concreto.
+- **Una clase por estrategia** cuando una función alcanza.
+- **Repositorios por tabla** con métodos genéricos que filtran detalles de SQL al dominio.
+- **Decorators que cambian el contrato** (un decorador de caché que devuelve datos de otro tenant).
+- **Mezclar Adapter con lógica de negocio.**
+- **Builders para objetos simples.**
+
+## Ejercicio interactivo
+
+<KnowledgeCheck
+  id="software-architecture.design-patterns.q1"
+  question="Querés agregar reintentos y auditoría a todos los envíos de mensajes sin modificar las clases de cada canal. ¿Qué patrón usás?"
+  options={[
+    { text: "Factory", explanation: "Crea objetos; no agrega comportamiento a los existentes." },
+    {
+      text: "Decorator",
+      correct: true,
+      explanation: "Correcto. Envuelve al Notifier con la misma interfaz y agrega comportamiento componible.",
+    },
+    { text: "Observer", explanation: "Notifica eventos; no envuelve el comportamiento del envío." },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="software-architecture.design-patterns.q2"
+  question="El SDK del proveedor de pagos tiene una API muy distinta a la que usa tu dominio. ¿Qué patrón aplica?"
+  options={[
+    {
+      text: "Adapter: implementa el puerto PaymentGateway traduciendo al SDK.",
+      correct: true,
+      explanation: "Correcto. El dominio no conoce el SDK; cambiar de proveedor es cambiar el adaptador.",
+    },
+    {
+      text: "Proxy",
+      explanation: "Mantiene la misma interfaz que el objeto real; acá las interfaces son distintas.",
+    },
+    { text: "Composite", explanation: "Sirve para tratar grupos y elementos de forma uniforme." },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="software-architecture.design-patterns.q3"
+  question="Los guardrails de salida de un agente se evalúan en orden y el primero que bloquea corta el envío. ¿Qué patrón es?"
+  options={[
+    { text: "Strategy", explanation: "Elige un algoritmo entre varios; acá se aplican varios en secuencia." },
+    {
+      text: "Chain of Responsibility",
+      correct: true,
+      explanation: "Correcto. Como los middlewares HTTP: cada eslabón decide si deja pasar o corta.",
+    },
+    { text: "Builder", explanation: "Construye objetos; no procesa una solicitud por etapas." },
+  ]}
+/>

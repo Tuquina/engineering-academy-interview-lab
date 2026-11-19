@@ -1,0 +1,269 @@
+---
+id: software-architecture.architecture-styles
+moduleId: software-architecture.architecture-patterns
+title: "Estilos de arquitectura: capas, clean, hexagonal, monolito modular y microservicios"
+description: "Cómo se organiza un sistema completo: arquitectura en capas y sus problemas, Clean, Hexagonal y Onion Architecture (y qué tienen en común), el monolito modular como punto de partida razonable, microservicios con sus costos reales, y cómo migrar entre estilos con Strangler Fig y Anti-Corruption Layer."
+difficulty: advanced
+order: 1
+objectives:
+  - "Explicar la arquitectura en capas y por qué la dirección de las dependencias importa."
+  - "Describir Clean, Hexagonal y Onion como variantes de la misma idea: el dominio en el centro."
+  - "Diseñar un monolito modular con límites verificables."
+  - "Evaluar microservicios con sus costos de red, datos, consistencia y operación."
+  - "Planificar una migración incremental con Strangler Fig y Anti-Corruption Layer."
+prerequisites: ["software-architecture.design-patterns"]
+estimatedMinutes: 45
+tags:
+  ["capas", "clean architecture", "hexagonal", "onion", "monolito modular", "microservicios", "strangler fig"]
+version: "1.0.0"
+comparesWith: ["csharp", "java"]
+references:
+  - title: "Alistair Cockburn — Hexagonal Architecture"
+    url: "https://alistair.cockburn.us/hexagonal-architecture/"
+  - title: "Robert C. Martin — The Clean Architecture"
+    url: "https://blog.cleancoder.com/uncle-bob/2012/08/13/the-clean-architecture.html"
+  - title: "Martin Fowler — Microservices"
+    url: "https://martinfowler.com/articles/microservices.html"
+  - title: "Martin Fowler — Monolith First"
+    url: "https://martinfowler.com/bliki/MonolithFirst.html"
+  - title: "Martin Fowler — Strangler Fig Application"
+    url: "https://martinfowler.com/bliki/StranglerFigApplication.html"
+interviewQuestions:
+  - question: "¿Qué tienen en común Clean, Hexagonal y Onion Architecture?"
+    keyPoints:
+      - "El dominio y los casos de uso en el centro, sin depender de frameworks ni infraestructura."
+      - "Las dependencias apuntan hacia adentro; la infraestructura implementa interfaces (puertos) definidas por el núcleo."
+      - "Permiten testear la lógica sin base de datos ni HTTP y cambiar adaptadores."
+      - "Difieren en nombres y en cuántas capas dibujan, no en la idea central."
+  - question: "¿Monolito modular o microservicios para una plataforma nueva?"
+    keyPoints:
+      - "Monolito modular por defecto: un despliegue, transacciones locales, refactors baratos, operación simple."
+      - "Módulos con límites claros (API pública, datos propios) verificados con tests de arquitectura."
+      - "Microservicios cuando hay razones concretas: equipos independientes, escalado o requisitos muy distintos por parte, aislamiento de fallas."
+      - "Sus costos: red, consistencia eventual, observabilidad distribuida, despliegues coordinados."
+  - question: "¿Cómo migrarías un sistema legado sin reescribirlo de una vez?"
+    keyPoints:
+      - "Strangler Fig: interceptar las requests y redirigir funcionalidad por funcionalidad al sistema nuevo."
+      - "Anti-Corruption Layer: traducir el modelo del legado para no contaminar el nuevo."
+      - "Migración incremental con métricas y posibilidad de volver atrás en cada paso."
+summary:
+  - "Capas: presentación, aplicación, dominio, datos; el problema clásico es que el dominio dependa de la base."
+  - "Clean, Hexagonal y Onion ponen el dominio en el centro y la infraestructura afuera, detrás de puertos."
+  - "Puertos de entrada (casos de uso) y de salida (repositorios, gateways); adaptadores en los bordes."
+  - "Monolito modular: un despliegue con módulos de límites estrictos; el punto de partida razonable."
+  - "Microservicios: independencia a cambio de red, consistencia eventual y complejidad operativa."
+  - "Strangler Fig y Anti-Corruption Layer permiten migrar de forma incremental."
+---
+
+## ¿Qué problema resuelve?
+
+A medida que un sistema crece, la pregunta deja de ser "cómo escribo esta función" y pasa a ser "cómo se organiza
+todo para que cinco equipos puedan cambiarlo sin pisarse, testearlo sin levantar toda la infraestructura y escalarlo
+donde hace falta". Los estilos de arquitectura son respuestas a esa pregunta, cada una con sus costos.
+
+## Arquitectura en capas
+
+El estilo más conocido: **presentación → aplicación → dominio → datos**, donde cada capa usa a la de abajo.
+
+<MermaidDiagram
+  caption="Capas tradicionales frente a la inversión: en la versión hexagonal, la persistencia depende del dominio y no al revés."
+  chart={`
+flowchart TB
+  subgraph TRAD["Capas tradicionales"]
+    P1["Presentación"] --> A1["Aplicación"] --> D1["Dominio"] --> R1["Datos / ORM"]
+  end
+  subgraph HEX["Dependencias invertidas"]
+    P2["HTTP, colas, CLI"] --> A2["Casos de uso"] --> D2["Dominio"]
+    R2["Postgres, proveedores"] -.->|"implementa puertos"| A2
+  end
+`}
+/>
+
+El problema clásico de las capas tradicionales: **el dominio depende de la capa de datos** (entidades anotadas del
+ORM, repositorios concretos). Cambiar la persistencia o testear las reglas obliga a arrastrar la base.
+
+## Clean, Hexagonal y Onion: el dominio en el centro
+
+Las tres son variantes de la misma idea:
+
+- **Hexagonal (Ports and Adapters, Alistair Cockburn):** la aplicación expone **puertos** (interfaces); el mundo
+  exterior se conecta con **adaptadores**. Hay adaptadores **de entrada** (HTTP, colas, CLI, tests) que llaman a la
+  aplicación, y **de salida** (base, proveedores, LLM) que la aplicación usa a través de puertos que ella define.
+- **Onion:** el dominio en el núcleo, rodeado por servicios de dominio, aplicación e infraestructura.
+- **Clean Architecture (Robert C. Martin):** entidades, casos de uso, adaptadores de interfaz y frameworks; con la
+  **regla de dependencia**: el código fuente sólo depende hacia adentro.
+
+<MermaidDiagram
+  caption="Hexagonal: adaptadores de entrada y salida alrededor de un núcleo que no conoce la infraestructura."
+  chart={`
+flowchart LR
+  HTTP["Route Handler<br/>adaptador de entrada"] --> UC["Casos de uso<br/>puertos de entrada"]
+  Q["Consumidor de cola<br/>adaptador de entrada"] --> UC
+  T["Tests"] --> UC
+  UC --> DOM["Dominio<br/>entidades y reglas"]
+  UC --> PO["Puertos de salida<br/>DebtRepository, LlmClient, Notifier"]
+  PG["PostgresDebtRepository"] -.->|"implementa"| PO
+  AN["AnthropicLlmClient"] -.->|"implementa"| PO
+  SMS["SmsNotifier"] -.->|"implementa"| PO
+`}
+/>
+
+Esta plataforma sigue exactamente esta estructura: cada módulo de `src/modules` tiene las carpetas `domain`,
+`application`, `infrastructure` y `presentation`, con un test que verifica que el dominio no importe infraestructura, y la composición en
+`src/infrastructure/composition`. La Pattern Library tiene el diagrama interactivo de
+[Arquitectura hexagonal](/patterns/hexagonal-architecture).
+
+**Cuándo no:** un CRUD simple o un script interno no necesita puertos y adaptadores. La estructura se justifica cuando
+hay reglas de negocio que proteger y dependencias externas que cambian.
+
+## Monolito modular
+
+Un **monolito modular** es **una sola aplicación desplegable** dividida en **módulos con límites estrictos**:
+
+| Regla del módulo                      | Cómo se verifica                                         |
+| ------------------------------------- | -------------------------------------------------------- |
+| API pública explícita (`index.ts`)    | Lint o test de arquitectura que prohíbe imports internos |
+| Datos propios (sus tablas o esquema)  | Ningún módulo consulta tablas de otro                    |
+| Comunicación por la API o por eventos | Revisión y tests de dependencias                         |
+| Sin ciclos entre módulos              | dependency-cruiser o equivalente                         |
+
+Ventajas: **transacciones locales**, refactors entre módulos baratos, un solo pipeline, depuración simple y operación
+mínima. Si los límites se respetan, extraer un módulo a un servicio más adelante es viable. Es el **punto de partida
+recomendado** para la mayoría de los productos nuevos (el consejo _Monolith First_).
+
+## Microservicios
+
+**Microservicios** son servicios desplegables por separado, cada uno con **sus propios datos**, organizados alrededor
+de capacidades de negocio y comunicados por la red.
+
+| Ganan                                     | Pagan                                                         |
+| ----------------------------------------- | ------------------------------------------------------------- |
+| Despliegue independiente por equipo       | Latencia y fallas de red en cada llamada                      |
+| Escalado por servicio                     | Consistencia eventual entre servicios (sagas, outbox)         |
+| Aislamiento de fallas (si se diseña bien) | Observabilidad distribuida, trazas obligatorias               |
+| Tecnologías distintas donde se justifica  | Contratos versionados, pruebas de integración entre servicios |
+| Autonomía de equipos grandes              | Más infraestructura: despliegue, descubrimiento, colas        |
+
+Razones válidas para separar un servicio: **equipos** que necesitan desplegar de forma independiente, partes con
+**requisitos de escala o disponibilidad muy distintos** (el procesamiento de webhooks de pagos frente al panel de
+administración), **aislamiento** de un componente riesgoso o con dependencias pesadas (un servicio de evaluaciones que
+corre modelos). Razones débiles: "es más moderno", "así escala", "lo hace Netflix".
+
+El antipatrón a evitar es el **monolito distribuido**: servicios que comparten base de datos o que deben desplegarse
+juntos. Tiene todos los costos de los microservicios y ninguno de sus beneficios.
+
+El **comparador** (`/patterns/compare`) presenta capas, monolito modular, microservicios y event-driven dimensión por
+dimensión.
+
+## Migrar de forma incremental
+
+<FlowDiagram
+  steps={[
+    { title: "Fachada o proxy", detail: "Todas las requests pasan por un punto que decide a dónde ir." },
+    {
+      title: "Extraer una funcionalidad",
+      detail: "El sistema nuevo implementa una parte (por ejemplo, promesas de pago).",
+    },
+    {
+      title: "Anti-Corruption Layer",
+      detail: "Traduce el modelo del legado al nuevo, sin contaminarlo.",
+      tone: "boundary",
+    },
+    {
+      title: "Redirigir y medir",
+      detail: "El proxy envía esa funcionalidad al sistema nuevo; se puede volver atrás.",
+      tone: "runtime",
+    },
+    { title: "Repetir", detail: "Hasta que el legado se puede apagar." },
+  ]}
+  caption="Strangler Fig: el sistema nuevo crece alrededor del viejo hasta reemplazarlo."
+/>
+
+- **Strangler Fig:** en lugar de una reescritura completa (que suele fracasar), se reemplaza funcionalidad por
+  funcionalidad detrás de una fachada.
+- **Anti-Corruption Layer:** una capa de traducción entre el modelo del sistema legado (o de un proveedor externo) y el
+  modelo propio, para que sus conceptos y nombres no se filtren. En una plataforma de cobranzas, la integración con el
+  CRM de cada cliente es un caso típico.
+
+## Comparación con C# y Java
+
+| Estilo            | .NET                                                     | Java                                  | Node.js / TypeScript                            |
+| ----------------- | -------------------------------------------------------- | ------------------------------------- | ----------------------------------------------- |
+| Clean / Hexagonal | Plantillas de Clean Architecture con proyectos separados | Paquetes por capa, Spring con puertos | Carpetas por capa en cada módulo                |
+| Monolito modular  | Proyectos por módulo en una solución                     | Spring Modulith (verifica módulos)    | Módulos con `index.ts` + reglas de dependencias |
+| Verificación      | NetArchTest, ArchUnitNET                                 | ArchUnit                              | dependency-cruiser, tests propios               |
+| Microservicios    | ASP.NET + .NET Aspire, Dapr                              | Spring Cloud                          | Fastify/NestJS + infraestructura de nube        |
+
+En .NET, la separación en **proyectos** hace que el compilador impida dependencias prohibidas. En TypeScript, sin esa
+barrera, los límites se verifican con **herramientas o tests de arquitectura**, como hace esta plataforma.
+
+## Errores frecuentes
+
+- **El dominio dependiendo del ORM** o de tipos del framework.
+- **Hexagonal en un CRUD trivial**, con puertos y adaptadores sin propósito.
+- **Monolito "modular" sin límites verificados**, que termina siendo una gran bola de barro.
+- **Microservicios con base de datos compartida.**
+- **Partir en microservicios antes de entender los límites del dominio.**
+- **Reescrituras completas** en lugar de migraciones incrementales.
+
+## Ejercicio interactivo
+
+<KnowledgeCheck
+  id="software-architecture.architecture-styles.q1"
+  question="En una arquitectura hexagonal, ¿quién define la interfaz `DebtRepository`?"
+  options={[
+    {
+      text: "El adaptador de PostgreSQL.",
+      explanation: "Si la define la infraestructura, el núcleo dependería de ella.",
+    },
+    {
+      text: "La aplicación o el dominio (el núcleo); el adaptador de PostgreSQL la implementa.",
+      correct: true,
+      explanation: "Correcto. Las dependencias apuntan hacia adentro: el puerto es del núcleo.",
+    },
+    {
+      text: "El framework web.",
+      explanation: "El framework es un adaptador de entrada, no define la persistencia.",
+    },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="software-architecture.architecture-styles.q2"
+  question="Dos 'microservicios' leen y escriben las mismas tablas y se despliegan siempre juntos. ¿Qué tenés?"
+  options={[
+    {
+      text: "Microservicios bien diseñados.",
+      explanation: "Compartir datos y despliegues elimina su independencia.",
+    },
+    {
+      text: "Un monolito distribuido: los costos de la red sin los beneficios de la independencia.",
+      correct: true,
+      explanation: "Correcto. Cada servicio debe ser dueño de sus datos y desplegable por separado.",
+    },
+    {
+      text: "Un monolito modular.",
+      explanation: "Un monolito modular se despliega como una unidad y no paga costos de red entre módulos.",
+    },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="software-architecture.architecture-styles.q3"
+  question="Hay que reemplazar un sistema legado de gestión de deudas que sigue en uso. ¿Cuál es el enfoque más seguro?"
+  options={[
+    {
+      text: "Reescribir todo y cambiar en un solo corte.",
+      explanation: "Las reescrituras completas acumulan riesgo y suelen fracasar.",
+    },
+    {
+      text: "Strangler Fig: una fachada que redirige funcionalidad por funcionalidad al sistema nuevo, con una Anti-Corruption Layer.",
+      correct: true,
+      explanation: "Correcto. Cada paso es medible y reversible.",
+    },
+    {
+      text: "Mantener el legado para siempre.",
+      explanation: "No resuelve el problema que motivó el reemplazo.",
+    },
+  ]}
+/>

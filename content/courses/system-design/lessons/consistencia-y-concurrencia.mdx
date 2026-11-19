@@ -1,0 +1,236 @@
+---
+id: system-design.consistency
+moduleId: system-design.consistency
+title: "Consistencia en sistemas distribuidos: CAP, consistencia fuerte y eventual, idempotencia, carreras y locks"
+description: "Cómo razonar sobre datos que viven en varios lugares: el teorema CAP y PACELC sin mitos, modelos de consistencia (fuerte, eventual, read-your-writes), dónde necesita consistencia fuerte una plataforma de cobranzas y dónde no, idempotencia de punta a punta, race conditions entre servicios y locks distribuidos con sus límites."
+difficulty: advanced
+order: 1
+objectives:
+  - "Explicar CAP y PACELC con precisión y aplicarlos a decisiones concretas."
+  - "Distinguir consistencia fuerte, eventual y read-your-writes."
+  - "Decidir qué datos de un sistema requieren consistencia fuerte y cuáles toleran consistencia eventual."
+  - "Diseñar idempotencia de punta a punta: cliente, API, procesamiento y efectos externos."
+  - "Detectar race conditions entre servicios y elegir entre locks, constraints y diseño sin coordinación."
+prerequisites: ["system-design.scalability", "postgresql.transactions"]
+estimatedMinutes: 45
+tags: ["cap", "pacelc", "consistencia eventual", "idempotencia", "race conditions", "locks distribuidos"]
+version: "1.0.0"
+comparesWith: []
+references:
+  - title: "Martin Kleppmann — Designing Data-Intensive Applications"
+    url: "https://dataintensive.net/"
+  - title: "Daniel Abadi — Consistency Tradeoffs in Modern Distributed Database System Design (PACELC)"
+    url: "https://www.cs.umd.edu/~abadi/papers/abadi-pacelc.pdf"
+  - title: "Werner Vogels — Eventually Consistent"
+    url: "https://www.allthingsdistributed.com/2008/12/eventually_consistent.html"
+  - title: "Martin Kleppmann — How to do distributed locking"
+    url: "https://martin.kleppmann.com/2016/02/08/how-to-do-distributed-locking.html"
+  - title: "Stripe — Designing robust and predictable APIs with idempotency"
+    url: "https://stripe.com/blog/idempotency"
+interviewQuestions:
+  - question: "Explicá el teorema CAP."
+    keyPoints:
+      - "Ante una partición de red (P), un sistema distribuido debe elegir entre consistencia (C) y disponibilidad (A)."
+      - "Sin partición, no hay que elegir entre C y A; PACELC agrega que en ese caso se elige entre latencia y consistencia."
+      - "No es 'elegir 2 de 3' en general: las particiones no son opcionales."
+      - "La elección se hace por operación: un pago necesita consistencia; un contador de vistas tolera eventualidad."
+  - question: "¿Qué datos de una plataforma de cobranzas necesitan consistencia fuerte?"
+    keyPoints:
+      - "Saldos, pagos aplicados, promesas vigentes, acuerdos, opt-outs y consentimiento."
+      - "Métricas, dashboards, búsquedas y resúmenes toleran consistencia eventual."
+      - "La consistencia fuerte se concentra en una base transaccional; lo demás se deriva por eventos."
+  - question: "¿Cómo garantizás que un pago no se aplique dos veces de punta a punta?"
+    keyPoints:
+      - "El cliente envía una idempotency key; el servidor la reserva atómicamente y devuelve el resultado guardado ante reintentos."
+      - "El webhook del proveedor se deduplica con una constraint sobre su ID."
+      - "Los consumidores de eventos son idempotentes (inbox)."
+      - "Las llamadas a terceros con efectos usan las claves de idempotencia del proveedor."
+summary:
+  - "CAP: ante una partición, consistencia o disponibilidad. PACELC: sin partición, latencia o consistencia."
+  - "Consistencia fuerte: todos ven la última escritura. Eventual: convergen con el tiempo."
+  - "Read-your-writes: quien escribió ve su cambio, aunque otros todavía no."
+  - "La consistencia se decide por dato y operación, no para todo el sistema."
+  - "Idempotencia de punta a punta: claves del cliente, constraints, consumidores idempotentes y claves hacia terceros."
+  - "Las carreras entre servicios se resuelven con constraints, operaciones condicionales o diseño sin coordinación; los locks distribuidos tienen límites."
+---
+
+## ¿Qué problema resuelve?
+
+En cuanto los datos viven en más de un lugar (una base y su réplica, una caché, otro servicio, el sistema del
+proveedor de pagos), aparecen preguntas incómodas: el operador ve el saldo viejo porque leyó de una réplica; el agente
+dice que no hay promesa porque el evento todavía no llegó; dos servicios aplican el mismo pago. Esta lección da el
+vocabulario y las herramientas para decidir **qué consistencia necesita cada dato** y cómo garantizarla.
+
+## CAP y PACELC sin mitos
+
+El **teorema CAP** dice que, ante una **partición de red** (nodos que no pueden comunicarse), un sistema distribuido
+tiene que elegir entre:
+
+- **Consistencia (C):** todos ven la misma información; si no se puede garantizar, se rechaza la operación.
+- **Disponibilidad (A):** todos los nodos responden, aunque con datos que pueden estar desactualizados.
+
+Dos aclaraciones frecuentes en entrevistas:
+
+1. **No es "elegir 2 de 3":** las particiones ocurren, no son opcionales. La elección real es **qué hacer cuando
+   ocurren**.
+2. **Sin partición también hay un compromiso.** **PACELC** lo completa: si hay **P**artición, elegir entre **A** y
+   **C**; **E**n otro caso (_else_), elegir entre **L**atencia y **C**onsistencia. Replicar de forma síncrona da
+   consistencia pero agrega latencia; de forma asíncrona, menos latencia y posibles lecturas viejas.
+
+<MermaidDiagram
+  caption="PACELC: hay un compromiso con y sin partición de red."
+  chart={`
+flowchart TD
+  Q{"¿Hay partición de red?"} -->|"sí"| PA{"Elegir"}
+  PA --> A["Disponibilidad<br/>responder con datos posiblemente viejos"]
+  PA --> C["Consistencia<br/>rechazar o esperar"]
+  Q -->|"no"| EL{"Elegir"}
+  EL --> L["Latencia<br/>replicación asíncrona"]
+  EL --> C2["Consistencia<br/>replicación síncrona"]
+`}
+/>
+
+## Modelos de consistencia
+
+| Modelo               | Garantía                                                | Ejemplo                                              |
+| -------------------- | ------------------------------------------------------- | ---------------------------------------------------- |
+| **Fuerte (lineal)**  | Toda lectura ve la última escritura confirmada          | Leer el saldo del primario dentro de una transacción |
+| **Read-your-writes** | Quien escribió ve su propio cambio                      | El operador registra una promesa y la ve al recargar |
+| **Monotonic reads**  | Nunca se "vuelve atrás" en el tiempo entre lecturas     | No ver un pago y después dejar de verlo              |
+| **Eventual**         | Si no hay escrituras nuevas, todas las copias convergen | El dashboard refleja el pago unos segundos después   |
+
+**Read-your-writes** es el que más se olvida: si después de escribir en el primario se lee de una réplica con lag, el
+usuario no ve lo que acaba de hacer. Se resuelve leyendo del primario durante un tiempo después de escribir, o
+pasando una versión mínima esperada.
+
+## ¿Qué necesita consistencia fuerte?
+
+| Necesita consistencia fuerte                       | Tolera consistencia eventual      |
+| -------------------------------------------------- | --------------------------------- |
+| Saldo y pagos aplicados                            | Dashboards y métricas de campañas |
+| Promesa vigente y acuerdos de pago                 | Búsqueda de deudores              |
+| Opt-outs y consentimientos (cumplimiento)          | Resúmenes de conversaciones       |
+| Límites de envío por deudor (si son legales)       | Rankings de agentes               |
+| Configuración publicada de un agente (por versión) | Analítica y reportes              |
+
+El patrón habitual: **la consistencia fuerte se concentra en una base transaccional** (fuente de verdad) y todo lo
+demás se **deriva** por eventos, con consistencia eventual y la capacidad de reconstruirse.
+
+## Idempotencia de punta a punta
+
+En un sistema distribuido, **los reintentos son inevitables** (redes que fallan, timeouts, entregas al menos una
+vez). La idempotencia tiene que existir en **cada salto**:
+
+<FlowDiagram
+  steps={[
+    {
+      title: "Cliente → API",
+      detail: "Idempotency-Key en POST críticos; reserva atómica y respuesta guardada.",
+    },
+    {
+      title: "Proveedor → Webhook",
+      detail: "Constraint única sobre el ID del evento del proveedor.",
+      tone: "boundary",
+    },
+    { title: "Evento → Consumidores", detail: "Inbox: ID procesado y efecto en la misma transacción." },
+    {
+      title: "Servicio → Tercero",
+      detail: "Claves de idempotencia del proveedor al cobrar o enviar.",
+      tone: "runtime",
+    },
+  ]}
+  caption="Si un solo salto no es idempotente, un reintento produce un efecto duplicado."
+/>
+
+El último salto suele olvidarse: si tu worker llama a la API del proveedor de mensajería, hace timeout y reintenta, el
+deudor puede recibir dos mensajes. Muchos proveedores aceptan una clave de idempotencia o un ID de cliente para
+deduplicar; si no, se registra el intento antes de llamar y se reconcilia con el estado del proveedor.
+
+## Race conditions entre servicios
+
+Las carreras de la lección de concurrencia (dos requests que leen y escriben el mismo dato) se agravan entre
+servicios, porque no hay una transacción común. Herramientas, de la más robusta a la menos:
+
+| Herramienta                                 | Cuándo                                                                                                     |
+| ------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| **Un solo dueño del dato**                  | Cada dato lo escribe un único servicio; los demás le piden cambios                                         |
+| **Constraints y operaciones condicionales** | `UPDATE ... WHERE version = $v`, índices únicos, `ON CONFLICT`                                             |
+| **Serializar por clave**                    | Una cola particionada por deudor: los eventos del mismo deudor se procesan en orden por un solo consumidor |
+| **Lock distribuido**                        | Coordinación de eficiencia (no duplicar trabajo), con fencing si importa la corrección                     |
+
+<Callout type="warning" title="Los locks distribuidos no garantizan exclusión mutua por sí solos">
+  Un lock con expiración puede vencer mientras su dueño sigue trabajando (pausa de GC, red lenta), y otro
+  proceso lo toma. Para corrección, el recurso protegido debe rechazar escrituras con un **fencing token**
+  viejo, o la garantía debe venir de la base (constraints, transacciones). El curso de Redis desarrolla este
+  punto.
+</Callout>
+
+**Serializar por clave** es especialmente útil en plataformas de agentes: si todos los mensajes de una conversación se
+procesan en orden por un único consumidor (por ejemplo, una partición o un grupo de mensajes por `conversationId`),
+desaparecen las carreras entre turnos de la misma conversación sin locks.
+
+## Errores frecuentes
+
+- **Explicar CAP como "elegí 2 de 3".**
+- **Exigir consistencia fuerte en todo**, con costo de latencia y disponibilidad innecesario.
+- **Leer de réplicas después de escribir** sin read-your-writes.
+- **Idempotencia sólo en la API**, olvidando webhooks, consumidores y llamadas a terceros.
+- **Varios servicios escribiendo el mismo dato.**
+- **Locks distribuidos como garantía de corrección.**
+
+## Ejercicio interactivo
+
+<KnowledgeCheck
+  id="system-design.consistency.q1"
+  question="Un operador registra una promesa de pago y, al recargar, no la ve; unos segundos después aparece. ¿Qué falta?"
+  options={[
+    {
+      text: "Consistencia fuerte en todo el sistema.",
+      explanation: "Alcanza con una garantía más acotada para quien escribió.",
+    },
+    {
+      text: "Read-your-writes: leer del primario (o esperar la versión escrita) después de una escritura del mismo usuario.",
+      correct: true,
+      explanation: "Correcto. Probablemente lee de una réplica con lag de replicación.",
+    },
+    {
+      text: "Un índice en la tabla de promesas.",
+      explanation: "No es un problema de velocidad de consulta sino de qué copia se lee.",
+    },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="system-design.consistency.q2"
+  question="¿Qué afirmación sobre CAP es correcta?"
+  options={[
+    {
+      text: "Se pueden tener siempre las tres propiedades con suficiente infraestructura.",
+      explanation: "Ante una partición hay que elegir.",
+    },
+    {
+      text: "Ante una partición de red, hay que elegir entre consistencia y disponibilidad para cada operación.",
+      correct: true,
+      explanation:
+        "Correcto. Y PACELC agrega el compromiso entre latencia y consistencia cuando no hay partición.",
+    },
+    {
+      text: "Las bases relacionales no se ven afectadas por CAP.",
+      explanation: "Cualquier sistema replicado enfrenta el compromiso.",
+    },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="system-design.consistency.q3"
+  question="Dos mensajes del mismo deudor llegan casi juntos y dos workers los procesan en paralelo, generando respuestas contradictorias del agente. ¿Qué diseño lo evita sin locks?"
+  options={[
+    { text: "Más workers.", explanation: "Aumenta la probabilidad de procesamiento paralelo." },
+    {
+      text: "Serializar por clave: una cola particionada por conversationId para que un solo consumidor procese cada conversación en orden.",
+      correct: true,
+      explanation: "Correcto. El orden por clave elimina la carrera sin coordinación distribuida.",
+    },
+    { text: "Ignorar el segundo mensaje.", explanation: "Se perdería información del deudor." },
+  ]}
+/>

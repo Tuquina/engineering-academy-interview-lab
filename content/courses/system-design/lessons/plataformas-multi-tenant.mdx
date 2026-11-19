@@ -1,0 +1,235 @@
+---
+id: system-design.multi-tenant
+moduleId: system-design.platform
+title: "Plataformas multi-tenant: modelos de aislamiento, identidad, seguridad de APIs y observabilidad por cliente"
+description: "Cómo se diseña una plataforma que atiende a muchas empresas a la vez: modelos de tenancy (compartido, por esquema, por base, híbrido), aislamiento de datos, de cómputo y de costos (noisy neighbor), identidad y autorización por tenant, seguridad de APIs para terceros, configuración por cliente y observabilidad con el tenant como dimensión de primera clase."
+difficulty: advanced
+order: 1
+objectives:
+  - "Comparar modelos de tenancy y elegir según aislamiento, costo y operación."
+  - "Garantizar el aislamiento de datos en todas las capas: aplicación, base, caché, colas y archivos."
+  - "Prevenir el problema del noisy neighbor con cuotas, bulkheads y colas por tenant."
+  - "Diseñar identidad, autorización y seguridad de APIs en un contexto multi-tenant."
+  - "Instrumentar métricas, logs y costos por tenant."
+prerequisites: ["system-design.messaging-resilience", "nodejs.auth-security"]
+estimatedMinutes: 45
+tags:
+  ["multi-tenancy", "aislamiento", "noisy neighbor", "autorización", "seguridad de apis", "observabilidad"]
+version: "1.0.0"
+comparesWith: []
+references:
+  - title: "AWS — SaaS Lens (Well-Architected)"
+    url: "https://docs.aws.amazon.com/wellarchitected/latest/saas-lens/saas-lens.html"
+  - title: "Microsoft — Architectural considerations for a multitenant solution"
+    url: "https://learn.microsoft.com/en-us/azure/architecture/guide/multitenant/overview"
+  - title: "PostgreSQL — Row Security Policies"
+    url: "https://www.postgresql.org/docs/current/ddl-rowsecurity.html"
+  - title: "OWASP — API Security Top 10 (2023)"
+    url: "https://owasp.org/API-Security/editions/2023/en/0x11-t10/"
+interviewQuestions:
+  - question: "¿Qué modelo de tenancy elegirías para una plataforma de agentes de cobranzas?"
+    keyPoints:
+      - "Por defecto, base compartida con tenant_id en cada tabla, filtros obligatorios y Row Level Security: bajo costo y operación simple."
+      - "Base o esquema dedicado para clientes con requisitos regulatorios, residencia de datos o volumen muy grande (modelo híbrido)."
+      - "El tenant se deriva de la identidad y se propaga a todas las capas, incluidas caché, colas, archivos e índices vectoriales."
+      - "Cuotas y bulkheads por tenant para el noisy neighbor."
+  - question: "¿Qué es el problema del noisy neighbor y cómo lo mitigás?"
+    keyPoints:
+      - "Un tenant consume recursos compartidos (CPU, base, cuota del LLM, workers) y degrada a los demás."
+      - "Rate limits y cuotas por tenant, colas o particiones por tenant, concurrencia máxima por tenant."
+      - "Prioridades y planes (tiers); aislamiento físico para los tenants más grandes."
+      - "Métricas por tenant para detectarlo."
+summary:
+  - "Modelos: todo compartido (tenant_id), esquema por tenant, base por tenant, o híbrido."
+  - "El aislamiento se aplica en todas las capas: consultas, RLS, claves de caché, colas, archivos, logs e índices vectoriales."
+  - "El tenant sale de la identidad autenticada y se propaga explícitamente; nunca se confía en un parámetro del cliente."
+  - "Noisy neighbor: cuotas, rate limits, colas y concurrencia por tenant; aislamiento físico para los más grandes."
+  - "APIs para clientes: claves o OAuth por tenant con scopes, rate limits, versionado y auditoría."
+  - "Configuración por tenant versionada y validada; el tenant es una dimensión de toda métrica, log y costo."
+---
+
+## ¿Qué problema resuelve?
+
+Una plataforma de agentes de cobranzas atiende a decenas de empresas (bancos, fintechs, retailers) que **compiten
+entre sí** y confían a la plataforma datos personales y financieros de sus clientes. El requisito número uno es que
+**ninguna empresa pueda ver datos de otra bajo ninguna circunstancia**. Y además: que la campaña gigante de un banco
+no deje sin servicio a una fintech chica, que cada cliente tenga su configuración y que se pueda saber cuánto cuesta
+atender a cada uno. Este es el diseño de una **plataforma multi-tenant**.
+
+## Modelos de tenancy
+
+<MermaidDiagram
+  caption="Del más compartido al más aislado: más aislamiento implica más costo y operación."
+  chart={`
+flowchart LR
+  A["Todo compartido<br/>tablas con tenant_id"] --> B["Esquema por tenant<br/>misma base"]
+  B --> C["Base por tenant<br/>mismo cluster o separado"]
+  C --> D["Stack completo por tenant<br/>infraestructura dedicada"]
+`}
+/>
+
+| Modelo                   | Aislamiento | Costo por tenant | Operación (migraciones, monitoreo) | Cuándo                                                         |
+| ------------------------ | ----------- | ---------------- | ---------------------------------- | -------------------------------------------------------------- |
+| Compartido (`tenant_id`) | Lógico      | Muy bajo         | Simple: un esquema                 | Muchos tenants chicos y medianos                               |
+| Esquema por tenant       | Medio       | Bajo             | N esquemas que migrar              | Pocos cientos de tenants con algo de personalización           |
+| Base por tenant          | Alto        | Medio-alto       | N bases que operar                 | Requisitos regulatorios, residencia de datos, clientes grandes |
+| Stack por tenant         | Máximo      | Alto             | N despliegues                      | Clientes enterprise con exigencias contractuales               |
+
+El enfoque más común es **híbrido**: compartido por defecto, y base o stack dedicados para los clientes que lo
+requieren (y lo pagan). Para eso, el código debe **resolver la conexión a partir del tenant** desde el principio.
+
+## Aislamiento de datos en todas las capas
+
+<FlowDiagram
+  steps={[
+    {
+      title: "Identidad",
+      detail: "El tenant sale del token o la sesión, nunca de un parámetro.",
+      tone: "boundary",
+    },
+    { title: "Aplicación", detail: "Repositorios que exigen tenantId; consultas siempre filtradas." },
+    { title: "Base", detail: "Row Level Security como segunda barrera.", tone: "runtime" },
+    { title: "Caché, colas, archivos", detail: "Tenant en cada clave, mensaje y ruta de almacenamiento." },
+    { title: "IA", detail: "Índices vectoriales, memoria del agente y prompts filtrados por tenant." },
+  ]}
+  caption="Un solo lugar que olvide el tenant alcanza para una filtración."
+/>
+
+Los lugares donde más se olvida el tenant:
+
+- **Claves de caché** (`agent:config:42` en lugar de `tenant:7:agent:42:config`).
+- **Mensajes de colas** y eventos sin `tenantId`, procesados por workers que no lo verifican.
+- **Archivos** en almacenamiento de objetos con rutas o permisos compartidos.
+- **Índices vectoriales y RAG** sin filtro por tenant (el agente cita la política de otra empresa).
+- **Logs y herramientas internas** (un panel de soporte que permite buscar en todos los tenants sin auditoría).
+- **Jobs de mantenimiento** que recorren datos de todos los tenants.
+
+Se testea explícitamente: **tests de aislamiento** que intentan leer recursos de otro tenant por cada endpoint,
+herramienta del agente y consulta.
+
+## Noisy neighbor
+
+En recursos compartidos, un tenant con mucha actividad puede degradar a todos.
+
+| Recurso compartido         | Mecanismo de aislamiento                                                                 |
+| -------------------------- | ---------------------------------------------------------------------------------------- |
+| API                        | Rate limiting por tenant (y por plan)                                                    |
+| Workers de campañas        | Colas o particiones por tenant; concurrencia máxima por tenant; reparto justo            |
+| Cuota del proveedor de LLM | Presupuesto de tokens y concurrencia por tenant                                          |
+| Base de datos              | Límites de consultas pesadas, réplicas para reportes, base dedicada para los más grandes |
+| Proveedores de mensajería  | Rate limits por tenant y por número emisor                                               |
+
+El **reparto justo** (_fair scheduling_) evita que la cola se llene con 500.000 trabajos de un tenant y los demás
+esperen horas: por ejemplo, los workers toman trabajos de forma intercalada entre tenants (round robin por tenant) en
+lugar de FIFO global.
+
+## Identidad y autorización
+
+- **Usuarios de cada tenant** (operadores, supervisores, administradores): roles por tenant; un mismo usuario podría
+  pertenecer a varios tenants con roles distintos.
+- **Usuarios de la plataforma** (soporte interno): acceso a datos de clientes **excepcional, justificado, temporal y
+  auditado**.
+- **Federación:** clientes enterprise que quieren iniciar sesión con su propio proveedor de identidad (SSO con OIDC o
+  SAML).
+- **Autorización por recurso** siempre incluye el tenant (lección de autenticación del curso de Node.js).
+
+## Seguridad de APIs para clientes
+
+Los clientes integran sus sistemas (CRM, core bancario) con la plataforma:
+
+| Aspecto            | Práctica                                                                                 |
+| ------------------ | ---------------------------------------------------------------------------------------- |
+| Credenciales       | API keys por tenant con scopes, rotables, guardadas con hash; o OAuth client credentials |
+| Autorización       | Cada key sólo opera sobre su tenant y sus scopes                                         |
+| Límites            | Rate limits y cuotas por key y por tenant                                                |
+| Contrato           | API versionada con OpenAPI, cambios compatibles y deprecaciones anunciadas               |
+| Webhooks salientes | Firmados por tenant, con reintentos y panel de entregas                                  |
+| Auditoría          | Registro de cada operación con la key, el actor y el resultado                           |
+
+La lista de OWASP API Security Top 10 pone en primer lugar la autorización a nivel de objeto (BOLA): en multi-tenant,
+es el error más grave posible.
+
+## Configuración por tenant
+
+Cada cliente configura sus agentes, plantillas, horarios, políticas de negociación y canales. Buenas prácticas:
+configuración **versionada y validada con esquemas**, cambios **auditados**, valores por defecto de la plataforma con
+**overrides** acotados por tenant, y **feature flags por tenant** para habilitar funcionalidades de forma gradual.
+
+## Observabilidad y costos por tenant
+
+El tenant es una **dimensión de primera clase**:
+
+- Métricas de latencia, errores y uso **por tenant** (con cuidado de la cardinalidad en el sistema de métricas).
+- Logs y trazas con `tenantId` para investigar incidentes de un cliente.
+- **Costo por tenant:** tokens de LLM, mensajes enviados, almacenamiento, cómputo de campañas. Es la base del pricing,
+  de la detección de abusos y de la rentabilidad de cada cliente.
+- SLOs por tier de cliente cuando los contratos lo exigen.
+
+El desafío [Plataforma multi-tenant de agentes](/system-design/challenges/multi-tenant-agents) del Studio integra
+todos estos elementos.
+
+## Errores frecuentes
+
+- **Tomar el tenant de un header o del body** sin validarlo contra la identidad.
+- **Olvidar el tenant** en caché, colas, archivos, índices vectoriales o jobs.
+- **Colas FIFO globales** donde un tenant grande bloquea a todos.
+- **Acceso de soporte sin auditoría** a datos de clientes.
+- **API keys sin scopes, sin rotación** o guardadas en texto plano.
+- **Métricas sin dimensión de tenant** y costos imposibles de atribuir.
+- **Elegir base por tenant para cientos de tenants chicos**, multiplicando la operación sin necesidad.
+
+## Ejercicio interactivo
+
+<KnowledgeCheck
+  id="system-design.multi-tenant.q1"
+  question="Una plataforma con 300 tenants medianos y 2 bancos con requisitos de residencia de datos. ¿Qué modelo de tenancy es razonable?"
+  options={[
+    {
+      text: "Base dedicada para los 302 tenants.",
+      explanation: "Multiplica la operación sin necesidad para la mayoría.",
+    },
+    {
+      text: "Híbrido: base compartida con tenant_id y RLS para la mayoría, y bases dedicadas en la región requerida para los bancos.",
+      correct: true,
+      explanation: "Correcto. Se paga aislamiento físico sólo donde un requisito lo exige.",
+    },
+    {
+      text: "Todo compartido, incluidos los bancos.",
+      explanation: "No cumple la residencia de datos que exigen.",
+    },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="system-design.multi-tenant.q2"
+  question="La campaña de un tenant encola 400.000 trabajos y los demás tenants esperan horas. ¿Qué cambiás?"
+  options={[
+    {
+      text: "Más workers.",
+      explanation: "Ayuda temporalmente, pero el orden FIFO global sigue favoreciendo al tenant grande.",
+    },
+    {
+      text: "Reparto justo entre tenants (colas o particiones por tenant y concurrencia máxima por tenant).",
+      correct: true,
+      explanation: "Correcto. Es la mitigación del noisy neighbor en el procesamiento asíncrono.",
+    },
+    {
+      text: "Prohibir campañas grandes.",
+      explanation: "Limita el negocio en lugar de diseñar el aislamiento.",
+    },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="system-design.multi-tenant.q3"
+  question="El agente de un tenant cita una política de pagos de otra empresa cliente. ¿Dónde está el fallo más probable?"
+  options={[
+    { text: "En el modelo de lenguaje.", explanation: "El modelo usa lo que recibe en el contexto." },
+    {
+      text: "En la recuperación (RAG) o la memoria: la búsqueda no filtró por tenant.",
+      correct: true,
+      explanation: "Correcto. El índice vectorial y la memoria también son capas que deben aislar tenants.",
+    },
+    { text: "En el balanceador de carga.", explanation: "El balanceador no mezcla datos entre tenants." },
+  ]}
+/>

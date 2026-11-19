@@ -1,0 +1,273 @@
+---
+id: system-design.messaging-resilience
+moduleId: system-design.messaging-resilience
+title: "Mensajería y resiliencia: colas, reintentos y DLQ, circuit breakers, backpressure, rate limiting, webhooks y recuperación ante desastres"
+description: "Cómo diseñar sistemas que absorben picos y sobreviven a fallas: comunicación síncrona y asíncrona, colas y brokers con sus garantías, reintentos con dead letter queues, circuit breakers, backpressure y control de admisión, rate limiting en varios niveles, webhooks confiables y planes de recuperación ante desastres con RPO y RTO."
+difficulty: advanced
+order: 1
+objectives:
+  - "Elegir entre comunicación síncrona y asíncrona según acoplamiento, latencia y garantías."
+  - "Diseñar colas con reintentos, visibilidad, orden y dead letter queues."
+  - "Combinar timeouts, reintentos y circuit breakers sin amplificar fallas."
+  - "Aplicar backpressure y control de admisión para que un pico no derribe el sistema."
+  - "Diseñar webhooks confiables, tanto recibidos como enviados."
+  - "Definir RPO y RTO y una estrategia de recuperación ante desastres."
+prerequisites: ["system-design.consistency", "nodejs.webhooks-idempotency"]
+estimatedMinutes: 50
+tags:
+  [
+    "colas",
+    "dlq",
+    "circuit breaker",
+    "backpressure",
+    "rate limiting",
+    "webhooks",
+    "disaster recovery",
+    "rpo",
+    "rto",
+  ]
+version: "1.0.0"
+comparesWith: []
+references:
+  - title: "AWS Builders' Library — Avoiding insurmountable queue backlogs"
+    url: "https://aws.amazon.com/builders-library/avoiding-insurmountable-queue-backlogs/"
+  - title: "AWS Builders' Library — Timeouts, retries, and backoff with jitter"
+    url: "https://aws.amazon.com/builders-library/timeouts-retries-and-backoff-with-jitter/"
+  - title: "Microsoft — Circuit Breaker pattern"
+    url: "https://learn.microsoft.com/en-us/azure/architecture/patterns/circuit-breaker"
+  - title: "Google SRE Book — Handling Overload"
+    url: "https://sre.google/sre-book/handling-overload/"
+  - title: "AWS — Disaster recovery options in the cloud"
+    url: "https://docs.aws.amazon.com/whitepapers/latest/disaster-recovery-workloads-on-aws/disaster-recovery-options-in-the-cloud.html"
+interviewQuestions:
+  - question: "¿Cómo diseñarías el envío de 2 millones de mensajes diarios respetando los límites de los proveedores?"
+    keyPoints:
+      - "La campaña genera trabajos en una cola en lugar de enviar en línea."
+      - "Workers con concurrencia limitada y rate limiting por proveedor, tenant y deudor."
+      - "Reintentos con backoff para errores transitorios, idempotencia por mensaje y DLQ para los que fallan siempre."
+      - "Ventanas horarias legales, priorización y métricas de backlog con alertas."
+  - question: "¿Qué es backpressure y cómo lo aplicarías?"
+    keyPoints:
+      - "Que un componente sobrecargado frene a sus productores en lugar de acumular trabajo sin límite."
+      - "Colas acotadas, límites de concurrencia, 429 o 503 con Retry-After, control de admisión."
+      - "Descartar o diferir trabajo de menor prioridad antes que degradar todo (load shedding)."
+      - "Evita que una cola crezca más rápido de lo que se puede vaciar."
+  - question: "¿Qué son RPO y RTO?"
+    keyPoints:
+      - "RPO: cuántos datos se pueden perder, medido en tiempo hacia atrás desde la falla."
+      - "RTO: cuánto tiempo puede tardar el servicio en volver."
+      - "Definen la estrategia: backups, réplicas entre zonas o regiones, activo-pasivo o activo-activo."
+      - "Un plan sólo vale si se prueba (restauraciones y simulacros)."
+summary:
+  - "Síncrono para respuestas inmediatas; asíncrono (colas, eventos) para desacoplar y absorber picos."
+  - "Las colas entregan al menos una vez: consumidores idempotentes, reintentos con backoff y DLQ."
+  - "Timeout + retry acotado + circuit breaker; nunca reintentos en varias capas que se multiplican."
+  - "Backpressure: colas y concurrencia acotadas, rechazos con Retry-After y load shedding por prioridad."
+  - "Rate limiting en el borde, por tenant y hacia cada proveedor."
+  - "Webhooks recibidos: firma, persistir y responder rápido. Enviados: firma, reintentos, idempotencia y DLQ."
+  - "RPO y RTO definen la estrategia de recuperación ante desastres; se prueban con simulacros."
+---
+
+## ¿Qué problema resuelve?
+
+A las 9:00 arranca una campaña de 500.000 deudores. Al mismo tiempo, el proveedor de WhatsApp empieza a responder con
+errores y el modelo de lenguaje se pone lento. Un sistema frágil responde a esto con reintentos en cascada, colas que
+crecen sin control, la base saturada y, a las 9:20, todo caído. Un sistema resiliente **absorbe el pico, contiene la
+falla y se recupera solo**. Esta lección reúne los mecanismos.
+
+## Síncrono y asíncrono
+
+| Aspecto               | Síncrono (HTTP, RPC)             | Asíncrono (colas, eventos)                          |
+| --------------------- | -------------------------------- | --------------------------------------------------- |
+| Respuesta             | Inmediata                        | Diferida                                            |
+| Acoplamiento temporal | Ambos deben estar disponibles    | El consumidor puede estar caído un rato             |
+| Picos                 | Se trasladan al servicio llamado | La cola los absorbe                                 |
+| Fallas                | Se propagan en cadena            | Se aíslan y reintentan                              |
+| Complejidad           | Menor                            | Consistencia eventual, idempotencia, observabilidad |
+
+Regla práctica: **síncrono cuando el usuario necesita la respuesta ya** (consultar el saldo), **asíncrono para todo
+lo que puede esperar** (enviar la campaña, recalcular métricas, notificar a otros módulos).
+
+## Colas y sus garantías
+
+<MermaidDiagram
+  caption="Una cola de trabajos con reintentos y dead letter queue."
+  chart={`
+flowchart LR
+  P["Productor<br/>orquestador de campaña"] --> Q["Cola de envíos"]
+  Q --> W1["Worker 1"]
+  Q --> W2["Worker 2"]
+  W1 -->|"éxito: ack"| OK["Registro del resultado"]
+  W1 -->|"error transitorio"| RQ["Reintento con backoff"]
+  RQ --> Q
+  W2 -->|"falla N veces o error permanente"| DLQ["Dead letter queue"]
+  DLQ --> OPS["Alerta, inspección<br/>y reprocesamiento"]
+`}
+/>
+
+Conceptos que aparecen en cualquier cola (SQS, RabbitMQ, BullMQ, Streams):
+
+- **Entrega al menos una vez:** un mensaje puede procesarse más de una vez (el worker cae antes de confirmar). Los
+  consumidores son **idempotentes**.
+- **Visibilidad / confirmación:** al tomar un mensaje, queda invisible para otros durante un tiempo; si no se confirma,
+  vuelve a la cola. Ese tiempo debe superar al procesamiento esperado.
+- **Orden:** la mayoría no garantiza orden global; algunas lo garantizan por grupo o partición (útil para serializar
+  por conversación).
+- **Dead letter queue:** después de N intentos, el mensaje se aparta para no bloquear ni consumir recursos para
+  siempre. Una DLQ necesita **alertas y un proceso de reprocesamiento**.
+- **Retrasos y prioridades:** programar un recordatorio para dentro de 2 días, priorizar respuestas a deudores sobre
+  envíos masivos.
+
+## Reintentos y circuit breakers
+
+Los reintentos mal diseñados **amplifican** las fallas: si cada una de tres capas reintenta tres veces, una falla se
+convierte en 27 requests contra un servicio que ya está mal.
+
+Reglas:
+
+1. **Timeouts en todo**, con presupuestos coherentes entre capas.
+2. **Reintentar en una sola capa**, sólo errores transitorios, con **backoff exponencial y jitter** y un máximo.
+3. **Circuit breaker** por dependencia: tras un umbral de fallas, se deja de llamar durante un tiempo y se prueba de a
+   poco antes de volver a la normalidad.
+4. **Fallback** decidido de antemano: encolar para más tarde, otro proveedor, respuesta degradada o escalar a humano.
+
+El simulador [Circuit breaker](/system-design/simulators/circuit-breaker) muestra la diferencia entre seguir llamando
+a un proveedor caído y abrir el circuito.
+
+## Backpressure y control de admisión
+
+Una cola sin límite no resuelve una sobrecarga: la **posterga** y la convierte en un backlog que tal vez nunca se
+vacíe. **Backpressure** es que el componente saturado **frene a quien le envía trabajo**.
+
+<FlowDiagram
+  steps={[
+    { title: "Límites", detail: "Colas acotadas y concurrencia máxima por worker y por dependencia." },
+    { title: "Señal hacia atrás", detail: "429 o 503 con Retry-After; el productor reduce el ritmo." },
+    { title: "Prioridades", detail: "Respuestas a deudores antes que envíos masivos.", tone: "runtime" },
+    {
+      title: "Load shedding",
+      detail: "Si no alcanza, descartar o diferir lo menos importante.",
+      tone: "boundary",
+    },
+  ]}
+  caption="Es mejor rechazar parte del trabajo de forma controlada que degradar todo."
+/>
+
+Métricas que importan: **largo de la cola, edad del mensaje más viejo** y tasa de entrada frente a tasa de
+procesamiento. Si la edad crece de forma sostenida, el sistema no está alcanzando y hay que escalar consumidores,
+reducir la entrada o priorizar. El simulador [Procesamiento de colas](/system-design/simulators/queue-processing)
+explora estas dinámicas.
+
+## Rate limiting en varios niveles
+
+| Nivel                | Para qué                                                         |
+| -------------------- | ---------------------------------------------------------------- |
+| Borde (API gateway)  | Proteger la plataforma de abuso y clientes defectuosos           |
+| Por tenant           | Que un cliente no consuma la capacidad de todos (noisy neighbor) |
+| Por deudor           | Límites legales y de buena práctica de contactos por día         |
+| Hacia cada proveedor | Respetar sus cuotas (mensajería, LLM, pagos)                     |
+
+## Webhooks confiables
+
+**Recibidos** (de proveedores): verificar la firma sobre el body crudo, persistir con deduplicación por ID, responder
+2xx rápido y procesar de forma asíncrona (curso de Node.js).
+
+**Enviados** (la plataforma notifica a los sistemas de sus clientes):
+
+- Firmar cada envío (HMAC con un secreto por cliente) e incluir un timestamp.
+- Reintentar con backoff durante horas o días ante errores o timeouts, y mover a una DLQ por cliente al agotarse.
+- Incluir un **ID de evento** para que el cliente deduplique.
+- Proteger contra **SSRF**: validar las URLs de destino (no permitir direcciones internas).
+- Un panel o API para que el cliente vea entregas fallidas y las reenvíe.
+
+El desafío de arquitectura [Webhooks confiables](/system-design/challenges/reliable-webhooks) recorre este diseño
+completo.
+
+## Recuperación ante desastres
+
+| Concepto | Pregunta                                     | Ejemplo                                        |
+| -------- | -------------------------------------------- | ---------------------------------------------- |
+| **RPO**  | ¿Cuántos datos (en tiempo) se pueden perder? | 5 minutos de pagos: no; 1 hora de métricas: sí |
+| **RTO**  | ¿Cuánto puede tardar en volver el servicio?  | Webhooks de pagos: 30 minutos                  |
+
+| Estrategia                                | RPO / RTO típicos  | Costo |
+| ----------------------------------------- | ------------------ | ----- |
+| Backups y restauración                    | Horas              | Bajo  |
+| Pilot light / warm standby en otra región | Minutos a una hora | Medio |
+| Activo-activo multirregión                | Segundos a minutos | Alto  |
+
+Para la mayoría de los sistemas, **multi-zona** dentro de una región (base con réplica síncrona en otra zona, varias
+instancias) cubre las fallas comunes; **multi-región** se justifica por requisitos fuertes de disponibilidad o
+regulatorios. Y un plan de recuperación **que nunca se probó no es un plan**: restauraciones periódicas y simulacros.
+
+## Errores frecuentes
+
+- **Llamadas síncronas en cadena** para trabajo que podía ser asíncrono.
+- **Consumidores no idempotentes** con colas de entrega al menos una vez.
+- **DLQ sin alertas** ni reprocesamiento.
+- **Reintentos en varias capas** y sin jitter.
+- **Colas sin límite** y sin métricas de antigüedad.
+- **Webhooks salientes sin firma, sin reintentos o sin protección SSRF.**
+- **RPO y RTO no definidos** o planes de recuperación nunca probados.
+
+## Ejercicio interactivo
+
+<KnowledgeCheck
+  id="system-design.messaging-resilience.q1"
+  question="Un mensaje de la cola de envíos falla siempre por un número de teléfono inválido. ¿Qué debería pasar?"
+  options={[
+    {
+      text: "Reintentarlo indefinidamente.",
+      explanation: "Consume recursos para siempre y puede bloquear a otros mensajes.",
+    },
+    {
+      text: "Tras detectar el error permanente (o N intentos), moverlo a la DLQ con alerta y registrar el motivo.",
+      correct: true,
+      explanation: "Correcto. Los errores permanentes no se reintentan; se apartan para revisión.",
+    },
+    {
+      text: "Borrarlo silenciosamente.",
+      explanation: "Se pierde la trazabilidad de un contacto que no se realizó.",
+    },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="system-design.messaging-resilience.q2"
+  question="La edad del mensaje más viejo de la cola crece de forma sostenida durante una campaña. ¿Qué indica?"
+  options={[
+    {
+      text: "Que todo funciona: la cola está absorbiendo el pico.",
+      explanation: "Si crece sostenidamente, nunca se va a vaciar al ritmo actual.",
+    },
+    {
+      text: "Que la tasa de entrada supera a la de procesamiento: hay que escalar consumidores, reducir la entrada o priorizar.",
+      correct: true,
+      explanation: "Correcto. Es la señal clásica de backlog insalvable sin intervención.",
+    },
+    {
+      text: "Que hay un problema de red.",
+      explanation: "Puede ser una causa, pero la señal habla del balance entre entrada y salida.",
+    },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="system-design.messaging-resilience.q3"
+  question="Para los pagos, el negocio acepta perder como máximo 1 minuto de datos y estar fuera de servicio como máximo 30 minutos. ¿Cómo se expresan?"
+  options={[
+    {
+      text: "SLA de 99,9 %.",
+      explanation: "Es otra métrica; no expresa pérdida de datos ni tiempo de recuperación.",
+    },
+    {
+      text: "RPO de 1 minuto y RTO de 30 minutos.",
+      correct: true,
+      explanation: "Correcto. Guían la estrategia de backups, réplicas y failover.",
+    },
+    {
+      text: "RTO de 1 minuto y RPO de 30 minutos.",
+      explanation: "Están invertidos: RPO es pérdida de datos; RTO, tiempo de recuperación.",
+    },
+  ]}
+/>

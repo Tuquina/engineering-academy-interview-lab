@@ -1,0 +1,226 @@
+---
+id: system-design.introduction
+moduleId: system-design.intro
+title: "Introducción a System Design: qué se evalúa y cómo estructurar una respuesta"
+description: "Qué es una entrevista de System Design y qué evalúa realmente; las fases de una buena respuesta (aclarar, estimar, diseñar en alto nivel, profundizar, cuellos de botella y compromisos); cómo separar requerimientos funcionales y no funcionales; estimaciones de orden de magnitud; los bloques de construcción de un sistema; y cómo comunicar decisiones."
+difficulty: basic
+order: 1
+objectives:
+  - "Explicar qué evalúa una entrevista de System Design."
+  - "Estructurar una respuesta en fases y administrar el tiempo."
+  - "Separar requerimientos funcionales de no funcionales y hacer preguntas aclaratorias útiles."
+  - "Hacer estimaciones de orden de magnitud de carga, almacenamiento y ancho de banda."
+  - "Reconocer los bloques de construcción de un sistema y cuándo aparece cada uno."
+prerequisites: ["software-architecture.introduction"]
+estimatedMinutes: 35
+tags: ["system design", "entrevista", "estimaciones", "requerimientos", "introducción"]
+version: "1.0.0"
+comparesWith: []
+references:
+  - title: "Alex Xu — System Design Interview (framework de 4 pasos, resumen)"
+    url: "https://bytebytego.com/courses/system-design-interview/a-framework-for-system-design-interviews"
+  - title: "Google SRE Book — Service Level Objectives"
+    url: "https://sre.google/sre-book/service-level-objectives/"
+  - title: "Jeff Dean — Latency numbers every programmer should know (versión interactiva)"
+    url: "https://colin-scott.github.io/personal_website/research/interactive_latency.html"
+  - title: "AWS Well-Architected Framework"
+    url: "https://docs.aws.amazon.com/wellarchitected/latest/framework/welcome.html"
+interviewQuestions:
+  - question: "¿Cómo encarás una pregunta de System Design?"
+    keyPoints:
+      - "Aclarar alcance: requerimientos funcionales, no funcionales, escala y restricciones; acordar qué queda afuera."
+      - "Estimar carga y datos en orden de magnitud para guiar las decisiones."
+      - "Proponer un diseño de alto nivel con los componentes y el flujo principal."
+      - "Profundizar en las partes críticas, identificar cuellos de botella y fallas, y explicar los compromisos."
+  - question: "¿Qué diferencia hay entre requerimientos funcionales y no funcionales?"
+    keyPoints:
+      - "Funcionales: qué hace el sistema (registrar promesas, enviar recordatorios, recibir pagos)."
+      - "No funcionales: cómo debe comportarse (latencia, disponibilidad, consistencia, seguridad, costo, cumplimiento)."
+      - "Los no funcionales son los que más condicionan la arquitectura."
+summary:
+  - "La entrevista evalúa razonamiento, comunicación y criterio sobre compromisos, no un diagrama 'correcto'."
+  - "Fases: aclarar, estimar, alto nivel, profundizar, cuellos de botella y fallas, compromisos y cierre."
+  - "Los requerimientos no funcionales (latencia, disponibilidad, consistencia, costo) definen la arquitectura."
+  - "Estimaciones de orden de magnitud: requests por segundo, picos, almacenamiento y ancho de banda."
+  - "Bloques: balanceadores, servicios sin estado, bases, cachés, colas, almacenamiento de objetos, CDN, observabilidad."
+  - "Se comunica en voz alta, con supuestos explícitos y alternativas descartadas."
+---
+
+## Qué vas a aprender en este curso
+
+System Design es la parte de la entrevista donde se evalúa si podés **diseñar un sistema completo**: desde los
+requerimientos hasta cómo se comporta cuando algo falla. Para una plataforma de agentes de cobranzas, las preguntas
+típicas son "diseñá un orquestador de campañas masivas", "diseñá la recepción confiable de webhooks de pagos" o
+"diseñá una plataforma multi-tenant de agentes".
+
+| Módulo                         | Qué vas a poder hacer                                                                             |
+| ------------------------------ | ------------------------------------------------------------------------------------------------- |
+| Introducción                   | Estructurar una respuesta, estimar cargas y comunicar compromisos.                                |
+| Escalabilidad y disponibilidad | Escalar con balanceo, servicios sin estado, réplicas y particiones; definir SLOs.                 |
+| Consistencia y concurrencia    | Razonar con CAP, elegir consistencia, garantizar idempotencia y evitar carreras.                  |
+| Mensajería y resiliencia       | Diseñar con colas, reintentos, DLQ, circuit breakers, backpressure y recuperación ante desastres. |
+| Plataformas multi-tenant       | Aislar tenants, autenticar y autorizar, proteger APIs y observar el sistema.                      |
+
+La plataforma tiene el **System Design Studio** (`/system-design`) con un canvas para diagramar, simuladores y cuatro
+desafíos completos con las mismas fases de esta lección.
+
+## Qué se evalúa
+
+No hay un diagrama "correcto". Se evalúa:
+
+- **Que aclares el problema** antes de resolverlo.
+- **Que tus decisiones se apoyen en requerimientos y números**, no en preferencias.
+- **Que conozcas los bloques de construcción** y sus garantías.
+- **Que anticipes fallas** y cuellos de botella.
+- **Que expliques compromisos** y alternativas.
+- **Que comuniques con claridad** y uses el tiempo con criterio.
+
+## Las fases de una respuesta
+
+<MermaidDiagram
+  caption="Las fases de una respuesta de System Design, con un reparto orientativo en una entrevista de 45 minutos."
+  chart={`
+flowchart LR
+  A["1. Aclarar<br/>5 min"] --> B["2. Estimar<br/>3-5 min"]
+  B --> C["3. Alto nivel<br/>10 min"]
+  C --> D["4. Profundizar<br/>15 min"]
+  D --> E["5. Cuellos de botella<br/>y fallas, 5-8 min"]
+  E --> F["6. Compromisos<br/>y cierre, 2-3 min"]
+`}
+/>
+
+Los desafíos del Studio usan ocho fases con la misma lógica (separando, por ejemplo, el modelo de datos y las APIs).
+Lo importante es el orden: **no se dibujan componentes antes de saber qué se necesita**.
+
+## Requerimientos funcionales y no funcionales
+
+| Tipo               | Pregunta           | Ejemplo para un orquestador de campañas                                                                    |
+| ------------------ | ------------------ | ---------------------------------------------------------------------------------------------------------- |
+| **Funcionales**    | ¿Qué hace?         | Crear campañas con segmentos; enviar por SMS, WhatsApp y voz; registrar resultados; pausar                 |
+| **No funcionales** | ¿Cómo se comporta? | 2 millones de contactos por día; respetar horarios legales; no duplicar envíos; costo por contacto acotado |
+| **Restricciones**  | ¿Qué está dado?    | Límites de los proveedores; normativa por país; equipo de 6 personas                                       |
+
+Preguntas aclaratorias que valen oro (porque cambian el diseño):
+
+- ¿Cuál es la escala hoy y en un año? ¿Hay picos (fin de mes, campañas masivas)?
+- ¿Qué pasa si se envía un mensaje dos veces? ¿Y si no se envía?
+- ¿Qué latencia es aceptable? ¿El usuario espera la respuesta?
+- ¿Cuántos tenants? ¿Requisitos de aislamiento o de residencia de datos?
+- ¿Qué consistencia se necesita entre lo que ve el operador y lo que pasó?
+
+## Estimaciones de orden de magnitud
+
+Las estimaciones no buscan precisión: buscan saber **si el problema es de miles o de millones** y dónde está la
+presión.
+
+```text
+Contactos por día:              2.000.000
+Ventana horaria permitida:      10 horas = 36.000 s
+Envíos promedio por segundo:    2.000.000 / 36.000 ≈ 55 por segundo
+Pico (inicio de campaña, ×5):   ≈ 280 por segundo
+Respuestas entrantes (20 %):    400.000 conversaciones por día
+Llamadas al LLM (6 por conversación): 2,4 millones por día ≈ 67 por segundo en la ventana
+Almacenamiento de mensajes (1 KB, 3 por contacto): ≈ 6 GB por día ≈ 2 TB por año
+```
+
+Ya con esto se ven decisiones: 280 envíos por segundo **no** es un problema para la base, pero sí para los **límites
+de los proveedores** (hace falta rate limiting y colas); 2 TB por año de mensajes sugiere **particionar** por tiempo y
+definir retención; 67 llamadas por segundo al LLM convierten **costo y cuotas del proveedor** en un requerimiento de
+primer orden.
+
+| Referencia útil                     | Orden de magnitud                  |
+| ----------------------------------- | ---------------------------------- |
+| Segundos en un día                  | ~86.400 (≈ 10^5)                   |
+| Lectura de memoria                  | Nanosegundos                       |
+| Lectura de SSD                      | Decenas a cientos de microsegundos |
+| Ida y vuelta en el mismo datacenter | Menos de 1 ms                      |
+| Ida y vuelta entre continentes      | 100-200 ms                         |
+| Llamada a un LLM                    | Cientos de ms a segundos           |
+
+## Bloques de construcción
+
+<FlowDiagram
+  steps={[
+    { title: "Borde", detail: "DNS, CDN, balanceador, API gateway, WAF." },
+    { title: "Cómputo", detail: "Servicios sin estado, workers, funciones." },
+    {
+      title: "Datos",
+      detail: "Base relacional, caché, almacenamiento de objetos, búsqueda, índice vectorial.",
+      tone: "runtime",
+    },
+    { title: "Asincronía", detail: "Colas, brokers, schedulers, outbox." },
+    { title: "Operación", detail: "Logs, métricas, trazas, alertas, feature flags.", tone: "boundary" },
+  ]}
+  caption="Casi todo diseño combina estos bloques; la pregunta es cuáles hacen falta y por qué."
+/>
+
+En el canvas del Studio están los 14 componentes más comunes, cada uno con sus propiedades.
+
+## Cómo comunicar
+
+- **Pensar en voz alta** y hacer explícitos los supuestos ("asumo que un envío duplicado es grave").
+- **Empezar simple** y agregar complejidad cuando un requerimiento la pide.
+- **Nombrar alternativas** y por qué se descartaron.
+- **Preguntar al entrevistador** qué parte quiere profundizar.
+- **Cerrar con un resumen**: decisiones clave, riesgos y qué haría con más tiempo.
+
+## Errores frecuentes
+
+- **Dibujar componentes antes de entender el problema.**
+- **No estimar**, y elegir tecnologías por costumbre.
+- **Diseñar para una escala imaginaria** (o ignorar la real).
+- **No hablar de fallas**: qué pasa si cae la base, el proveedor o una zona.
+- **Presentar decisiones sin compromisos.**
+- **Monólogos largos** sin chequear con el entrevistador.
+
+## Ejercicio interactivo
+
+<KnowledgeCheck
+  id="system-design.introduction.q1"
+  question="Te piden diseñar un orquestador de campañas. ¿Qué hacés primero?"
+  options={[
+    {
+      text: "Dibujar los microservicios principales.",
+      explanation: "Sin requerimientos ni escala, el diseño no tiene fundamento.",
+    },
+    {
+      text: "Aclarar requerimientos funcionales y no funcionales, escala, picos y qué tan grave es un envío duplicado.",
+      correct: true,
+      explanation: "Correcto. Esas respuestas definen colas, idempotencia, rate limiting y almacenamiento.",
+    },
+    {
+      text: "Elegir la base de datos.",
+      explanation: "La elección depende de los requerimientos que todavía no conocés.",
+    },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="system-design.introduction.q2"
+  question="Con 2 millones de contactos por día en una ventana de 10 horas, ¿qué orden de magnitud de envíos por segundo esperás en promedio?"
+  options={[
+    { text: "Unos 5", explanation: "Es un orden de magnitud menos: 2.000.000 / 36.000 ≈ 55." },
+    {
+      text: "Unos 55, con picos varias veces mayores",
+      correct: true,
+      explanation:
+        "Correcto. Y los picos al iniciar campañas condicionan el rate limiting hacia los proveedores.",
+    },
+    { text: "Unos 5.000", explanation: "Sería el caso si todo se enviara en unos pocos minutos." },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="system-design.introduction.q3"
+  question="¿Cuál es un requerimiento no funcional?"
+  options={[
+    { text: "Permitir pausar una campaña.", explanation: "Es una capacidad del sistema: funcional." },
+    {
+      text: "Un mismo contacto no debe recibir el mismo mensaje dos veces, incluso ante reintentos.",
+      correct: true,
+      explanation:
+        "Correcto. Es una garantía de comportamiento que condiciona la arquitectura (idempotencia).",
+    },
+    { text: "Registrar el resultado de cada contacto.", explanation: "Es una función del sistema." },
+  ]}
+/>

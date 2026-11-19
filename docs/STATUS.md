@@ -219,7 +219,7 @@ entrevista rápida con su registro y recomendación, y el live coding con tests 
 - El live coding parte del borrador guardado del challenge si existe (se puede reiniciar con "Reiniciar").
 - Las entrevistas no graban audio: responder en voz alta queda a cargo del usuario.
 
-## Fase 4.5 — Teoría de los cursos · 🚧 en curso
+## Fase 4.5 — Teoría de los cursos · ✅ completada (2026-11-19)
 
 Fase agregada a pedido del usuario (ADR-0008): cursos completos de introducción y teoría, entendibles desde cero
 para alguien que ya programa. Cada curso suma un módulo **Introducción** (qué es, cómo se usa, sintaxis básica y
@@ -235,11 +235,18 @@ C# y Java, errores frecuentes, knowledge checks y preguntas de entrevista.
 | LLMs y agentes de IA     | 8         | ✅ Tanda 4 |
 | PostgreSQL               | 6         | ✅ Tanda 5 |
 | Redis                    | 4         | ✅ Tanda 5 |
-| Arquitectura de software | 0         | Pendiente  |
-| System Design            | 0         | Pendiente  |
+| Arquitectura de software | 5         | ✅ Tanda 6 |
+| System Design            | 5         | ✅ Tanda 6 |
 
 ### Implementado y verificado
 
+- **Arquitectura de software (5 lecciones):** introducción (decisiones, atributos de calidad, compromisos, ADRs,
+  C4), principios (SOLID, DRY/KISS/YAGNI, acoplamiento y cohesión, inversión de dependencias, pirámide de testing,
+  DDD), patrones de diseño en TypeScript, estilos (capas, hexagonal, monolito modular, microservicios, Strangler Fig)
+  y patrones distribuidos (eventos, event sourcing, CQRS, sagas, outbox/inbox, DLQ, circuit breaker, bulkhead, BFF).
+- **System Design (5 lecciones):** introducción (fases de la respuesta, requerimientos, estimaciones), escalabilidad
+  y disponibilidad (balanceo, réplicas, sharding, SLOs), consistencia (CAP/PACELC, read-your-writes, idempotencia de
+  punta a punta), mensajería y resiliencia (colas, DLQ, backpressure, webhooks, RPO/RTO) y plataformas multi-tenant.
 - **PostgreSQL (6 lecciones):** introducción y SQL esencial (Docker, psql, tipos, DDL/DML, agregaciones, NULL,
   consultas parametrizadas), modelado (normalización, claves, constraints, JSONB, migraciones expand/contract),
   consultas (joins, CTEs, window functions, keyset), índices y EXPLAIN ANALYZE, transacciones (aislamiento, MVCC,
@@ -278,6 +285,25 @@ C# y Java, errores frecuentes, knowledge checks y preguntas de entrevista.
   inversión de dependencias, `Result`, Vitest con fakes).
 - **Verificación de diagramas:** `tests/content/lesson-diagrams.test.ts` parsea con Mermaid todos los diagramas de
   lecciones y cheatsheets; un diagrama roto falla el test en lugar de mostrarse como código en el navegador.
+- **Ruta principal:** empieza por la introducción de TypeScript; los cursos completos se expanden solos en la ruta.
+
+### Verificación
+
+60 lecciones en 9 cursos (cada curso con su módulo de introducción), 180 knowledge checks y 105 diagramas (Mermaid y
+de flujo), todos parseados por el test de diagramas. Cada lección pasa el mínimo de calidad de
+`catalog-content.test.ts` (secciones, extensión, referencias oficiales y preguntas de entrevista) y compila en el
+build de producción. Los detalles dependientes de versión se verificaron contra la documentación incluida en
+`next@16.4.6` y contra la referencia oficial de la API de Claude.
+
+### Limitaciones conocidas
+
+- Algunos temas de los temarios se cubren dentro de lecciones más amplias en lugar de tener una lección propia (por
+  ejemplo, Template Method o Composite dentro de la lección general de patrones).
+- Los ejemplos de código de las lecciones son ilustrativos y no se ejecutan en los tests; los que se pueden practicar
+  están en los challenges, el playground y el Database Lab (los ejemplos de window functions corren tal cual ahí).
+- Las referencias a precios, modelos y versiones de proveedores reflejan noviembre de 2026; las lecciones remiten a la
+  documentación oficial para valores vigentes.
+- Todavía no hay una ruta de preparación de 7 días (§35).
 
 ## Próximas fases
 
@@ -286,7 +312,7 @@ C# y Java, errores frecuentes, knowledge checks y preguntas de entrevista.
 | 2 — Aprendizaje                                                               | Completada |
 | 3 — Laboratorios (editor, Sandpack, SQL Playground con PGlite, challenges)    | Completada |
 | 4 — Arquitectura y entrevistas (System Design Studio, Interview Arena)        | Completada |
-| 4.5 — Teoría de los cursos (ADR-0008)                                         | En curso   |
+| 4.5 — Teoría de los cursos (ADR-0008)                                         | Completada |
 | 5 — Agentes IA (configuración, tool calling, memoria, evals)                  | Pendiente  |
 | 6 — Persistencia y administración (PostgreSQL, auth, contenido personalizado) | Pendiente  |
 | 7 — Producción (CI/CD, Vercel)                                                | Pendiente  |
@@ -295,9 +321,9 @@ C# y Java, errores frecuentes, knowledge checks y preguntas de entrevista.
 
 | Elemento                    | Actual                                        | Objetivo |
 | --------------------------- | --------------------------------------------- | -------- |
-| Lecciones sustantivas       | 50                                            | 40 ✅    |
+| Lecciones sustantivas       | 60                                            | 40 ✅    |
 | Challenges                  | 11 + 4 de arquitectura (+ 6 ejercicios SQL)   | 25       |
-| Preguntas de evaluación     | 150 knowledge checks + 27 del Interview Arena | 60 ✅    |
+| Preguntas de evaluación     | 180 knowledge checks + 27 del Interview Arena | 60 ✅    |
 | Flashcards                  | 32                                            | 30 ✅    |
 | Diagramas                   | 13 (10 interactivos + 1 flujo + 2 Mermaid)    | 12 ✅    |
 | Simuladores o laboratorios  | 9 (3 laboratorios + 6 simuladores)            | 5 ✅     |

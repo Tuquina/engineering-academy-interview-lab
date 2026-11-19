@@ -1762,7 +1762,7 @@ La aplicación es amplia. Organizar el desarrollo en fases ejecutables, con entr
 Agregada a pedido del usuario después de la Fase 4: las herramientas existen, pero los cursos necesitan la teoría
 completa para aprender desde cero (para alguien que ya programa) antes de practicar.
 
-- [ ] Módulo de introducción en cada curso: qué es, para qué sirve, sintaxis básica y ejemplos (ADR-0008).
+- [x] Módulo de introducción en cada curso: qué es, para qué sirve, sintaxis básica y ejemplos (ADR-0008).
 - [x] TypeScript.
 - [x] Node.js.
 - [x] React.
@@ -1770,8 +1770,8 @@ completa para aprender desde cero (para alguien que ya programa) antes de practi
 - [x] LLMs y agentes de IA.
 - [x] PostgreSQL.
 - [x] Redis.
-- [ ] Arquitectura de software.
-- [ ] System Design.
+- [x] Arquitectura de software.
+- [x] System Design.
 - [x] Verificación automática de diagramas y del mínimo de calidad de cada lección.
 
 Cada lección: teoría explicada a fondo, diagramas, ejemplos de código, comparación con C# y Java cuando aplica,
