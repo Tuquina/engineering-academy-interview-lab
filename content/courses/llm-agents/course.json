@@ -10,6 +10,21 @@
   "tags": ["llm", "agentes", "evals"],
   "modules": [
     {
+      "id": "llm-agents.intro",
+      "slug": "introduccion",
+      "title": "Introducción",
+      "description": "Qué es un LLM, qué es un agente y cómo se usa un modelo desde código: mensajes, roles, respuestas y el mapa del curso.",
+      "order": 0,
+      "topics": [
+        "Qué es un LLM, en términos de ingeniería",
+        "Qué es un agente y en qué se diferencia de un chatbot",
+        "Llamar a un modelo desde código: mensajes, roles y respuesta",
+        "Un puerto propio y adaptadores por proveedor",
+        "Qué es determinista y qué no en un sistema con LLMs",
+        "Casos de uso en cobranzas"
+      ]
+    },
+    {
       "id": "llm-agents.fundamentals",
       "slug": "fundamentos",
       "title": "Fundamentos de LLMs",

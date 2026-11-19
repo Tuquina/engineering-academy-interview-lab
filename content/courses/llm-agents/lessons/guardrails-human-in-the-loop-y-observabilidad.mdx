@@ -1,0 +1,249 @@
+---
+id: llm-agents.guardrails-observability
+moduleId: llm-agents.engineering
+title: "Guardrails, human in the loop, trazabilidad y costos por conversación"
+description: "Cómo se opera un agente en producción con responsabilidad: guardrails de entrada, de acción y de salida; cuándo y cómo involucrar a una persona (aprobaciones, escalamiento y handoff); trazas que permiten reconstruir cada decisión del agente; y métricas de calidad, costo y riesgo por conversación y por tenant."
+difficulty: advanced
+order: 2
+objectives:
+  - "Diseñar guardrails en tres puntos: entrada, acciones y salida."
+  - "Definir criterios de human in the loop: aprobación previa, escalamiento y handoff."
+  - "Registrar trazas que reconstruyan cada turno: contexto, decisiones, herramientas y versión."
+  - "Medir costo, latencia y calidad por conversación y por tenant."
+  - "Cumplir requisitos de privacidad y auditoría en los registros."
+prerequisites: ["llm-agents.agent-engineering", "nodejs.observability-testing"]
+estimatedMinutes: 40
+tags: ["guardrails", "human in the loop", "observabilidad", "trazas", "costos", "auditoría", "privacidad"]
+version: "1.0.0"
+comparesWith: []
+references:
+  - title: "OWASP — Top 10 for LLM Applications"
+    url: "https://genai.owasp.org/llm-top-10/"
+  - title: "OpenTelemetry — Semantic conventions for generative AI"
+    url: "https://opentelemetry.io/docs/specs/semconv/gen-ai/"
+  - title: "Anthropic — OpenTelemetry"
+    url: "https://platform.claude.com/docs/en/manage-claude/opentelemetry"
+  - title: "NIST — AI Risk Management Framework"
+    url: "https://www.nist.gov/itl/ai-risk-management-framework"
+interviewQuestions:
+  - question: "¿Qué guardrails pondrías en un agente de cobranzas?"
+    keyPoints:
+      - "Entrada: detección de intentos de inyección, datos sensibles, señales de vulnerabilidad y opt-out."
+      - "Acciones: herramientas permitidas, límites de negocio, confirmación humana para lo irreversible."
+      - "Salida: validación de montos y fechas contra el sistema, lenguaje prohibido, cumplimiento de horarios y normativa."
+      - "Los guardrails deterministas se prefieren; los basados en modelos se evalúan y se usan como capa adicional."
+  - question: "¿Cuándo pondrías a un humano en el loop?"
+    keyPoints:
+      - "Acciones de alto impacto o irreversibles: quitas grandes, cancelaciones, cambios contractuales."
+      - "Señales de vulnerabilidad, conflicto o pedido explícito de la persona."
+      - "Baja confianza o casos fuera de las políticas conocidas."
+      - "El handoff transfiere un resumen y el estado estructurado para que el operador no empiece de cero."
+  - question: "¿Qué registrarías para poder auditar una conversación de un agente?"
+    keyPoints:
+      - "Versión del agente, modelo usado y contexto enviado (o una referencia), por turno."
+      - "Cada tool call con sus argumentos, resultado, latencia y decisión de los guardrails."
+      - "Tokens, costo y latencia por llamada, agregables por conversación y tenant."
+      - "Con redacción de datos personales y retención acorde a la normativa."
+summary:
+  - "Guardrails en tres puntos: lo que entra, lo que el agente hace y lo que el agente dice."
+  - "Se prefieren controles deterministas; los clasificadores con modelos se agregan como capa extra y se evalúan."
+  - "Human in the loop: aprobación previa para lo irreversible, escalamiento por señales de riesgo y handoff con contexto."
+  - "Una traza por turno reconstruye contexto, decisiones, herramientas, versión y guardrails."
+  - "Costo, latencia y calidad se miden por conversación, por tenant y por versión del agente."
+  - "Los registros también son datos personales: se redactan y tienen retención definida."
+---
+
+## ¿Qué problema resuelve?
+
+Un agente de cobranzas habla con personas, muchas veces en situaciones difíciles, en nombre de una empresa regulada.
+Un error puede ser un mensaje agresivo, un plan de pago fuera de política, un contacto en horario prohibido o
+información de deuda revelada a un familiar. Para operar con responsabilidad hacen falta tres cosas: **guardrails**
+que impidan lo inaceptable, **personas** en los puntos donde el criterio humano es necesario y **observabilidad** para
+saber qué pasó en cada conversación.
+
+## Guardrails en tres puntos
+
+<MermaidDiagram
+  caption="Los guardrails rodean al modelo: filtran lo que entra, controlan lo que hace y verifican lo que dice."
+  chart={`
+flowchart LR
+  IN["Mensaje entrante"] --> G1["Guardrails de entrada<br/>opt-out, vulnerabilidad,<br/>inyección, datos sensibles"]
+  G1 --> M["Agente"]
+  M --> G2["Guardrails de acción<br/>herramientas permitidas,<br/>límites, aprobaciones"]
+  G2 --> TOOLS["Herramientas"]
+  M --> G3["Guardrails de salida<br/>montos y fechas verificados,<br/>lenguaje, horarios"]
+  G3 --> OUT["Mensaje enviado"]
+  G1 -.->|"casos de riesgo"| H["Operador humano"]
+  G2 -.->|"requiere aprobación"| H
+  G3 -.->|"bloqueado"| H
+`}
+/>
+
+| Punto       | Ejemplos                                                                                                    | Tipo de control       |
+| ----------- | ----------------------------------------------------------------------------------------------------------- | --------------------- |
+| **Entrada** | "No me escriban más" → registrar opt-out y cortar; menciones de enfermedad o duelo → escalar                | Reglas + clasificador |
+| **Acción**  | Descuento mayor al permitido → rechazar; quita mayor a un umbral → aprobación humana                        | Código determinista   |
+| **Salida**  | El mensaje menciona un monto que no coincide con el sistema → bloquear; fuera del horario legal → no enviar | Código + clasificador |
+
+**Preferí controles deterministas.** Que un monto coincida con el saldo, que la hora esté dentro del horario
+permitido o que una herramienta no esté disponible son verificaciones exactas. Los **clasificadores basados en
+modelos** (detectar tono agresivo, señales de vulnerabilidad, intentos de manipulación) son útiles como capa
+adicional, pero son probabilísticos: tienen falsos positivos y negativos, y se evalúan como cualquier otro componente.
+
+```ts
+/** Guardrail de salida: todo monto mencionado debe existir en los datos verificados del turno. */
+export function verifyMentionedAmounts(message: string, verified: VerifiedTurnData): GuardrailResult {
+  const mentioned = extractAmounts(message); // parseo determinista de montos en el texto
+  const allowed = new Set([verified.balanceCents, ...verified.offeredPlans.map((p) => p.installmentCents)]);
+  const unknown = mentioned.filter((amount) => !allowed.has(amount));
+  return unknown.length === 0
+    ? { action: "allow" }
+    : { action: "block", reason: "amount_not_verified", details: { unknown } };
+}
+```
+
+Cuando un guardrail bloquea, el sistema tiene una **respuesta segura predefinida** (o regenera con la corrección, o
+escala); nunca envía el mensaje bloqueado.
+
+## Human in the loop
+
+| Modalidad              | Cuándo                                                         | Ejemplo                                                               |
+| ---------------------- | -------------------------------------------------------------- | --------------------------------------------------------------------- |
+| **Aprobación previa**  | Acciones irreversibles o de alto impacto                       | Una quita del 40 % queda pendiente hasta que un supervisor la aprueba |
+| **Escalamiento**       | Señales de riesgo, conflicto, baja confianza, pedido explícito | "Quiero hablar con una persona"                                       |
+| **Handoff**            | La conversación pasa a un operador                             | Disputa sobre la existencia de la deuda                               |
+| **Revisión posterior** | Muestreo de conversaciones para control de calidad             | 2 % de las conversaciones cerradas se revisan                         |
+
+Un buen **handoff** transfiere **contexto**: un resumen de la conversación, el estado estructurado (identidad
+verificada, saldo informado, ofertas hechas, motivo del escalamiento) y el historial completo accesible. El operador
+no debería tener que preguntar lo que la persona ya contestó.
+
+Las aprobaciones también son una parte del diseño de la experiencia: mientras una quita espera aprobación, el agente
+informa con honestidad que la propuesta está en revisión y cuándo habrá respuesta.
+
+## Trazabilidad
+
+Para responder "¿por qué el agente dijo esto?" hace falta una **traza por turno**:
+
+```ts
+interface AgentTurnTrace {
+  conversationId: string;
+  tenantId: string;
+  turn: number;
+  agent: { agentId: string; version: number }; // qué configuración corrió
+  stage: ConversationStage; // en qué etapa de la máquina de estados
+  modelCalls: Array<{
+    model: string;
+    inputTokens: number;
+    outputTokens: number;
+    cacheReadTokens: number;
+    latencyMs: number;
+    stopReason: string;
+    requestId: string; // para correlacionar con el proveedor
+  }>;
+  toolCalls: Array<{ name: string; argsRedacted: unknown; ok: boolean; latencyMs: number; error?: string }>;
+  guardrails: Array<{ name: string; action: "allow" | "block" | "escalate"; reason?: string }>;
+  outcome: "replied" | "escalated" | "blocked" | "error";
+}
+```
+
+Con **OpenTelemetry** cada turno es una traza con spans para las llamadas al modelo, las herramientas y los
+guardrails; existen convenciones semánticas específicas para IA generativa (nombres de atributos para modelo, tokens,
+operación). Así una conversación se sigue de punta a punta junto con el resto del sistema (curso de Node.js).
+
+<Callout type="warning" title="Los logs de un agente contienen datos personales">
+  Mensajes de deudores, montos, situaciones personales. Se **redactan** los datos sensibles en los logs
+  operativos, se separan los registros de auditoría (con acceso restringido) y se define una **retención**
+  acorde a la normativa y al contrato con el cliente.
+</Callout>
+
+## Métricas: calidad, costo y riesgo
+
+| Dimensión | Métricas                                                                                           |
+| --------- | -------------------------------------------------------------------------------------------------- |
+| Negocio   | Tasa de contacto efectivo, promesas registradas, promesas cumplidas, recupero                      |
+| Calidad   | Tasa de escalamiento, conversaciones bloqueadas por guardrails, puntaje de revisión humana, quejas |
+| Costo     | Tokens y costo por conversación, por promesa lograda, por tenant y por versión del agente          |
+| Operación | Latencia por turno (p50, p95), errores del proveedor, fallbacks usados                             |
+| Riesgo    | Intentos de inyección detectados, opt-outs, contactos fuera de horario bloqueados                  |
+
+Todas se cortan **por versión del agente**: es la forma de saber si una versión nueva mejoró o empeoró en producción
+(y alimenta la comparación de versiones del módulo de evals). El **costo por resultado** (por promesa cumplida) es más
+significativo que el costo por mensaje.
+
+<FlowDiagram
+  steps={[
+    { title: "Trazas por turno", detail: "Modelo, herramientas, guardrails, versión." },
+    { title: "Agregación", detail: "Por conversación, tenant y versión del agente." },
+    { title: "Dashboards y alertas", detail: "Costo, latencia, escalamiento, bloqueos.", tone: "runtime" },
+    {
+      title: "Revisión y evals",
+      detail: "Las conversaciones problemáticas se vuelven casos de prueba.",
+      tone: "boundary",
+    },
+  ]}
+  caption="La observabilidad cierra el ciclo: lo que falla en producción alimenta la suite de evaluaciones."
+/>
+
+## Errores frecuentes
+
+- **Guardrails sólo en el prompt** ("no ofrezcas más del 20 %").
+- **Clasificadores con modelos como único control** de algo crítico, sin evaluar sus errores.
+- **Escalar sin contexto**: el operador empieza de cero.
+- **Aprobaciones que bloquean al agente** sin informar a la persona qué está pasando.
+- **No registrar la versión del agente** en cada traza.
+- **Logs con datos personales sin redactar** y sin retención definida.
+- **Medir sólo costo por mensaje**, sin calidad ni resultado de negocio.
+
+## Ejercicio interactivo
+
+<KnowledgeCheck
+  id="llm-agents.guardrails-observability.q1"
+  question="El agente envía 'Tu saldo es de $95.000' cuando el sistema dice $59.000. ¿Qué guardrail lo hubiera evitado?"
+  options={[
+    {
+      text: "Una instrucción en el prompt pidiendo revisar los montos.",
+      explanation: "No es verificable ni garantiza nada.",
+    },
+    {
+      text: "Un guardrail de salida determinista que compara cada monto mencionado con los datos verificados del turno.",
+      correct: true,
+      explanation: "Correcto. Es una verificación exacta y barata antes de enviar.",
+    },
+    { text: "Usar un modelo más grande.", explanation: "Puede reducir la frecuencia, pero no la elimina." },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="llm-agents.guardrails-observability.q2"
+  question="Una persona cuenta que está internada y no puede pagar. ¿Qué hace un agente bien diseñado?"
+  options={[
+    {
+      text: "Ofrece el plan con más cuotas disponible.",
+      explanation: "Hay señales de vulnerabilidad: corresponde criterio humano.",
+    },
+    {
+      text: "Activa el escalamiento a un operador con un resumen y el estado de la conversación.",
+      correct: true,
+      explanation: "Correcto. Es un caso para human in the loop, con un handoff que transfiera contexto.",
+    },
+    {
+      text: "Continúa con el guion normal.",
+      explanation: "Ignorar la vulnerabilidad es un riesgo ético, legal y reputacional.",
+    },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="llm-agents.guardrails-observability.q3"
+  question="La versión 8 de un agente bajó el costo por mensaje un 30 %, pero las promesas cumplidas cayeron. ¿Qué métrica lo revela mejor?"
+  options={[
+    { text: "Costo por mensaje.", explanation: "Mejoró, y por eso es engañosa." },
+    {
+      text: "Costo por promesa cumplida, cortado por versión del agente.",
+      correct: true,
+      explanation: "Correcto. El costo se mide contra el resultado de negocio y por versión.",
+    },
+    { text: "Latencia p95.", explanation: "No refleja el resultado de negocio." },
+  ]}
+/>

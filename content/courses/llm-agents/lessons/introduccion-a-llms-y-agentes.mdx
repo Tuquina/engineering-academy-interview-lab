@@ -1,0 +1,311 @@
+---
+id: llm-agents.introduction
+moduleId: llm-agents.intro
+title: "Introducción a LLMs y agentes: qué son y cómo se usan desde código"
+description: "El punto de partida del curso: qué es un modelo de lenguaje desde el punto de vista de un ingeniero, qué es un agente y en qué se diferencia de un chatbot o de un workflow, cómo se llama a un modelo desde TypeScript (mensajes, roles, respuesta, stop reason) y por qué conviene aislar al proveedor detrás de un puerto propio."
+difficulty: basic
+order: 1
+objectives:
+  - "Explicar qué es un LLM en términos de entradas, salidas y limitaciones, sin misticismo."
+  - "Distinguir una llamada simple, un workflow y un agente, y saber cuándo conviene cada uno."
+  - "Hacer una llamada a un modelo desde TypeScript e interpretar su respuesta."
+  - "Diseñar un puerto propio para el modelo con adaptadores por proveedor."
+  - "Identificar qué partes de un sistema con LLMs son deterministas y cuáles no."
+prerequisites: ["typescript.type-safe-apis"]
+estimatedMinutes: 40
+tags: ["llm", "agentes", "introducción", "messages api", "arquitectura"]
+version: "1.0.0"
+comparesWith: []
+references:
+  - title: "Anthropic — Messages API"
+    url: "https://platform.claude.com/docs/en/api/messages/create"
+  - title: "Anthropic — Building effective agents"
+    url: "https://www.anthropic.com/engineering/building-effective-agents"
+  - title: "Anthropic — TypeScript SDK"
+    url: "https://github.com/anthropics/anthropic-sdk-typescript"
+  - title: "Anthropic — Models overview"
+    url: "https://platform.claude.com/docs/en/about-claude/models/overview"
+interviewQuestions:
+  - question: "¿Qué es un agente de IA y en qué se diferencia de un workflow con LLMs?"
+    keyPoints:
+      - "En un workflow, el código decide los pasos y el LLM resuelve partes concretas (clasificar, extraer, redactar)."
+      - "En un agente, el modelo decide qué herramienta usar y cuándo, en un loop, hasta cumplir el objetivo."
+      - "Los agentes ganan flexibilidad a cambio de menos previsibilidad, más costo y más necesidad de evaluación."
+      - "Se empieza por lo más simple que funcione; un agente se justifica cuando los pasos no se pueden especificar de antemano."
+  - question: "¿Por qué aislarías al proveedor del modelo detrás de una interfaz propia?"
+    keyPoints:
+      - "Para cambiar de modelo o proveedor sin tocar la lógica de negocio."
+      - "Para centralizar timeouts, reintentos, logging, costos y redacción de datos sensibles."
+      - "Para testear casos de uso con un fake determinista."
+      - "Sin perder las capacidades propias de cada proveedor: el puerto modela lo que el dominio necesita."
+summary:
+  - "Un LLM recibe texto (tokens) y genera texto probable a continuación; no consulta una base de datos ni ejecuta código por sí mismo."
+  - "Sus salidas son probabilísticas y pueden ser incorrectas con total confianza: se validan."
+  - "Una llamada simple resuelve una tarea acotada; un workflow encadena pasos que decide el código; un agente decide sus pasos en un loop con herramientas."
+  - "La API de mensajes es sin estado: cada request envía el historial completo."
+  - "La respuesta trae bloques de contenido, un stop_reason y el uso de tokens."
+  - "Un puerto propio (LlmClient) separa el dominio del proveedor y permite fakes en los tests."
+---
+
+## Qué vas a aprender en este curso
+
+Este curso apunta al corazón de la posición: construir una plataforma donde **agentes de IA** conversan con deudores,
+registran promesas de pago, consultan saldos y escalan a humanos. Está pensado para ingenieros que nunca integraron
+un LLM y quieren entenderlo con la misma rigurosidad que cualquier otra dependencia de un sistema.
+
+| Módulo                | Qué vas a poder hacer                                                                                                                                        |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Introducción          | Llamar a un modelo desde código y entender qué es un agente.                                                                                                 |
+| Fundamentos de LLMs   | Razonar sobre tokens, contexto, costos y latencia; diseñar prompts, salidas estructuradas y tools; defenderte de alucinaciones y prompt injection; usar RAG. |
+| Ingeniería de agentes | Configurar y versionar agentes, orquestarlos con máquinas de estado, aplicar guardrails y human in the loop, observar costos.                                |
+| Memoria y contexto    | Separar estado de negocio de historial conversacional y manejar información contradictoria.                                                                  |
+| Evaluaciones          | Saber si un cambio mejora o empeora un agente no determinista.                                                                                               |
+
+## Qué es un LLM, en términos de ingeniería
+
+Un **LLM** (_large language model_) es una función entrenada con enormes cantidades de texto que, dado un texto de
+entrada, **genera el texto que probablemente sigue**, de a un fragmento (token) por vez. Todo lo demás (responder
+preguntas, resumir, clasificar, escribir código, decidir qué herramienta usar) emerge de esa capacidad.
+
+Para un ingeniero, lo útil es tratarlo como una dependencia con propiedades conocidas:
+
+| Propiedad                       | Consecuencia de diseño                                                            |
+| ------------------------------- | --------------------------------------------------------------------------------- |
+| Entrada y salida son texto      | Todo lo que necesita saber tiene que estar en el contexto que le enviás.          |
+| La salida es probabilística     | La misma entrada puede producir respuestas distintas: se evalúa estadísticamente. |
+| Puede equivocarse con confianza | Alucinaciones: las salidas se validan como datos externos.                        |
+| No tiene memoria entre llamadas | El historial y el estado los gestiona tu sistema.                                 |
+| No actúa por sí mismo           | Sólo propone acciones (tool calls); tu código decide si ejecutarlas.              |
+| Cuesta y tarda por token        | Contexto y salidas largas impactan en costo y latencia.                           |
+
+<Callout type="warning" title="El modelo no es la fuente de verdad">
+  Si un agente "dice" que el saldo de un cliente es $15.000, ese número sólo es confiable si vino de una
+  herramienta que lo leyó del sistema. El modelo redacta; los datos de negocio vienen de tu backend.
+</Callout>
+
+## Llamada simple, workflow y agente
+
+<MermaidDiagram
+  caption="Tres niveles de autonomía: cuanto más decide el modelo, más flexible y menos previsible es el sistema."
+  chart={`
+flowchart LR
+  subgraph S["Llamada simple"]
+    S1["Input"] --> S2["LLM"] --> S3["Output validado"]
+  end
+  subgraph W["Workflow"]
+    W1["Código"] --> W2["LLM: clasificar"] --> W3["Código: decidir"] --> W4["LLM: redactar"]
+  end
+  subgraph A["Agente"]
+    A1["Objetivo"] --> A2["LLM decide"]
+    A2 -->|"tool call"| A3["Herramienta"]
+    A3 -->|"resultado"| A2
+    A2 -->|"terminó"| A4["Respuesta"]
+  end
+`}
+/>
+
+- **Llamada simple:** clasificar la intención de un mensaje entrante, extraer una fecha de promesa de un texto.
+- **Workflow:** el código orquesta pasos fijos (clasificar el mensaje, si es una promesa extraer la fecha, validar
+  contra reglas, redactar la confirmación). Previsible y fácil de evaluar por partes.
+- **Agente:** el modelo recibe un objetivo ("gestionar la conversación con este deudor") y herramientas
+  (`getDebtBalance`, `registerPaymentPromise`, `escalateToHuman`), y decide en un loop qué hacer.
+
+La recomendación de la industria es **empezar por lo más simple que funcione**. Un agente se justifica cuando los
+pasos no se pueden especificar de antemano y el valor compensa el costo y el riesgo. En cobranzas, una conversación
+abierta con un deudor suele justificarlo; extraer una fecha de un mensaje, no.
+
+## Llamar a un modelo desde código
+
+Las APIs de los proveedores siguen un modelo de **mensajes**: se envía una lista de turnos con roles (`user`,
+`assistant`) y un **system prompt** con las instrucciones generales, y se recibe el siguiente turno del asistente.
+Con el SDK oficial de Anthropic en TypeScript:
+
+```ts
+import Anthropic from "@anthropic-ai/sdk";
+
+const client = new Anthropic(); // lee las credenciales del entorno (ANTHROPIC_API_KEY)
+
+const response = await client.messages.create({
+  model: "claude-opus-5-5",
+  max_tokens: 16000,
+  system: "Sos un asistente de cobranzas. Respondés en español, con tono cordial y breve.",
+  messages: [{ role: "user", content: "Hola, ¿cuánto debo?" }],
+});
+
+for (const block of response.content) {
+  if (block.type === "text") console.log(block.text);
+}
+console.log(response.stop_reason); // "end_turn", "max_tokens", "tool_use", "refusal"...
+console.log(response.usage); // tokens de entrada y salida: la base del costo
+```
+
+Lo que hay que notar:
+
+- **La API no tiene estado.** Para continuar la conversación se reenvía el historial completo
+  (`[user, assistant, user, ...]`). La "memoria" es responsabilidad de tu sistema.
+- **La respuesta es una lista de bloques** (texto, pedidos de herramienta, otros tipos), no un string. Se recorre
+  verificando el tipo de cada bloque.
+- **`stop_reason`** dice por qué terminó: terminó de responder, se quedó sin tokens, quiere usar una herramienta o
+  rechazó la solicitud. El código siempre lo revisa antes de usar el contenido.
+- **`usage`** informa los tokens consumidos: se registra por conversación para controlar costos.
+
+<Callout type="info" title="Sobre los ejemplos del curso">
+  Los ejemplos usan el SDK de Anthropic porque es el que se documenta con precisión acá; los conceptos
+  (mensajes, tools, salidas estructuradas, tokens) son equivalentes en otros proveedores con nombres
+  distintos. Los IDs de modelos y precios cambian con frecuencia: consultá siempre la documentación vigente.
+</Callout>
+
+## Un puerto propio para el modelo
+
+En una arquitectura hexagonal, el modelo es una **dependencia externa** más, como la base o el proveedor de SMS. El
+dominio define lo que necesita; un adaptador lo implementa con un proveedor concreto:
+
+```ts
+// application/ports/llm-client.ts: lo que el dominio necesita, sin tipos del proveedor
+export interface LlmMessage {
+  role: "user" | "assistant";
+  content: string;
+}
+
+export interface LlmCompletion {
+  text: string;
+  stopReason: "end_turn" | "max_tokens" | "tool_use" | "refusal" | "other";
+  usage: { inputTokens: number; outputTokens: number };
+  model: string;
+}
+
+export interface LlmClient {
+  complete(input: { system: string; messages: LlmMessage[]; signal?: AbortSignal }): Promise<LlmCompletion>;
+}
+```
+
+```ts
+// infrastructure/llm/anthropic-llm-client.ts
+import Anthropic from "@anthropic-ai/sdk";
+
+export class AnthropicLlmClient implements LlmClient {
+  constructor(
+    private readonly client: Anthropic,
+    private readonly model: string,
+  ) {}
+
+  async complete({ system, messages, signal }: Parameters<LlmClient["complete"]>[0]): Promise<LlmCompletion> {
+    const response = await this.client.messages.create(
+      { model: this.model, max_tokens: 16000, system, messages },
+      { signal },
+    );
+    const text = response.content.flatMap((block) => (block.type === "text" ? [block.text] : [])).join("");
+    return {
+      text,
+      stopReason: mapStopReason(response.stop_reason),
+      usage: { inputTokens: response.usage.input_tokens, outputTokens: response.usage.output_tokens },
+      model: response.model,
+    };
+  }
+}
+```
+
+Beneficios: cambiar de modelo o de proveedor no toca los casos de uso; los timeouts, reintentos, logging y costos
+se centralizan en el adaptador; y los tests usan un **fake determinista** que devuelve respuestas predefinidas.
+
+## Qué es determinista y qué no
+
+<FlowDiagram
+  steps={[
+    { title: "Entrada del deudor", detail: "Texto libre: no confiable.", tone: "boundary" },
+    { title: "Contexto armado por código", detail: "Datos del sistema, reglas, historial: determinista." },
+    { title: "Modelo", detail: "Genera texto o pide herramientas: probabilístico.", tone: "boundary" },
+    {
+      title: "Validación y políticas",
+      detail: "Esquemas, permisos, reglas de negocio: determinista.",
+      tone: "runtime",
+    },
+    { title: "Acción", detail: "Sólo si pasó las validaciones." },
+  ]}
+  caption="Rodear al componente probabilístico con código determinista es la base de un agente confiable."
+/>
+
+Un buen diseño **minimiza lo que depende del modelo**: las reglas de negocio (montos mínimos, fechas permitidas,
+horarios de contacto, quién puede recibir qué información) se aplican en código, no se "piden" en el prompt.
+
+## Casos de uso en cobranzas
+
+| Caso                                              | Nivel recomendado                      |
+| ------------------------------------------------- | -------------------------------------- |
+| Clasificar la intención de un mensaje entrante    | Llamada simple                         |
+| Extraer fecha y monto de una promesa de pago      | Llamada simple con salida estructurada |
+| Resumir una conversación para el operador humano  | Llamada simple                         |
+| Campaña: seleccionar, redactar, enviar, registrar | Workflow                               |
+| Conversar con el deudor y negociar un plan        | Agente con herramientas y guardrails   |
+
+## Errores frecuentes
+
+- **Usar el modelo como fuente de datos** (saldos, fechas, políticas) en lugar de herramientas.
+- **Construir un agente** donde alcanzaba una llamada o un workflow.
+- **Ignorar `stop_reason`**: tratar como completa una respuesta cortada por `max_tokens` o rechazada.
+- **Acoplar el dominio al SDK** del proveedor.
+- **Poner reglas de negocio sólo en el prompt.**
+- **No registrar el uso de tokens** por conversación y por tenant.
+
+## Ejercicio interactivo
+
+<KnowledgeCheck
+  id="llm-agents.introduction.q1"
+  question="Hay que extraer la fecha y el monto de los mensajes en los que un deudor promete pagar. ¿Qué nivel de autonomía es el adecuado?"
+  options={[
+    {
+      text: "Un agente con herramientas.",
+      explanation:
+        "La tarea está bien especificada: un agente agrega costo e imprevisibilidad sin beneficio.",
+    },
+    {
+      text: "Una llamada simple con salida estructurada y validación.",
+      correct: true,
+      explanation:
+        "Correcto. Es una extracción acotada: una llamada con un esquema y validación de negocio en código.",
+    },
+    {
+      text: "Ninguno: se resuelve sólo con expresiones regulares.",
+      explanation: "Los mensajes son lenguaje natural variable; un regex no alcanza para casos reales.",
+    },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="llm-agents.introduction.q2"
+  question="Un usuario escribe tres mensajes seguidos a un asistente. ¿Cómo 'recuerda' el modelo los dos primeros al responder el tercero?"
+  options={[
+    {
+      text: "El proveedor guarda la conversación automáticamente.",
+      explanation: "La API de mensajes es sin estado.",
+    },
+    {
+      text: "Tu sistema reenvía el historial completo en cada request.",
+      correct: true,
+      explanation:
+        "Correcto. La memoria es responsabilidad de tu aplicación, y por eso el contexto crece con cada turno.",
+    },
+    {
+      text: "El modelo se reentrena con cada mensaje.",
+      explanation: "Los modelos no aprenden durante el uso normal de la API.",
+    },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="llm-agents.introduction.q3"
+  question="Una respuesta llega con `stop_reason: 'max_tokens'`. ¿Qué significa?"
+  options={[
+    {
+      text: "Que la respuesta está completa.",
+      explanation: "Se cortó al llegar al límite de tokens de salida.",
+    },
+    {
+      text: "Que la generación se cortó por el límite de tokens: la respuesta puede estar incompleta.",
+      correct: true,
+      explanation:
+        "Correcto. Hay que tratarla como incompleta: subir el límite, pedir continuar o fallar de forma controlada.",
+    },
+    { text: "Que el modelo rechazó la solicitud.", explanation: "Eso se indica con stop_reason 'refusal'." },
+  ]}
+/>

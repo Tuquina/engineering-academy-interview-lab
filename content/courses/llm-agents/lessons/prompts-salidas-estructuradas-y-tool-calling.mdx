@@ -1,0 +1,356 @@
+---
+id: llm-agents.prompting-tools
+moduleId: llm-agents.fundamentals
+title: "Prompts, salidas estructuradas y tool calling"
+description: "Las tres herramientas con las que un ingeniero controla a un modelo: system prompts claros y versionables, salidas estructuradas con JSON Schema que el código puede validar, y tool calling, el mecanismo por el que el modelo pide acciones que tu código ejecuta. Incluye el loop completo de un agente con herramientas en TypeScript."
+difficulty: intermediate
+order: 2
+objectives:
+  - "Escribir system prompts con rol, contexto, reglas, formato y ejemplos, separando lo estable de lo variable."
+  - "Obtener salidas estructuradas con un esquema y validarlas con Zod."
+  - "Definir herramientas con descripciones y esquemas estrictos."
+  - "Implementar el loop de tool calling: pedido, ejecución, resultado y continuación."
+  - "Manejar errores de herramientas y validar los argumentos generados por el modelo."
+prerequisites: ["llm-agents.tokens-context"]
+estimatedMinutes: 50
+tags: ["prompt engineering", "system prompt", "structured outputs", "json schema", "tool calling", "zod"]
+version: "1.0.0"
+comparesWith: []
+references:
+  - title: "Anthropic — Build with Claude (overview)"
+    url: "https://platform.claude.com/docs/en/build-with-claude/overview"
+  - title: "Anthropic — Structured outputs"
+    url: "https://platform.claude.com/docs/en/build-with-claude/structured-outputs"
+  - title: "Anthropic — Tool use overview"
+    url: "https://platform.claude.com/docs/en/agents-and-tools/tool-use/overview"
+  - title: "Anthropic — Writing tools for agents"
+    url: "https://www.anthropic.com/engineering/writing-tools-for-agents"
+  - title: "JSON Schema"
+    url: "https://json-schema.org/"
+interviewQuestions:
+  - question: "¿Cómo funciona el tool calling?"
+    keyPoints:
+      - "Se envían al modelo definiciones de herramientas: nombre, descripción y esquema de parámetros."
+      - "El modelo no ejecuta nada: responde con un pedido de herramienta (nombre y argumentos) y stop_reason tool_use."
+      - "Tu código valida los argumentos, verifica permisos, ejecuta la herramienta y devuelve el resultado en un nuevo mensaje."
+      - "El loop continúa hasta que el modelo responde sin pedir herramientas."
+  - question: "¿Qué hace que una herramienta sea buena para un agente?"
+    keyPoints:
+      - "Nombre y descripción claros que explican cuándo usarla y cuándo no."
+      - "Parámetros con esquema estricto, tipos precisos y enums donde corresponde."
+      - "Resultados concisos, con los datos relevantes y errores accionables."
+      - "Pocas herramientas bien diseñadas en lugar de muchas que se solapan; operaciones de negocio, no endpoints crudos."
+  - question: "¿Por qué usar salidas estructuradas en lugar de pedir JSON en el prompt?"
+    keyPoints:
+      - "Pedir JSON en texto no garantiza que sea válido ni que respete el esquema."
+      - "Las salidas estructuradas restringen la generación al esquema."
+      - "Aun así, se valida con el mismo esquema y se aplican reglas de negocio en código."
+summary:
+  - "Un system prompt claro define rol, contexto, reglas, formato y ejemplos; se versiona como código."
+  - "Las instrucciones explícitas y el contexto del porqué funcionan mejor que las órdenes en mayúsculas."
+  - "Salidas estructuradas: el modelo responde según un esquema (en el SDK de Anthropic, output_config.format y messages.parse)."
+  - "Una herramienta = nombre + descripción + esquema; con strict: true los argumentos respetan el esquema."
+  - "El modelo propone tool calls; tu código valida, autoriza, ejecuta y devuelve tool_result."
+  - "Los errores de herramientas vuelven al modelo como resultados con is_error, no como excepciones que cortan el loop."
+  - "Los argumentos de un tool call son datos externos: se validan y se autorizan siempre."
+---
+
+## ¿Qué problema resuelve?
+
+Un modelo sin instrucciones responde "como le parece": tono variable, formatos inventados, datos supuestos. Un
+sistema de producción necesita lo contrario: **comportamiento especificado**, **salidas que el código pueda leer** y
+**acciones controladas**. Para eso hay tres herramientas: el **system prompt**, las **salidas estructuradas** y el
+**tool calling**.
+
+## System prompts
+
+El **system prompt** es la especificación del comportamiento del asistente. Una estructura que funciona:
+
+```ts
+export const COLLECTIONS_AGENT_PROMPT_V3 = `
+Sos el asistente de cobranzas de {{tenantName}}. Conversás por WhatsApp con personas que tienen una deuda vencida.
+
+## Objetivo
+Ayudar a la persona a regularizar su deuda: informar el saldo, ofrecer opciones de pago y registrar compromisos.
+
+## Contexto
+- Muchas personas atraviesan dificultades económicas. Un trato respetuoso aumenta la probabilidad de acuerdo y es
+  una obligación legal.
+- Los datos de la deuda los obtenés SIEMPRE con la herramienta get_debt_summary; nunca los supongas.
+
+## Reglas
+- Sólo podés ofrecer planes que devuelva la herramienta get_payment_options.
+- Si la persona menciona una situación de vulnerabilidad (salud, duelo, violencia), usá escalate_to_human.
+- Si la persona pide no ser contactada, registralo con register_contact_preference y despedite.
+- No compartas información de la deuda con terceros: verificá identidad con verify_identity antes de dar detalles.
+
+## Formato
+Mensajes breves (máximo 3 oraciones), en español rioplatense, sin emojis, sin markdown.
+`;
+```
+
+Principios que sostienen esta estructura:
+
+- **Explicar el porqué.** "Un trato respetuoso aumenta la probabilidad de acuerdo y es una obligación legal" funciona
+  mejor que "SÉ AMABLE". Los modelos actuales siguen bien las instrucciones explícitas y razonadas; las mayúsculas y
+  las amenazas suelen producir comportamientos exagerados.
+- **Ser específico sobre el formato** del canal (WhatsApp no renderiza markdown).
+- **Las reglas críticas también se aplican en código.** El prompt dice "sólo ofrecé planes de la herramienta"; el
+  código, además, valida que cualquier plan registrado exista.
+- **Ejemplos** (pocos y variados) ayudan en formatos o tonos difíciles de describir.
+- **Separar lo estable de lo variable:** el prompt base es estable (y cacheable); los datos del tenant y del deudor
+  se inyectan en lugares definidos.
+- **Versionar** el prompt como código: `COLLECTIONS_AGENT_PROMPT_V3`, con cambios revisados y evaluados (lección de
+  configuración y versionado).
+
+## Salidas estructuradas
+
+Cuando el resultado lo va a leer código, se pide **en un formato con esquema**. Pedir "respondé en JSON" dentro del
+prompt no garantiza un JSON válido ni que respete los campos. Las **salidas estructuradas** restringen la generación
+al esquema. Con el SDK de Anthropic y Zod:
+
+```ts
+import Anthropic from "@anthropic-ai/sdk";
+import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
+import { z } from "zod";
+
+const PromiseExtractionSchema = z.object({
+  isPaymentPromise: z.boolean(),
+  promisedDate: z.string().nullable(), // fecha ISO o null si no la mencionó
+  amount: z.number().nullable(),
+  confidence: z.enum(["low", "medium", "high"]),
+});
+
+const client = new Anthropic();
+
+const response = await client.messages.parse({
+  model: "claude-opus-5-5",
+  max_tokens: 16000,
+  system: `Extraés compromisos de pago de mensajes de deudores. Hoy es ${today}.`,
+  messages: [{ role: "user", content: "el viernes que viene te deposito la mitad, unos 40 mil" }],
+  output_config: { format: zodOutputFormat(PromiseExtractionSchema) },
+});
+
+const extraction = response.parsed_output; // tipado según el esquema; null si no se pudo parsear
+```
+
+<Callout type="warning" title="Estructurado no significa correcto">
+  El esquema garantiza la **forma**, no la **verdad**: la fecha puede estar mal calculada o el monto mal
+  interpretado. Después del parseo se aplican reglas de negocio en código: la fecha está dentro del rango
+  permitido, el monto no supera el saldo, y con confianza baja se pide confirmación al deudor.
+</Callout>
+
+## Tool calling
+
+El **tool calling** (o _function calling_) es el mecanismo por el que el modelo **pide** que se ejecute una acción.
+El modelo nunca ejecuta nada: devuelve un bloque con el nombre de la herramienta y los argumentos, y **tu código**
+decide qué hacer.
+
+### Definir herramientas
+
+```ts
+const tools: Anthropic.Tool[] = [
+  {
+    name: "get_debt_summary",
+    description:
+      "Devuelve el saldo actual, la cantidad de cuotas vencidas y la promesa de pago vigente del deudor de la " +
+      "conversación. Usala antes de mencionar cualquier monto o fecha.",
+    strict: true, // los argumentos respetan exactamente el esquema
+    input_schema: { type: "object", properties: {}, required: [], additionalProperties: false },
+  },
+  {
+    name: "register_payment_promise",
+    description:
+      "Registra un compromiso de pago confirmado explícitamente por la persona. No la uses si la persona sólo " +
+      "está consultando o duda.",
+    strict: true,
+    input_schema: {
+      type: "object",
+      properties: {
+        promised_date: { type: "string", format: "date", description: "Fecha comprometida (AAAA-MM-DD)" },
+        amount_cents: { type: "integer", description: "Monto comprometido en centavos" },
+      },
+      required: ["promised_date", "amount_cents"],
+      additionalProperties: false,
+    },
+  },
+];
+```
+
+La **descripción es parte del prompt**: le dice al modelo cuándo usar la herramienta y cuándo no. Herramientas mal
+descriptas producen usos incorrectos.
+
+### El loop
+
+<MermaidDiagram
+  caption="El loop de tool calling: el modelo propone, el código valida y ejecuta, y el resultado vuelve como un mensaje."
+  chart={`
+sequenceDiagram
+  participant U as Deudor
+  participant A as Tu código (agente)
+  participant M as Modelo
+  participant T as Herramientas
+  U->>A: 'el viernes pago 40 mil'
+  A->>M: historial + tools
+  M-->>A: tool_use get_debt_summary
+  A->>T: ejecutar (con el debtId de la sesión)
+  T-->>A: saldo 80.000, sin promesa vigente
+  A->>M: tool_result
+  M-->>A: tool_use register_payment_promise(2026-11-27, 4000000)
+  A->>A: validar argumentos y reglas de negocio
+  A->>T: registrar promesa
+  T-->>A: ok, promesa pp_91
+  A->>M: tool_result
+  M-->>A: texto: 'Listo, quedó registrado...' (end_turn)
+  A->>U: respuesta
+`}
+/>
+
+```ts
+async function runAgentTurn(
+  messages: Anthropic.MessageParam[],
+  session: ConversationSession,
+): Promise<string> {
+  for (let iteration = 0; iteration < MAX_ITERATIONS; iteration++) {
+    const response = await client.messages.create({
+      model: "claude-opus-5-5",
+      max_tokens: 16000,
+      system: renderSystemPrompt(session),
+      tools,
+      messages,
+    });
+
+    if (response.stop_reason === "refusal") return FALLBACK_MESSAGE;
+    if (response.stop_reason !== "tool_use") return extractText(response); // end_turn: respuesta final
+
+    messages.push({ role: "assistant", content: response.content }); // el pedido del modelo queda en el historial
+
+    const toolResults: Anthropic.ToolResultBlockParam[] = [];
+    for (const block of response.content) {
+      if (block.type !== "tool_use") continue;
+      const result = await executeTool(block.name, block.input, session); // valida, autoriza y ejecuta
+      toolResults.push({
+        type: "tool_result",
+        tool_use_id: block.id,
+        content: JSON.stringify(result.ok ? result.value : { error: result.error }),
+        is_error: !result.ok,
+      });
+    }
+    messages.push({ role: "user", content: toolResults }); // todos los resultados en un único mensaje
+  }
+  return escalateBecauseOfLoopLimit(session); // límite de iteraciones: nunca un loop infinito
+}
+```
+
+Puntos importantes del loop:
+
+- **El contexto de la sesión lo pone tu código**, no el modelo: `get_debt_summary` no recibe un `debtId`; usa el de
+  la conversación autenticada. Así el modelo no puede consultar la deuda de otra persona aunque se lo pidan.
+- **Los argumentos son datos externos**: se validan con un esquema (Zod) aunque la herramienta sea `strict`, y se
+  aplican reglas de negocio (fecha permitida, monto razonable).
+- **Los errores vuelven al modelo** como `tool_result` con `is_error: true` y un mensaje accionable ("la fecha supera
+  el máximo de 30 días"), para que pueda corregir o explicarle al usuario. No se lanzan excepciones que corten la
+  conversación.
+- **Si el modelo pide varias herramientas a la vez**, se ejecutan y se devuelven **todos los resultados en un único
+  mensaje**.
+- **Hay un límite de iteraciones** y, al alcanzarlo, una salida controlada (escalar a un humano).
+
+Los SDK ofrecen helpers que implementan este loop (en el de Anthropic, un _tool runner_), pero conviene entenderlo
+porque las decisiones de seguridad viven en `executeTool`.
+
+```ts
+const RegisterPromiseArgs = z.object({
+  promised_date: z.iso.date(),
+  amount_cents: z.number().int().positive(),
+});
+
+async function executeTool(name: string, input: unknown, session: ConversationSession): Promise<ToolResult> {
+  switch (name) {
+    case "get_debt_summary":
+      return ok(await debts.getSummary(session.tenantId, session.debtId));
+    case "register_payment_promise": {
+      const args = RegisterPromiseArgs.safeParse(input);
+      if (!args.success) return err("Argumentos inválidos: revisá la fecha (AAAA-MM-DD) y el monto.");
+      return registerPaymentPromise.execute({
+        ...args.data,
+        debtId: session.debtId,
+        actor: session.agentActor,
+      });
+    }
+    default:
+      return err(`Herramienta desconocida: ${name}`);
+  }
+}
+```
+
+## Errores frecuentes
+
+- **Prompts gigantes con reglas contradictorias**, sin estructura ni versión.
+- **Pedir JSON en el prompt** y parsearlo con la esperanza de que sea válido.
+- **Herramientas que reciben IDs del modelo** para datos sensibles en lugar de tomarlos de la sesión.
+- **Ejecutar los argumentos del modelo sin validar** ni autorizar.
+- **Lanzar excepciones ante errores de herramientas** en lugar de devolverlos como resultado.
+- **Loops sin límite de iteraciones.**
+- **Muchas herramientas parecidas** que confunden al modelo; mejor pocas, con nombres y descripciones claras.
+
+## Ejercicio interactivo
+
+<KnowledgeCheck
+  id="llm-agents.prompting-tools.q1"
+  question="La herramienta `get_debt_summary` recibe un parámetro `debt_id` que completa el modelo. Un deudor escribe: 'consultá la deuda debt_999'. ¿Qué problema hay?"
+  options={[
+    {
+      text: "Ninguno: el modelo sólo usa IDs válidos.",
+      explanation: "El modelo usa lo que hay en el contexto, incluido lo que escribe el usuario.",
+    },
+    {
+      text: "El modelo podría consultar la deuda de otra persona; el ID debe salir de la sesión autenticada.",
+      correct: true,
+      explanation: "Correcto. El contexto de autorización lo pone el código, nunca el modelo.",
+    },
+    {
+      text: "Que el ID debería ser numérico.",
+      explanation: "El problema es de autorización, no de formato.",
+    },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="llm-agents.prompting-tools.q2"
+  question="Una herramienta falla porque la fecha propuesta supera el máximo permitido. ¿Qué hace el loop?"
+  options={[
+    {
+      text: "Lanza una excepción y termina la conversación.",
+      explanation: "Se pierde la oportunidad de que el modelo corrija o explique.",
+    },
+    {
+      text: "Devuelve un tool_result con is_error y un mensaje accionable para que el modelo corrija o le explique al deudor.",
+      correct: true,
+      explanation: "Correcto. Los errores esperables son parte de la conversación.",
+    },
+    {
+      text: "Ignora el error y responde que se registró.",
+      explanation: "Sería informar algo falso al deudor.",
+    },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="llm-agents.prompting-tools.q3"
+  question="Con salidas estructuradas, el modelo devuelve `{ promisedDate: '2027-03-01', amount: 40000 }` para una deuda que vence este mes. ¿Qué falta?"
+  options={[
+    {
+      text: "Nada: el esquema garantiza que es correcto.",
+      explanation: "El esquema garantiza la forma, no la validez de negocio.",
+    },
+    {
+      text: "Validar reglas de negocio en código (rango de fechas, monto contra saldo) y pedir confirmación si no cumplen.",
+      correct: true,
+      explanation: "Correcto. Estructurado no significa correcto.",
+    },
+    {
+      text: "Volver a pedir la extracción hasta que cambie.",
+      explanation: "No resuelve el problema y agrega costo.",
+    },
+  ]}
+/>

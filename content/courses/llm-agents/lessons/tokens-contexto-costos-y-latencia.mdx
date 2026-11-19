@@ -1,0 +1,301 @@
+---
+id: llm-agents.tokens-context
+moduleId: llm-agents.fundamentals
+title: "Tokens, ventana de contexto, variabilidad, costos y latencia"
+description: "Las unidades con las que se razona sobre un LLM en producción: qué es un token, qué entra en la ventana de contexto y qué pasa cuando se llena, por qué las salidas varían (sampling, temperature) y cómo controlarlo, de qué dependen la latencia y el costo, y cómo reducirlos con caching, streaming y la elección de modelo y esfuerzo."
+difficulty: intermediate
+order: 1
+objectives:
+  - "Explicar qué es un token y estimar el tamaño de un prompt."
+  - "Describir la ventana de contexto y las estrategias cuando se acerca al límite."
+  - "Explicar el sampling y por qué una misma entrada produce salidas distintas."
+  - "Descomponer la latencia (tiempo hasta el primer token, velocidad de generación) y el costo de una llamada."
+  - "Aplicar prompt caching, streaming y elección de modelo y esfuerzo para optimizar."
+prerequisites: ["llm-agents.introduction"]
+estimatedMinutes: 40
+tags:
+  ["tokens", "context window", "sampling", "temperature", "costos", "latencia", "prompt caching", "streaming"]
+version: "1.0.0"
+comparesWith: []
+references:
+  - title: "Anthropic — Token counting"
+    url: "https://platform.claude.com/docs/en/build-with-claude/token-counting"
+  - title: "Anthropic — Context windows"
+    url: "https://platform.claude.com/docs/en/build-with-claude/context-windows"
+  - title: "Anthropic — Prompt caching"
+    url: "https://platform.claude.com/docs/en/build-with-claude/prompt-caching"
+  - title: "Anthropic — Streaming messages"
+    url: "https://platform.claude.com/docs/en/build-with-claude/streaming"
+  - title: "Anthropic — Pricing"
+    url: "https://platform.claude.com/docs/en/about-claude/pricing"
+interviewQuestions:
+  - question: "¿Qué factores determinan el costo y la latencia de una llamada a un LLM?"
+    keyPoints:
+      - "Costo: tokens de entrada y de salida por el precio del modelo; la salida suele costar varias veces más que la entrada."
+      - "Latencia: tiempo hasta el primer token (crece con el contexto y la carga) más tokens de salida dividido la velocidad de generación."
+      - "En agentes se multiplican por la cantidad de iteraciones del loop: cada tool call es otra llamada con todo el historial."
+      - "Se optimiza con prompt caching, contexto más corto, menos iteraciones, streaming para la percepción y el modelo o esfuerzo adecuados."
+  - question: "¿Qué hacés cuando una conversación se acerca al límite de la ventana de contexto?"
+    keyPoints:
+      - "No truncar a ciegas: se pierde información relevante sin saberlo."
+      - "Resumir los turnos viejos (compaction) conservando decisiones y datos clave."
+      - "Mantener el estado de negocio fuera del historial (en la base) y reinyectarlo estructurado."
+      - "Recortar resultados de herramientas voluminosos y usar recuperación (RAG) en lugar de cargar todo."
+  - question: "¿Por qué el mismo prompt puede dar respuestas distintas y cómo lo manejás?"
+    keyPoints:
+      - "El modelo calcula una distribución de probabilidad sobre el siguiente token y se elige muestreando de ella."
+      - "En algunos proveedores se controla con temperature o top_p; varios modelos actuales no aceptan esos parámetros."
+      - "No se busca determinismo absoluto: se restringe la salida (esquemas, validación) y se evalúa sobre muchas corridas."
+summary:
+  - "Un token es un fragmento de texto (unos pocos caracteres); los modelos cobran y limitan por tokens."
+  - "La ventana de contexto incluye system prompt, herramientas, historial, resultados de tools y la respuesta."
+  - "Cerca del límite: resumir, sacar el estado de negocio del historial y recuperar en lugar de cargar todo."
+  - "La salida se elige muestreando una distribución: la variabilidad es parte del sistema y se gestiona con validación y evals."
+  - "Costo = tokens de entrada × precio + tokens de salida × precio (la salida es más cara)."
+  - "Latencia = tiempo hasta el primer token + tokens de salida / velocidad; en agentes, por cada iteración."
+  - "Prompt caching abarata y acelera prefijos repetidos; streaming mejora la latencia percibida."
+---
+
+## ¿Qué problema resuelve?
+
+Una campaña de cobranzas envía 50.000 conversaciones por semana. Si cada una usa un agente que hace 6 llamadas al
+modelo con 8.000 tokens de contexto, son 2.400 millones de tokens de entrada por semana. Una decisión de diseño que
+agrega 2.000 tokens al system prompt cambia la factura de forma visible; una que reduce las iteraciones del agente
+de 6 a 4 también. Y cada segundo de latencia es un deudor esperando una respuesta en WhatsApp.
+
+Para diseñar con LLMs hay que razonar en sus unidades: **tokens, contexto, tiempo y dinero**.
+
+## Tokens
+
+Los modelos no procesan caracteres ni palabras: procesan **tokens**, fragmentos de texto definidos por un
+_tokenizer_. En español, una palabra suele ser uno o dos tokens; los números largos, los IDs y el JSON con muchos
+símbolos consumen más tokens de lo que parece.
+
+```text
+"Hola, ¿cuánto debo?"          → unos pocos tokens
+"debt_8f3k2j9x4q"              → varios tokens: los IDs aleatorios se parten mucho
+{"amountCents": 1500000}       → llaves, comillas y nombres también cuentan
+```
+
+Reglas prácticas:
+
+- **Medí, no estimes**: los proveedores ofrecen endpoints de conteo de tokens (en la API de Anthropic,
+  `messages.countTokens`), y cada respuesta informa `usage`.
+- **Cada modelo puede tener su propio tokenizer**: al cambiar de modelo, se vuelve a medir.
+- **El formato importa**: un JSON con nombres de campo largos repetido en cada mensaje es costoso; una tabla compacta
+  o datos ya resumidos pueden transmitir lo mismo con menos tokens.
+
+## La ventana de contexto
+
+La **ventana de contexto** es el máximo de tokens que el modelo puede considerar en una llamada. Todo cuenta:
+
+<MermaidDiagram
+  caption="Todo lo que se envía y lo que se genera comparte la misma ventana."
+  chart={`
+flowchart TB
+  subgraph CW["Ventana de contexto"]
+    T["Definiciones de herramientas"]
+    S["System prompt<br/>rol, políticas, datos del tenant"]
+    H["Historial de la conversación"]
+    R["Resultados de herramientas<br/>suelen ser los más voluminosos"]
+    O["Respuesta generada"]
+  end
+`}
+/>
+
+Los modelos actuales tienen ventanas grandes (cientos de miles o un millón de tokens), pero eso **no significa que
+convenga llenarlas**: más contexto es más costo, más latencia y, en la práctica, más riesgo de que el modelo preste
+atención a lo irrelevante.
+
+Cuando una conversación crece, las estrategias son:
+
+| Estrategia                          | Idea                                                                                                         |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| Estado fuera del historial          | El saldo, la promesa vigente y el plan viven en la base; se inyectan resumidos y actualizados en cada turno. |
+| Resumir (compaction)                | Reemplazar los turnos viejos por un resumen que conserve decisiones y datos clave.                           |
+| Recortar resultados de herramientas | Devolver sólo los campos necesarios, no la fila completa ni el JSON del proveedor.                           |
+| Recuperar en lugar de cargar        | Buscar los fragmentos relevantes (RAG) en vez de incluir todos los documentos.                               |
+
+**Truncar a ciegas** (borrar los mensajes más viejos) es la peor opción: se pierde, sin saberlo, que el deudor dijo
+que estaba desempleado o que pidió no ser contactado por la mañana. El módulo de memoria profundiza en esto.
+
+## Por qué las salidas varían
+
+En cada paso, el modelo calcula una **distribución de probabilidad** sobre el siguiente token y se elige uno
+**muestreando** esa distribución. Por eso la misma entrada puede producir respuestas distintas.
+
+<FlowDiagram
+  steps={[
+    { title: "Contexto", detail: "Todo el texto hasta el momento." },
+    { title: "Distribución", detail: "'Hola' 62 %, 'Buen' 21 %, 'Estimado' 9 %..." },
+    { title: "Muestreo", detail: "Se elige un token según esas probabilidades.", tone: "boundary" },
+    { title: "Se repite", detail: "El token elegido se agrega y se calcula el siguiente." },
+  ]}
+  caption="La generación es una secuencia de elecciones probabilísticas, un token por vez."
+/>
+
+Históricamente, parámetros como **`temperature`** (aplanar o concentrar la distribución) y **`top_p`** (limitar la
+elección a los tokens más probables) controlaban esa variabilidad. Hoy depende del proveedor y del modelo: varios
+modelos actuales **no aceptan** esos parámetros (en la API de Anthropic, los modelos recientes devuelven un error si
+se envían) y controlan el comportamiento con otros mecanismos, como el nivel de esfuerzo o de razonamiento.
+
+La conclusión de ingeniería no cambia: **no se diseña contando con el determinismo**. La variabilidad se maneja con:
+
+- **Salidas estructuradas** que restringen el formato (próxima lección).
+- **Validación** de todo lo que el modelo produce.
+- **Reglas de negocio en código**, no en el prompt.
+- **Evaluaciones sobre muchas corridas**, no sobre una prueba manual (módulo de evals).
+
+## Latencia
+
+La latencia de una llamada tiene dos componentes:
+
+| Componente                              | De qué depende                                                                      |
+| --------------------------------------- | ----------------------------------------------------------------------------------- |
+| **Tiempo hasta el primer token** (TTFT) | Tamaño del contexto a procesar, carga del proveedor, razonamiento previo del modelo |
+| **Velocidad de generación**             | Tokens por segundo del modelo; los modelos más grandes suelen ser más lentos        |
+
+`latencia total ≈ TTFT + tokens de salida / tokens por segundo`
+
+En un **agente**, se paga **por cada iteración del loop**: un turno con 3 tool calls son 4 llamadas, y cada una
+procesa el historial completo. Reducir iteraciones (herramientas que devuelven lo necesario en una sola llamada,
+instrucciones claras) suele ser la mejora más grande.
+
+### Streaming
+
+Con **streaming**, el modelo envía los tokens a medida que los genera. La latencia total es la misma, pero el usuario
+ve texto casi de inmediato:
+
+```ts
+const stream = client.messages.stream({
+  model: "claude-opus-5-5",
+  max_tokens: 64000,
+  system: SYSTEM_PROMPT,
+  messages,
+});
+
+stream.on("text", (delta) => sendToClient(delta)); // reenviar cada fragmento (SSE, WebSocket)
+const finalMessage = await stream.finalMessage(); // mensaje completo, con stop_reason y usage
+```
+
+Además de la experiencia, el streaming evita timeouts HTTP en respuestas largas. En canales que no admiten respuestas
+parciales (un SMS), no aporta: hay que esperar el mensaje completo.
+
+## Costo
+
+`costo ≈ tokens de entrada × precio de entrada + tokens de salida × precio de salida`
+
+La **salida suele costar varias veces más** que la entrada (por ejemplo, 5 veces en los precios publicados de varios
+modelos). Los precios cambian seguido y varían mucho entre modelos de una misma familia: se consultan en la página
+oficial y se registran en la configuración, no se escriben en el código.
+
+```ts
+/** Registra el consumo de cada llamada para atribuir costo por conversación y por tenant. */
+function recordUsage(conversationId: string, tenantId: string, model: string, usage: Anthropic.Usage) {
+  metrics.increment("llm.input_tokens", usage.input_tokens, { tenantId, model });
+  metrics.increment("llm.output_tokens", usage.output_tokens, { tenantId, model });
+  metrics.increment("llm.cache_read_tokens", usage.cache_read_input_tokens ?? 0, { tenantId, model });
+  costLedger.add({ conversationId, tenantId, model, usage }); // el precio se aplica desde la configuración
+}
+```
+
+### Prompt caching
+
+Muchas llamadas comparten un **prefijo** idéntico: las definiciones de herramientas, el system prompt con las
+políticas del tenant. Con **prompt caching**, el proveedor guarda ese prefijo procesado y las llamadas siguientes lo
+leen de la caché, mucho más barato y con menor tiempo hasta el primer token.
+
+```ts
+const response = await client.messages.create({
+  model: "claude-opus-5-5",
+  max_tokens: 16000,
+  cache_control: { type: "ephemeral" }, // cachea automáticamente el último bloque cacheable
+  tools: AGENT_TOOLS, // estable: siempre en el mismo orden
+  system: tenantPolicyPrompt, // estable por tenant
+  messages, // lo variable va al final
+});
+
+console.log(response.usage.cache_read_input_tokens); // si es 0 en llamadas repetidas, algo invalida la caché
+```
+
+La regla clave: **la caché es un match de prefijo**. Cualquier cambio en un byte del prefijo invalida todo lo que
+sigue. Poner la fecha y hora actual o un ID de request **al principio del system prompt** anula la caché en cada
+llamada. Lo estable va primero; lo variable, al final.
+
+## Elegir modelo y esfuerzo
+
+Las familias de modelos ofrecen variantes más capaces y más rápidas o baratas, y muchos modelos permiten ajustar el
+**esfuerzo** de razonamiento. La decisión se toma **midiendo** sobre casos reales:
+
+- Tareas simples y de alto volumen (clasificar un mensaje): un modelo rápido o un esfuerzo bajo suele alcanzar.
+- Negociación con reglas complejas o decisiones de alto impacto: más capacidad y esfuerzo.
+- Se compara el **costo por tarea completada**, no por llamada: un modelo barato que necesita más iteraciones o
+  reintentos puede terminar costando más.
+
+## Errores frecuentes
+
+- **Estimar tokens "a ojo"** en lugar de medirlos.
+- **Llenar el contexto "por las dudas"** con documentos o resultados completos.
+- **Truncar el historial sin criterio.**
+- **Esperar respuestas idénticas** entre corridas y escribir tests que dependen de eso.
+- **Contenido variable al principio del prompt**, que invalida la caché.
+- **Precios escritos en el código.**
+- **Medir costo por llamada** en lugar de por conversación o tarea completada.
+
+## Ejercicio interactivo
+
+<KnowledgeCheck
+  id="llm-agents.tokens-context.q1"
+  question="El system prompt empieza con `Fecha y hora actual: 2026-11-19 10:42:13` y la caché nunca se usa. ¿Por qué?"
+  options={[
+    {
+      text: "Porque los system prompts no se pueden cachear.",
+      explanation: "Sí se pueden; suelen ser el mejor candidato.",
+    },
+    {
+      text: "Porque la caché es un match de prefijo y el prefijo cambia en cada llamada.",
+      correct: true,
+      explanation:
+        "Correcto. El contenido variable va al final (o en el último mensaje), después de lo estable.",
+    },
+    {
+      text: "Porque la fecha consume demasiados tokens.",
+      explanation: "Son pocos tokens; el problema es que cambian.",
+    },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="llm-agents.tokens-context.q2"
+  question="Un agente hace 5 tool calls para responder un mensaje. ¿Cuántas veces se procesa el historial de la conversación?"
+  options={[
+    { text: "Una vez.", explanation: "Cada iteración del loop es una llamada nueva con todo el contexto." },
+    {
+      text: "Unas 6 veces: una por cada llamada del loop (5 con tool calls más la respuesta final).",
+      correct: true,
+      explanation:
+        "Correcto. Por eso reducir iteraciones y usar caching tiene tanto impacto en costo y latencia.",
+    },
+    { text: "Ninguna: el proveedor lo recuerda.", explanation: "La API es sin estado." },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="llm-agents.tokens-context.q3"
+  question="Una conversación larga se acerca al límite de contexto. ¿Cuál es la mejor estrategia?"
+  options={[
+    {
+      text: "Borrar los mensajes más viejos.",
+      explanation: "Puede perder información crítica sin que nadie lo note.",
+    },
+    {
+      text: "Mantener el estado de negocio en la base, resumir los turnos viejos y recortar resultados de herramientas.",
+      correct: true,
+      explanation: "Correcto. Se conserva lo importante en forma estructurada y se reduce el volumen.",
+    },
+    {
+      text: "Cambiar a un modelo con más contexto y no hacer nada más.",
+      explanation: "Posterga el problema y sube costo y latencia.",
+    },
+  ]}
+/>

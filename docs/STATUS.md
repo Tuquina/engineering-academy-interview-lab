@@ -232,7 +232,7 @@ C# y Java, errores frecuentes, knowledge checks y preguntas de entrevista.
 | Node.js                  | 9         | ✅ Tanda 2 |
 | React                    | 7         | ✅ Tanda 3 |
 | Next.js                  | 5         | ✅ Tanda 3 |
-| LLMs y agentes de IA     | 0         | Pendiente  |
+| LLMs y agentes de IA     | 8         | ✅ Tanda 4 |
 | PostgreSQL               | 0         | Pendiente  |
 | Redis                    | 0         | Pendiente  |
 | Arquitectura de software | 0         | Pendiente  |
@@ -240,6 +240,12 @@ C# y Java, errores frecuentes, knowledge checks y preguntas de entrevista.
 
 ### Implementado y verificado
 
+- **LLMs y agentes (8 lecciones):** introducción (qué es un LLM y un agente, Messages API, puerto propio),
+  tokens, contexto, variabilidad, costos, latencia y prompt caching, prompts, salidas estructuradas y el loop de
+  tool calling, alucinaciones, prompt injection y RAG con embeddings, configuración versionada, herramientas con
+  mínimo privilegio, routing, fallbacks y máquinas de estado, guardrails, human in the loop y observabilidad,
+  memoria y contexto (estado de negocio frente a historial), y evaluaciones (datasets, LLM as judge, estadística,
+  quality gates). Ejemplos del SDK verificados contra la referencia oficial de la API de Claude.
 - **React (7 lecciones):** introducción (UI declarativa, JSX, props, estado, eventos, listas y keys), render y
   commit, reconciliación y pureza, composición y lifting state, useState/useReducer/useEffect (y cuándo no usar
   efectos), memoización, refs, Context y custom hooks, server state con TanStack Query, formularios, Actions de
@@ -281,9 +287,9 @@ C# y Java, errores frecuentes, knowledge checks y preguntas de entrevista.
 
 | Elemento                    | Actual                                       | Objetivo |
 | --------------------------- | -------------------------------------------- | -------- |
-| Lecciones sustantivas       | 32                                           | 40       |
+| Lecciones sustantivas       | 40                                           | 40       |
 | Challenges                  | 11 + 4 de arquitectura (+ 6 ejercicios SQL)  | 25       |
-| Preguntas de evaluación     | 96 knowledge checks + 27 del Interview Arena | 60 ✅    |
+| Preguntas de evaluación     | 120 knowledge checks + 27 del Interview Arena | 60 ✅    |
 | Flashcards                  | 32                                           | 30 ✅    |
 | Diagramas                   | 13 (10 interactivos + 1 flujo + 2 Mermaid)   | 12 ✅    |
 | Simuladores o laboratorios  | 9 (3 laboratorios + 6 simuladores)           | 5 ✅     |

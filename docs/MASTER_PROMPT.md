@@ -1767,7 +1767,7 @@ completa para aprender desde cero (para alguien que ya programa) antes de practi
 - [x] Node.js.
 - [x] React.
 - [x] Next.js.
-- [ ] LLMs y agentes de IA.
+- [x] LLMs y agentes de IA.
 - [ ] PostgreSQL.
 - [ ] Redis.
 - [ ] Arquitectura de software.
