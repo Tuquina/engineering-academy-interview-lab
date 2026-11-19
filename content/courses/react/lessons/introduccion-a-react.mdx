@@ -1,0 +1,404 @@
+---
+id: react.introduction
+moduleId: react.intro
+title: "Introducción a React: componentes, JSX, props, estado y eventos"
+description: "Qué es React y por qué cambió la forma de construir interfaces: UI declarativa, componentes como funciones, la sintaxis JSX, props, estado con useState, eventos, renderizado condicional, listas con keys y cómo se arma un proyecto. Pensado para quien programa backend en C# o Java."
+difficulty: basic
+order: 1
+objectives:
+  - "Explicar la idea de UI declarativa y en qué se diferencia de manipular el DOM a mano."
+  - "Escribir componentes como funciones que reciben props y devuelven JSX."
+  - "Leer y escribir JSX: expresiones, atributos, children y fragmentos."
+  - "Manejar estado local con useState y responder a eventos del usuario."
+  - "Renderizar condicionalmente y mostrar listas con keys estables."
+  - "Ubicar las herramientas para crear un proyecto y el mapa del curso."
+prerequisites: ["typescript.modern-javascript"]
+estimatedMinutes: 40
+tags: ["react", "introducción", "jsx", "componentes", "props", "estado", "c#", "java"]
+version: "1.0.0"
+comparesWith: ["csharp", "java"]
+references:
+  - title: "React — Quick Start"
+    url: "https://react.dev/learn"
+  - title: "React — Thinking in React"
+    url: "https://react.dev/learn/thinking-in-react"
+  - title: "React — Writing Markup with JSX"
+    url: "https://react.dev/learn/writing-markup-with-jsx"
+  - title: "React — Rendering Lists"
+    url: "https://react.dev/learn/rendering-lists"
+  - title: "React — Using TypeScript"
+    url: "https://react.dev/learn/typescript"
+  - title: "Vite — Getting Started"
+    url: "https://vite.dev/guide/"
+interviewQuestions:
+  - question: "¿Qué significa que React sea declarativo?"
+    keyPoints:
+      - "Describís cómo debe verse la interfaz para un estado dado, en lugar de dar los pasos para modificar el DOM."
+      - "Cuando el estado cambia, React calcula qué cambió y actualiza el DOM por vos."
+      - "UI = f(estado): la interfaz es una función del estado."
+      - "Reduce bugs de sincronización entre datos y pantalla, comunes con jQuery o manipulación manual."
+  - question: "¿Qué diferencia hay entre props y estado?"
+    keyPoints:
+      - "Las props vienen del componente padre y son de sólo lectura para el hijo."
+      - "El estado es propio del componente y cambia con su setter, lo que dispara un nuevo render."
+      - "Los datos fluyen hacia abajo por props y los cambios suben mediante callbacks."
+  - question: "¿Para qué sirven las keys en una lista?"
+    keyPoints:
+      - "Identifican cada elemento entre renders para que React sepa cuál se agregó, movió o eliminó."
+      - "Deben ser estables y únicas entre hermanos: normalmente el ID del dato."
+      - "Usar el índice provoca bugs de estado y de foco cuando la lista se reordena o se filtra."
+summary:
+  - "React es una librería para construir interfaces a partir de componentes; la UI es una función del estado."
+  - "Un componente es una función que recibe props y devuelve JSX; su nombre empieza con mayúscula."
+  - "JSX es azúcar sintáctica sobre llamadas a funciones; {} inserta expresiones de JavaScript."
+  - "Las props son de sólo lectura; el estado (useState) es propio y su cambio provoca un nuevo render."
+  - "Los eventos se manejan con props como onClick que reciben funciones."
+  - "El renderizado condicional usa &&, el operador ternario o retornos tempranos."
+  - "Cada elemento de una lista necesita una key estable, normalmente el ID del dato."
+  - "Para empezar: Vite para una SPA, Next.js para una aplicación full stack."
+---
+
+## Qué vas a aprender en este curso
+
+React es la librería con la que se construye el frontend de este stack (y de esta misma plataforma). Si venís de
+backend, el cambio más grande no es la sintaxis: es el **modelo mental**. Este curso lo construye en orden:
+
+| Módulo                      | Qué vas a poder hacer                                                                     |
+| --------------------------- | ----------------------------------------------------------------------------------------- |
+| Introducción                | Escribir componentes con props, estado, eventos y listas.                                 |
+| Componentes y renderizado   | Predecir cuándo y por qué se renderiza un componente; componer en lugar de heredar.       |
+| Hooks                       | Usar estado, efectos, memoización, refs, contexto y custom hooks sin los errores típicos. |
+| Estado, datos y formularios | Separar server state de client state, cargar datos, manejar formularios y errores.        |
+| Calidad y arquitectura      | Optimizar con mediciones, testear, hacer interfaces accesibles y seguras.                 |
+
+## Qué es React y qué problema resuelve
+
+Una interfaz web es un árbol de elementos (el **DOM**) que el navegador dibuja. La forma "clásica" de hacerla
+interactiva era **imperativa**: escuchar un evento y modificar el DOM paso a paso.
+
+```js
+// Imperativo: hay que recordar actualizar cada lugar que depende del dato
+button.addEventListener("click", () => {
+  paidCount++;
+  counter.textContent = String(paidCount);
+  if (paidCount > 0) emptyMessage.remove();
+  list.appendChild(createRow(lastPayment));
+});
+```
+
+Con pocos datos funciona. Con muchos, es fácil olvidar un lugar y que la pantalla muestre algo que no coincide con
+los datos. **React es declarativo**: describís **cómo se ve la interfaz para un estado dado**, y React se encarga de
+actualizar el DOM cuando el estado cambia.
+
+```tsx
+function PaymentsPanel({ payments }: { payments: Payment[] }) {
+  return (
+    <section>
+      <h2>Pagos recibidos: {payments.length}</h2>
+      {payments.length === 0 ? <p>Todavía no hay pagos.</p> : <PaymentList payments={payments} />}
+    </section>
+  );
+}
+```
+
+<MermaidDiagram
+  caption="UI = f(estado): cuando el estado cambia, React vuelve a llamar al componente y aplica sólo las diferencias al DOM."
+  chart={`
+flowchart LR
+  S["Estado<br/>payments"] --> C["Componente<br/>función"]
+  C --> J["Descripción de la UI<br/>JSX"]
+  J --> R["React compara<br/>con la anterior"]
+  R --> D["DOM actualizado<br/>sólo lo que cambió"]
+  E["Evento del usuario"] -->|"setState"| S
+`}
+/>
+
+Si venís de .NET, la idea se parece a Blazor o a los bindings de WPF: el código describe la vista a partir del
+modelo. La diferencia es que en React **la vista se recalcula completa** (en memoria) en cada cambio, y React
+decide qué tocar en el DOM real. Eso se ve en detalle en la lección de renderizado.
+
+## Crear un proyecto
+
+| Herramienta | Cuándo                                                                                   |
+| ----------- | ---------------------------------------------------------------------------------------- |
+| **Vite**    | Una SPA (aplicación que corre sólo en el navegador) o una librería de componentes.       |
+| **Next.js** | Una aplicación full stack: rutas, renderizado en servidor, backend en el mismo proyecto. |
+
+```bash
+pnpm create vite collections-ui --template react-ts
+pnpm create next-app@latest collections-app
+```
+
+Esta plataforma está hecha con Next.js; el curso de Next.js viene después de éste.
+
+## Componentes y JSX
+
+Un **componente** es una función de JavaScript que devuelve la descripción de una parte de la interfaz. Su nombre
+**empieza con mayúscula** (así JSX lo distingue de una etiqueta HTML).
+
+```tsx
+export function DebtCard() {
+  return (
+    <article className="debt-card">
+      <h3>Deuda #1042</h3>
+      <p>Saldo: $ 15.000</p>
+    </article>
+  );
+}
+```
+
+**JSX** es una extensión de sintaxis que parece HTML pero se compila a llamadas de funciones de JavaScript. Las
+reglas que más sorprenden:
+
+| Regla                                  | Ejemplo                                                                       |
+| -------------------------------------- | ----------------------------------------------------------------------------- |
+| Un solo elemento raíz (o un fragmento) | `<>...</>` agrupa sin agregar un nodo al DOM                                  |
+| `className` en lugar de `class`        | `<p className="muted">`                                                       |
+| Atributos en camelCase                 | `onClick`, `tabIndex`, `aria-label` (los `aria-*` y `data-*` van con guiones) |
+| Todas las etiquetas se cierran         | `<img />`, `<input />`, `<br />`                                              |
+| `{}` inserta expresiones de JavaScript | `<p>{formatAmount(debt.balanceCents)}</p>`                                    |
+| `style` recibe un objeto               | `<div style={{ marginTop: 8 }}>`                                              |
+
+Dentro de `{}` va **cualquier expresión** (una variable, una llamada, un ternario), pero no sentencias como `if` o
+`for`. Por eso las condiciones y los bucles se escriben con expresiones, como se ve más abajo.
+
+```tsx
+// Lo que el compilador genera a partir del JSX (simplificado):
+<p className="muted">{name}</p>
+// → jsx("p", { className: "muted", children: name })
+```
+
+## Props: los parámetros de un componente
+
+Las **props** son los datos que un componente recibe de su padre. En TypeScript se tipan como un objeto:
+
+```tsx
+interface DebtCardProps {
+  id: string;
+  customerName: string;
+  balanceCents: number;
+  status: "pending" | "promised" | "paid";
+}
+
+export function DebtCard({ id, customerName, balanceCents, status }: DebtCardProps) {
+  return (
+    <article>
+      <h3>
+        {customerName} · #{id}
+      </h3>
+      <p>Saldo: {formatAmount(balanceCents)}</p>
+      <StatusBadge status={status} />
+    </article>
+  );
+}
+
+// Uso: los atributos JSX son las props
+<DebtCard id="1042" customerName="Ana Pérez" balanceCents={1_500_000} status="pending" />;
+```
+
+- Las props son **de sólo lectura**: un componente nunca modifica las props que recibe.
+- Los strings van entre comillas; cualquier otro valor, entre llaves (`balanceCents={1500000}`).
+- **`children`** es una prop especial: lo que va entre la etiqueta de apertura y la de cierre.
+
+```tsx
+function Card({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <section className="card">
+      <h2>{title}</h2>
+      {children}
+    </section>
+  );
+}
+
+<Card title="Promesas de pago">
+  <PromiseList />
+</Card>;
+```
+
+## Estado con useState
+
+Las props vienen de afuera. El **estado** es la memoria propia de un componente: datos que cambian con la
+interacción. Se declara con el hook `useState`:
+
+```tsx
+import { useState } from "react";
+
+export function ReminderToggle() {
+  const [enabled, setEnabled] = useState(false); // valor inicial
+
+  return (
+    <button type="button" aria-pressed={enabled} onClick={() => setEnabled(!enabled)}>
+      Recordatorios: {enabled ? "activados" : "desactivados"}
+    </button>
+  );
+}
+```
+
+`useState` devuelve un par: el **valor actual** y una **función para cambiarlo**. Llamar al setter le pide a React
+que **vuelva a ejecutar el componente** (un nuevo _render_) con el valor nuevo. Es fundamental entender que:
+
+- Modificar una variable común no actualiza la pantalla: sólo el setter dispara un render.
+- El estado se reemplaza, no se muta: para objetos y arrays se crea uno nuevo (`setItems([...items, item])`).
+- Cada instancia del componente tiene su propio estado.
+
+<Callout type="info" title="¿Qué es un hook?">
+  Los hooks son funciones que empiezan con `use` y le dan capacidades a un componente: estado (`useState`),
+  efectos (`useEffect`), contexto (`useContext`), entre otras. Tienen dos reglas: se llaman siempre en el
+  nivel superior del componente (nunca dentro de un `if` o un bucle) y sólo desde componentes o desde otros
+  hooks.
+</Callout>
+
+## Eventos
+
+Los eventos se manejan con props `on...` que reciben **una función**:
+
+```tsx
+function PromiseForm({ onSubmit }: { onSubmit: (date: string) => void }) {
+  const [date, setDate] = useState("");
+
+  return (
+    <form
+      onSubmit={(event) => {
+        event.preventDefault(); // evita la recarga de la página
+        onSubmit(date);
+      }}
+    >
+      <label htmlFor="promised-for">Fecha de pago</label>
+      <input id="promised-for" type="date" value={date} onChange={(event) => setDate(event.target.value)} />
+      <button type="submit">Registrar promesa</button>
+    </form>
+  );
+}
+```
+
+Un error clásico: `onClick={handleClick()}` **llama** a la función durante el render; lo correcto es pasarla:
+`onClick={handleClick}` o `onClick={() => handleClick(id)}`.
+
+Observá también el patrón de **comunicación hacia arriba**: el formulario no sabe qué hacer con la fecha; recibe
+una función `onSubmit` de su padre y la llama. **Los datos bajan por props; los cambios suben por callbacks.**
+
+## Renderizado condicional
+
+```tsx
+function DebtStatus({ debt }: { debt: Debt }) {
+  if (debt.status === "paid") return <p>Pagada ✓</p>; // retorno temprano
+
+  return (
+    <div>
+      {debt.status === "promised" ? <p>Promesa para el {debt.promisedFor}</p> : <p>Pendiente</p>}
+      {debt.overdueDays > 30 && <OverdueWarning days={debt.overdueDays} />}
+    </div>
+  );
+}
+```
+
+<Callout type="warning" title="La trampa del 0 con &&">
+  `{items.length && <List />}` muestra un `0` en pantalla cuando la lista está vacía, porque `0` es un valor
+  que React sí renderiza. Escribí `{items.length > 0 && <List />}`.
+</Callout>
+
+## Listas y keys
+
+Para mostrar una colección se transforma el array en elementos con `map`. Cada elemento necesita una **key**:
+
+```tsx
+function DebtList({ debts }: { debts: Debt[] }) {
+  return (
+    <ul>
+      {debts.map((debt) => (
+        <li key={debt.id}>
+          <DebtCard {...debt} />
+        </li>
+      ))}
+    </ul>
+  );
+}
+```
+
+La key le permite a React **reconocer cada elemento entre renders**: saber que la fila con `id="1042"` es la misma
+aunque haya cambiado de posición. Debe ser **estable y única entre hermanos**, normalmente el ID del dato. Usar el
+índice del array como key causa bugs cuando la lista se reordena o se filtra: el estado de una fila (un input, un
+checkbox) queda asociado a la fila equivocada.
+
+## Estructura de archivos y estilos
+
+No hay una estructura obligatoria. Una convención habitual: un componente por archivo, nombrado igual que el
+componente, agrupado **por funcionalidad** (`features/debts/debt-card.tsx`) más que por tipo. Para estilos, las
+opciones más comunes son CSS Modules, Tailwind CSS (la que usa esta plataforma) y librerías de componentes con
+estilos propios.
+
+## Comparación con C# y Java
+
+| Concepto            | Blazor / WPF (.NET)               | JavaFX / Vaadin (Java)    | React                                         |
+| ------------------- | --------------------------------- | ------------------------- | --------------------------------------------- |
+| Unidad de UI        | Componente `.razor` / UserControl | Node / Component          | Función que devuelve JSX                      |
+| Plantilla           | Razor / XAML                      | FXML / código Java        | JSX (JavaScript con sintaxis de marcado)      |
+| Parámetros          | `[Parameter]`                     | Propiedades / constructor | Props (sólo lectura)                          |
+| Estado              | Campos + `StateHasChanged()`      | Properties observables    | `useState`: el setter dispara un nuevo render |
+| Actualizar la vista | Diff del árbol de render (Blazor) | Bindings                  | Re-render + reconciliación                    |
+| Eventos             | `@onclick`                        | `setOnAction`             | `onClick={fn}`                                |
+
+## Errores frecuentes
+
+- **Mutar el estado** (`items.push(x); setItems(items)`): React compara por referencia y puede no re-renderizar.
+- **Llamar al handler en lugar de pasarlo**: `onClick={save()}`.
+- **Usar el índice como key** en listas que cambian.
+- **Llamar hooks dentro de condiciones o bucles.**
+- **Nombres de componentes en minúscula**: JSX los interpreta como etiquetas HTML.
+- **`{count && ...}` con números**: muestra `0`.
+- **Esperar que una variable común "recuerde" su valor** entre renders: cada render es una nueva ejecución de la
+  función.
+
+## Ejercicio interactivo
+
+<KnowledgeCheck
+  id="react.introduction.q1"
+  question="Un componente hace `let count = 0` y un botón con `onClick={() => count++}`. ¿Qué pasa al hacer clic?"
+  options={[
+    {
+      text: "El contador en pantalla aumenta.",
+      explanation: "Modificar una variable común no dispara un nuevo render.",
+    },
+    {
+      text: "La variable cambia, pero la pantalla no se actualiza; y en el próximo render vuelve a 0.",
+      correct: true,
+      explanation: "Correcto. Para que React re-renderice y recuerde el valor hace falta useState.",
+    },
+    { text: "React lanza un error.", explanation: "No hay error: simplemente no tiene efecto visible." },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="react.introduction.q2"
+  question="Una lista de deudas usa `key={index}`. El usuario escribe una nota en la fila 2 y después ordena la lista por saldo. ¿Qué puede pasar?"
+  options={[
+    {
+      text: "Nada, el índice es una key válida.",
+      explanation: "Es válida sintácticamente, pero no identifica al dato.",
+    },
+    {
+      text: "La nota queda en la posición 2, asociada ahora a otra deuda.",
+      correct: true,
+      explanation:
+        "Correcto. React asocia el estado a la key; con el índice, la key de la posición no cambia aunque cambie el dato.",
+    },
+    {
+      text: "La lista no se reordena.",
+      explanation: "Se reordena; el problema es el estado asociado a cada fila.",
+    },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="react.introduction.q3"
+  question="¿Cómo le avisa un componente hijo a su padre que el usuario envió un formulario?"
+  options={[
+    { text: "Modificando las props que recibió.", explanation: "Las props son de sólo lectura." },
+    {
+      text: "Llamando a una función que el padre le pasó por props, como `onSubmit`.",
+      correct: true,
+      explanation: "Correcto. Los datos bajan por props y los cambios suben por callbacks.",
+    },
+    { text: "Con una variable global.", explanation: "No dispararía renders y acopla componentes." },
+  ]}
+/>

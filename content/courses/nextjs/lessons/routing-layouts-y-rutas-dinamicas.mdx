@@ -1,0 +1,294 @@
+---
+id: nextjs.routing
+moduleId: nextjs.routing-rendering
+title: "Routing en el App Router: layouts anidados, route groups, rutas dinámicas y manejo de errores"
+description: "Todo el sistema de rutas del App Router: layouts anidados y templates, route groups para organizar sin afectar la URL, segmentos dinámicos y catch-all, params y searchParams como Promises, generateStaticParams, not-found, error.tsx y global-error, y una introducción a parallel e intercepting routes."
+difficulty: intermediate
+order: 1
+objectives:
+  - "Organizar rutas con layouts anidados y route groups."
+  - "Crear rutas dinámicas y catch-all y leer params y searchParams correctamente."
+  - "Prerenderizar rutas dinámicas conocidas con generateStaticParams."
+  - "Manejar rutas inexistentes con notFound y errores con error.tsx y global-error.tsx."
+  - "Reconocer cuándo usar parallel e intercepting routes."
+prerequisites: ["nextjs.introduction"]
+estimatedMinutes: 40
+tags: ["routing", "layouts", "route groups", "rutas dinámicas", "params", "error handling", "nextjs"]
+version: "1.0.0"
+comparesWith: ["csharp", "java"]
+references:
+  - title: "Next.js — Dynamic Routes"
+    url: "https://nextjs.org/docs/app/api-reference/file-conventions/dynamic-routes"
+  - title: "Next.js — Route Groups"
+    url: "https://nextjs.org/docs/app/api-reference/file-conventions/route-groups"
+  - title: "Next.js — generateStaticParams"
+    url: "https://nextjs.org/docs/app/api-reference/functions/generate-static-params"
+  - title: "Next.js — Error Handling"
+    url: "https://nextjs.org/docs/app/getting-started/error-handling"
+  - title: "Next.js — Parallel Routes"
+    url: "https://nextjs.org/docs/app/api-reference/file-conventions/parallel-routes"
+  - title: "Next.js — Intercepting Routes"
+    url: "https://nextjs.org/docs/app/api-reference/file-conventions/intercepting-routes"
+interviewQuestions:
+  - question: "¿Para qué sirven los route groups?"
+    keyPoints:
+      - "Una carpeta entre paréntesis organiza rutas sin agregar un segmento a la URL."
+      - "Permiten layouts distintos para secciones al mismo nivel (por ejemplo, (marketing) y (app))."
+      - "Sirven para agrupar por funcionalidad o equipo."
+  - question: "¿Cómo se manejan los errores en el App Router?"
+    keyPoints:
+      - "Errores esperados (validación, no encontrado) se devuelven como valores o con notFound(), no con excepciones."
+      - "error.tsx es un error boundary del segmento; debe ser Client Component y recibe retry() para volver a intentar."
+      - "global-error.tsx captura errores del layout raíz."
+      - "En producción el mensaje del error de servidor se oculta; se correlaciona con un digest en los logs."
+  - question: "¿Qué hace generateStaticParams?"
+    keyPoints:
+      - "Devuelve la lista de valores de los segmentos dinámicos a prerenderizar en el build."
+      - "Las rutas conocidas se sirven como estáticas; las demás pueden generarse bajo demanda según la configuración."
+      - "Esta plataforma lo usa para prerenderizar cada lección y cada patrón."
+summary:
+  - "Los layouts se anidan por carpetas y se conservan al navegar; template.tsx se vuelve a montar en cada navegación."
+  - "Una carpeta (entre paréntesis) es un route group: organiza sin cambiar la URL."
+  - "[id] es dinámico, [...slug] es catch-all y [[...slug]] es catch-all opcional."
+  - "params y searchParams son Promises en las páginas y layouts: se esperan con await."
+  - "generateStaticParams prerenderiza en el build los valores conocidos de un segmento dinámico."
+  - "notFound() muestra el not-found.tsx más cercano; error.tsx captura errores inesperados del segmento."
+  - "Parallel routes (@slot) muestran varias páginas en un layout; intercepting routes abren rutas en modales."
+---
+
+## ¿Qué problema resuelve?
+
+Una plataforma de cobranzas tiene un panel de operadores, una sección de administración con su propio menú, el
+detalle de cada deuda, de cada cliente y de cada campaña, y páginas públicas de pago para los deudores, con otro
+diseño. El sistema de rutas tiene que permitir layouts distintos por sección, URLs limpias, parámetros dinámicos y
+un manejo coherente de "no existe" y "algo falló".
+
+## Layouts anidados y templates
+
+Cada nivel de carpetas puede tener su `layout.tsx`, y los layouts **se anidan**:
+
+```text
+app/
+  layout.tsx              html, body, proveedores globales
+  (app)/
+    layout.tsx            barra lateral del panel de operadores
+    debts/
+      layout.tsx          pestañas de la sección de deudas
+      page.tsx
+```
+
+Para `/debts`, el resultado es `RootLayout > AppLayout > DebtsLayout > DebtsPage`. Al navegar entre páginas
+hermanas, **sólo se re-renderiza lo que cambia**; los layouts compartidos se conservan con su estado.
+
+`template.tsx` es como un layout pero **se vuelve a montar en cada navegación** (se pierde su estado). Se usa poco:
+animaciones de entrada o lógica que debe reiniciarse por página.
+
+## Route groups
+
+Una carpeta **entre paréntesis** organiza rutas **sin aparecer en la URL**:
+
+```text
+app/
+  (public)/
+    layout.tsx            diseño simple para deudores
+    pay/[token]/page.tsx  → /pay/abc123
+  (app)/
+    layout.tsx            panel con barra lateral y autenticación
+    debts/page.tsx        → /debts
+    campaigns/page.tsx    → /campaigns
+```
+
+`/pay/abc123` y `/debts` están en el mismo nivel de URL, pero usan layouts completamente distintos. También se usan
+para agrupar por funcionalidad o equipo sin afectar las rutas.
+
+## Rutas dinámicas
+
+| Carpeta       | Coincide con                        | `params`                                  |
+| ------------- | ----------------------------------- | ----------------------------------------- |
+| `[debtId]`    | `/debts/123`                        | `{ debtId: "123" }`                       |
+| `[...slug]`   | `/docs/a/b/c` (uno o más segmentos) | `{ slug: ["a", "b", "c"] }`               |
+| `[[...slug]]` | `/docs` y `/docs/a/b` (cero o más)  | `{ slug: undefined }` o `{ slug: [...] }` |
+
+En las páginas, layouts y metadata, **`params` y `searchParams` son Promises**:
+
+```tsx
+// app/(app)/debts/[debtId]/page.tsx
+import { notFound } from "next/navigation";
+
+export default async function DebtPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ debtId: string }>;
+  searchParams: Promise<{ tab?: string }>;
+}) {
+  const { debtId } = await params;
+  const { tab = "summary" } = await searchParams;
+
+  const debt = await getDebtForCurrentUser(debtId); // incluye el chequeo de tenant
+  if (!debt) notFound(); // muestra el not-found.tsx más cercano
+
+  return <DebtView debt={debt} tab={tab} />;
+}
+```
+
+<Callout type="warning" title="Los parámetros son datos externos">
+  `debtId` y `searchParams` vienen de la URL: cualquiera puede escribir lo que quiera. Se validan (formato,
+  rango) y se verifica la autorización sobre el recurso igual que en una API.
+</Callout>
+
+En Client Components, los parámetros se leen con los hooks `useParams` y `useSearchParams`.
+
+### generateStaticParams
+
+Para segmentos dinámicos con valores **conocidos en el build** (lecciones, artículos, productos), se prerenderizan:
+
+```tsx
+// app/courses/[courseSlug]/[lessonSlug]/page.tsx (así funciona esta plataforma)
+export async function generateStaticParams() {
+  const catalog = await getCatalog();
+  return catalog.courses.flatMap((course) =>
+    catalog
+      .getLessonsOfCourse(course.id)
+      .map((lesson) => ({ courseSlug: course.slug, lessonSlug: lesson.slug })),
+  );
+}
+```
+
+Cada lección se genera como HTML en el build: se sirve sin trabajo en el servidor y se cachea en la CDN.
+
+## Estados de carga, no encontrado y error
+
+<MermaidDiagram
+  caption="Qué archivo responde en cada situación de un segmento."
+  chart={`
+flowchart TD
+  R["Request a /debts/123"] --> L{"¿Los datos están listos?"}
+  L -->|"todavía no"| LO["loading.tsx<br/>esqueleto"]
+  L -->|"sí"| E{"¿Existe la deuda?"}
+  E -->|"no: notFound()"| NF["not-found.tsx"]
+  E -->|"sí"| X{"¿Falló algo inesperado?"}
+  X -->|"sí: excepción"| ER["error.tsx<br/>con botón de reintentar"]
+  X -->|"no"| P["page.tsx"]
+`}
+/>
+
+La documentación separa dos tipos de errores:
+
+- **Esperados** (validación, recurso inexistente, sin permisos): se modelan como **valores de retorno**, se muestran
+  en la UI o se usa `notFound()`. No son excepciones.
+- **Inesperados** (bugs, dependencia caída): se lanzan y los captura el `error.tsx` más cercano.
+
+```tsx
+// app/(app)/debts/error.tsx
+"use client"; // los error boundaries son Client Components
+
+import { useEffect } from "react";
+
+export default function DebtsError({ error, retry }: { error: unknown; retry: () => void }) {
+  useEffect(() => reportError(error), [error]); // enviar a la herramienta de monitoreo
+
+  return (
+    <div role="alert">
+      <p>No pudimos cargar las deudas.</p>
+      <button onClick={() => retry()}>Reintentar</button>
+      {/* En producción, el mensaje de un error del servidor se oculta; un digest permite buscarlo en los logs */}
+    </div>
+  );
+}
+```
+
+`retry()` vuelve a pedir los datos y renderizar el segmento (es la prop estable desde Next.js 16.3; versiones
+anteriores ofrecían `reset()`, que hoy queda para casos en que no se quiere volver a pedir los datos).
+
+`error.tsx` no captura errores de su **propio** layout (lo envuelve desde adentro); para el layout raíz existe
+`global-error.tsx`.
+
+## Parallel e intercepting routes
+
+Dos herramientas avanzadas que vale la pena reconocer:
+
+- **Parallel routes** (`@slot`): un layout recibe varias páginas como props y las muestra a la vez, cada una con su
+  carga y error independientes. Ejemplo: un dashboard con `@metrics` y `@alerts`.
+- **Intercepting routes** (`(.)photo/[id]`): al navegar desde la lista, la ruta se abre **dentro de un modal**; si se
+  entra directo por URL, se muestra como página completa. Ejemplo: el detalle de un deudor en un modal desde la
+  tabla, con URL compartible.
+
+## Comparación con C# y Java
+
+| Concepto            | ASP.NET Core                                 | Spring Boot                          | Next.js                             |
+| ------------------- | -------------------------------------------- | ------------------------------------ | ----------------------------------- |
+| Parámetro de ruta   | `{debtId}` en la plantilla de ruta           | `@PathVariable`                      | Carpeta `[debtId]` + `await params` |
+| Query string        | `[FromQuery]`                                | `@RequestParam`                      | `await searchParams`                |
+| Layouts por sección | `_Layout` por carpeta, `Layout = ...`        | Layouts de Thymeleaf                 | `layout.tsx` + route groups         |
+| Página de error     | `UseExceptionHandler`, páginas de error      | `@ControllerAdvice`, `error.html`    | `error.tsx`, `global-error.tsx`     |
+| 404                 | `NotFound()`                                 | `ResponseStatusException(NOT_FOUND)` | `notFound()` + `not-found.tsx`      |
+| Prerenderizado      | Output caching / generación estática externa | No nativo                            | `generateStaticParams`              |
+
+## Errores frecuentes
+
+- **Leer `params.debtId` sin `await`** (en versiones anteriores eran objetos; ahora son Promises).
+- **Confiar en los parámetros de la URL** sin validar ni autorizar.
+- **Lanzar excepciones para errores esperados** en lugar de devolver valores o usar `notFound()`.
+- **Olvidar `"use client"` en `error.tsx`.**
+- **Duplicar layouts** en lugar de usar route groups.
+- **Mostrar `error.message` de errores del servidor** en la UI.
+
+## Ejercicio interactivo
+
+<KnowledgeCheck
+  id="nextjs.routing.q1"
+  question="¿Qué URL corresponde a `app/(public)/pay/[token]/page.tsx`?"
+  options={[
+    { text: "`/public/pay/abc`", explanation: "Las carpetas entre paréntesis no aparecen en la URL." },
+    {
+      text: "`/pay/abc`",
+      correct: true,
+      explanation:
+        "Correcto. (public) es un route group: organiza y permite un layout propio sin cambiar la URL.",
+    },
+    {
+      text: "`/(public)/pay/abc`",
+      explanation: "Los paréntesis indican un route group, no un segmento literal.",
+    },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="nextjs.routing.q2"
+  question="La deuda pedida no existe. ¿Qué es lo más adecuado en la página?"
+  options={[
+    {
+      text: "Lanzar `new Error('No existe')` para que lo capture error.tsx.",
+      explanation: "Es un caso esperado: no debería tratarse como un error inesperado.",
+    },
+    {
+      text: "Llamar a `notFound()` para mostrar el not-found.tsx más cercano con status 404.",
+      correct: true,
+      explanation:
+        "Correcto. Los errores esperados se modelan como valores o con las funciones del framework.",
+    },
+    {
+      text: "Devolver una página vacía.",
+      explanation: "El usuario no sabría qué pasó y el status sería 200.",
+    },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="nextjs.routing.q3"
+  question="¿Por qué `error.tsx` debe empezar con `'use client'`?"
+  options={[
+    {
+      text: "Porque los errores sólo ocurren en el navegador.",
+      explanation: "También captura errores del servidor que se propagan al render.",
+    },
+    {
+      text: "Porque es un error boundary con interactividad (reintentar), y los error boundaries son componentes cliente.",
+      correct: true,
+      explanation:
+        "Correcto. Recibe la función retry para volver a pedir los datos y renderizar el segmento.",
+    },
+    { text: "No es obligatorio.", explanation: "Next.js lo exige para este archivo." },
+  ]}
+/>

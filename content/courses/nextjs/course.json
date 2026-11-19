@@ -10,6 +10,22 @@
   "tags": ["nextjs", "rsc", "vercel"],
   "modules": [
     {
+      "id": "nextjs.intro",
+      "slug": "introduccion",
+      "title": "Introducción",
+      "description": "Qué es Next.js, qué agrega sobre React y cómo se organiza un proyecto con App Router: convenciones de archivos, rutas, layouts y estrategias de renderizado.",
+      "order": 0,
+      "topics": [
+        "Qué es Next.js y qué agrega sobre React",
+        "Crear y ejecutar un proyecto",
+        "Convenciones de archivos del App Router",
+        "Páginas, layouts y navegación",
+        "Servidor y cliente en una misma aplicación",
+        "Estrategias de renderizado: estático, dinámico y streaming",
+        "Estructura recomendada de un proyecto"
+      ]
+    },
+    {
       "id": "nextjs.routing-rendering",
       "slug": "routing-y-renderizado",
       "title": "Routing y renderizado",

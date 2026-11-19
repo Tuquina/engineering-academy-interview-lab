@@ -1,0 +1,339 @@
+---
+id: react.data-forms
+moduleId: react.state-data
+title: "Datos y formularios: server state, data fetching, formularios, Suspense y error boundaries"
+description: "Cómo maneja datos una aplicación React real: separar server state de client state, cargar datos con una librería de caché (o desde el servidor), formularios controlados y no controlados con validación, Actions y useActionState de React 19, Suspense para estados de carga y error boundaries para fallas."
+difficulty: intermediate
+order: 1
+objectives:
+  - "Distinguir server state de client state y elegir la herramienta para cada uno."
+  - "Cargar y mutar datos con una librería de server state (caché, invalidación, reintentos)."
+  - "Implementar formularios controlados y no controlados, con validación compartida con el backend."
+  - "Usar Actions, useActionState y useOptimistic de React 19 en formularios."
+  - "Diseñar estados de carga con Suspense y fallas con error boundaries."
+prerequisites: ["react.memo-refs-context"]
+estimatedMinutes: 45
+tags: ["server state", "tanstack query", "formularios", "suspense", "error boundaries", "useactionstate"]
+version: "1.0.0"
+comparesWith: ["csharp", "java"]
+references:
+  - title: "React — Choosing the State Structure"
+    url: "https://react.dev/learn/choosing-the-state-structure"
+  - title: "TanStack Query — Overview"
+    url: "https://tanstack.com/query/latest/docs/framework/react/overview"
+  - title: "React — useActionState"
+    url: "https://react.dev/reference/react/useActionState"
+  - title: "React — useOptimistic"
+    url: "https://react.dev/reference/react/useOptimistic"
+  - title: "React — Suspense"
+    url: "https://react.dev/reference/react/Suspense"
+  - title: "React — Catching rendering errors with an error boundary"
+    url: "https://react.dev/reference/react/Component#catching-rendering-errors-with-an-error-boundary"
+interviewQuestions:
+  - question: "¿Qué diferencia hay entre server state y client state?"
+    keyPoints:
+      - "Server state es una copia local de datos que pertenecen al servidor: puede quedar desactualizada, se comparte entre componentes y necesita caché, invalidación y reintentos."
+      - "Client state es propio de la interfaz: un modal abierto, un filtro, un borrador."
+      - "Server state se maneja con librerías como TanStack Query o con Server Components; client state con useState, useReducer o una librería ligera."
+      - "Mezclarlos en un store global lleva a reimplementar caché e invalidación a mano."
+  - question: "¿Formularios controlados o no controlados?"
+    keyPoints:
+      - "Controlados: el valor vive en el estado de React; permiten validación en vivo y campos dependientes."
+      - "No controlados: el DOM guarda el valor y se lee al enviar (FormData); menos renders y más simples."
+      - "Librerías como React Hook Form combinan ambos enfoques con buena performance."
+      - "La validación debe repetirse en el servidor; compartir el esquema evita divergencias."
+  - question: "¿Qué hacen Suspense y los error boundaries?"
+    keyPoints:
+      - "Suspense muestra un fallback mientras un componente hijo espera datos o código."
+      - "Un error boundary captura errores de render de sus hijos y muestra una UI alternativa."
+      - "Ambos son declarativos y se ubican según qué parte de la pantalla debe degradarse."
+      - "Los error boundaries no capturan errores de event handlers ni de código asíncrono fuera del render."
+summary:
+  - "Server state (datos del servidor) y client state (estado de la UI) tienen necesidades distintas."
+  - "Las librerías de server state dan caché, deduplicación, revalidación, reintentos e invalidación tras mutaciones."
+  - "Las query keys identifican los datos en caché; invalidarlas tras una mutación los vuelve a pedir."
+  - "Formularios: no controlados con FormData para lo simple, controlados o React Hook Form para lo complejo."
+  - "El esquema de validación (Zod) se comparte entre el formulario y el backend; el servidor siempre revalida."
+  - "useActionState maneja pendiente, resultado y errores de una acción; useOptimistic muestra el resultado antes de confirmarlo."
+  - "Suspense declara qué mostrar mientras se carga; los error boundaries, qué mostrar si falla."
+---
+
+## ¿Qué problema resuelve?
+
+En la lección de efectos vimos que cargar datos con `useEffect` a mano obliga a resolver race conditions. Y eso es
+sólo el principio: si dos componentes necesitan el mismo cliente, ¿se piden dos veces? Si el usuario registra una
+promesa de pago, ¿cómo se actualiza la lista? ¿Qué pasa si la red falla? ¿Cuándo se considera viejo un dato?
+
+La respuesta moderna es reconocer que **los datos del servidor son un tipo de estado distinto** y usar herramientas
+diseñadas para él.
+
+## Server state y client state
+
+| Server state                                           | Client state                               |
+| ------------------------------------------------------ | ------------------------------------------ |
+| Pertenece al servidor; tenés una copia                 | Pertenece a la interfaz                    |
+| Puede quedar desactualizado sin que lo sepas           | Siempre está al día                        |
+| Se comparte entre pantallas y usuarios                 | Local a una pantalla o sesión              |
+| Necesita caché, revalidación, reintentos, invalidación | Necesita sólo guardarse y actualizarse     |
+| Ejemplos: deudas, clientes, campañas                   | Ejemplos: modal abierto, pestaña, borrador |
+
+<MermaidDiagram
+  caption="Cada tipo de estado con su herramienta: el server state se cachea y revalida; el client state es local."
+  chart={`
+flowchart LR
+  subgraph S["Server state"]
+    Q["TanStack Query<br/>o Server Components"] -->|"caché por query key"| API["API"]
+  end
+  subgraph C["Client state"]
+    L["useState / useReducer"]
+    G["Context o store ligero<br/>tema, preferencias"]
+  end
+  UI["Componentes"] --> Q
+  UI --> L
+  UI --> G
+`}
+/>
+
+El error de diseño más común es guardar datos del servidor en un store global (Redux, Context) y reimplementar a
+mano el `loading`, el `error`, la caché y la invalidación.
+
+## Data fetching con una librería de server state
+
+**TanStack Query** (antes React Query) es la librería más usada para server state en el cliente. Con Next.js y
+Server Components, buena parte de la carga de datos se hace en el servidor (curso de Next.js); en el cliente, el
+modelo es este:
+
+```tsx
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+
+function useCustomerDebts(customerId: string) {
+  return useQuery({
+    queryKey: ["customers", customerId, "debts"], // identidad del dato en la caché
+    queryFn: ({ signal }) => api.getCustomerDebts(customerId, { signal }), // cancelable
+    staleTime: 30_000, // durante 30 s se considera fresco y no se vuelve a pedir
+  });
+}
+
+function useRegisterPromise(customerId: string) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: api.registerPaymentPromise,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["customers", customerId] }), // refresca lo afectado
+  });
+}
+
+function DebtsPanel({ customerId }: { customerId: string }) {
+  const { data, isPending, isError, refetch } = useCustomerDebts(customerId);
+  if (isPending) return <Skeleton />;
+  if (isError) return <ErrorState onRetry={refetch} />;
+  return <DebtList debts={data} />;
+}
+```
+
+Lo que obtenés sin escribirlo: **deduplicación** (dos componentes con la misma key comparten la request),
+**caché**, **revalidación** al volver a la pestaña o reconectar, **reintentos** con backoff, **cancelación** al
+cambiar de key (sin race conditions) e **invalidación** tras mutaciones.
+
+## Formularios
+
+### No controlados: el DOM guarda el valor
+
+```tsx
+function PromiseForm({ onSubmit }: { onSubmit: (input: PromiseInput) => void }) {
+  return (
+    <form
+      onSubmit={(event) => {
+        event.preventDefault();
+        const data = new FormData(event.currentTarget);
+        onSubmit({ promisedFor: String(data.get("promisedFor")), amount: Number(data.get("amount")) });
+      }}
+    >
+      <label>
+        Fecha <input name="promisedFor" type="date" required />
+      </label>
+      <label>
+        Monto <input name="amount" type="number" min="1" required />
+      </label>
+      <button type="submit">Registrar</button>
+    </form>
+  );
+}
+```
+
+Simple, sin renders por tecla, y aprovecha la validación nativa del navegador (`required`, `min`, `type`).
+
+### Controlados: React guarda el valor
+
+```tsx
+const [amount, setAmount] = useState("");
+<input value={amount} onChange={(e) => setAmount(e.target.value)} />;
+```
+
+Necesarios cuando el valor afecta otras partes de la interfaz en vivo: validación mientras se escribe, campos que
+dependen de otros, formato en tiempo real. Cada tecla produce un render; en formularios grandes, una librería como
+**React Hook Form** (no controlada por dentro, con suscripciones selectivas) mantiene la performance.
+
+### Validación compartida
+
+La validación del cliente es **para la experiencia**; la del servidor es **para la seguridad**. El mismo esquema
+Zod puede usarse en ambos lados para que no diverjan:
+
+```tsx
+export const PromiseInputSchema = z.object({
+  promisedFor: z.iso.date(),
+  amount: z.number().int().positive().max(10_000_000),
+});
+```
+
+## Actions de React 19: useActionState y useOptimistic
+
+React 19 agregó soporte nativo para **acciones**: funciones async asociadas a un formulario, con estado de envío y
+resultado manejados por React. Funcionan en el cliente y, con Next.js, con Server Actions.
+
+```tsx
+import { useActionState, useOptimistic } from "react";
+
+type FormState = { error?: string; ok?: boolean };
+
+function PromiseForm({ debtId, promises }: { debtId: string; promises: PaymentPromise[] }) {
+  const [optimisticPromises, addOptimistic] = useOptimistic(promises, (current, added: PaymentPromise) => [
+    ...current,
+    added,
+  ]);
+
+  const [state, formAction, isPending] = useActionState(async (_previous: FormState, formData: FormData) => {
+    const parsed = PromiseInputSchema.safeParse({
+      promisedFor: formData.get("promisedFor"),
+      amount: Number(formData.get("amount")),
+    });
+    if (!parsed.success) return { error: "Revisá la fecha y el monto." };
+
+    addOptimistic({ id: "temp", debtId, ...parsed.data, status: "pending" }); // se ve al instante
+    const result = await registerPromise(debtId, parsed.data); // si falla, la UI optimista se descarta
+    return result.ok ? { ok: true } : { error: result.message };
+  }, {});
+
+  return (
+    <form action={formAction}>
+      {/* ...campos... */}
+      <button disabled={isPending}>{isPending ? "Guardando…" : "Registrar"}</button>
+      {state.error && <p role="alert">{state.error}</p>}
+      <PromiseList promises={optimisticPromises} />
+    </form>
+  );
+}
+```
+
+- `useActionState` devuelve el último resultado, la acción para el `form` y si está pendiente.
+- `useOptimistic` muestra el resultado esperado **antes** de que el servidor confirme; si la acción falla, React
+  vuelve al estado real.
+
+## Suspense y error boundaries
+
+**Suspense** declara qué mostrar **mientras** una parte de la interfaz espera (datos o código):
+
+```tsx
+<Suspense fallback={<DebtsSkeleton />}>
+  <DebtsPanel customerId={customerId} />
+</Suspense>
+```
+
+Los componentes "suspenden" cuando leen datos con una fuente compatible (Server Components, `use(promise)`,
+`useSuspenseQuery` de TanStack Query, `lazy` para código). La ubicación del boundary es una decisión de diseño:
+¿se muestra un esqueleto por panel o uno para toda la página?
+
+Un **error boundary** declara qué mostrar si **falla** el render de sus hijos:
+
+```tsx
+import { ErrorBoundary } from "react-error-boundary";
+
+<ErrorBoundary fallback={<PanelError message="No pudimos cargar las deudas." />}>
+  <Suspense fallback={<DebtsSkeleton />}>
+    <DebtsPanel customerId={customerId} />
+  </Suspense>
+</ErrorBoundary>;
+```
+
+<FlowDiagram
+  steps={[
+    { title: "Render del panel", detail: "El componente pide sus datos." },
+    { title: "Suspende", detail: "Suspense muestra el esqueleto mientras tanto." },
+    { title: "Datos listos", detail: "Se muestra el contenido real.", tone: "runtime" },
+    {
+      title: "Si falla",
+      detail: "El error boundary muestra el estado de error con opción de reintentar.",
+      tone: "boundary",
+    },
+  ]}
+  caption="Carga y error se declaran alrededor de cada sección: una falla no tira abajo toda la pantalla."
+/>
+
+Los error boundaries capturan errores **durante el render**, no en event handlers ni en código asíncrono suelto:
+esos se manejan con `try/catch` y estado.
+
+## Comparación con C# y Java
+
+| Necesidad                | Blazor                              | Java (Vaadin / JSF)      | React                              |
+| ------------------------ | ----------------------------------- | ------------------------ | ---------------------------------- |
+| Cargar datos             | `OnInitializedAsync` + `HttpClient` | Servicios del backend    | TanStack Query o Server Components |
+| Caché de datos remotos   | Manual o librerías                  | Caché del backend        | Caché por query key                |
+| Formularios y validación | `EditForm` + DataAnnotations        | Binder + Bean Validation | FormData / React Hook Form + Zod   |
+| Estado de carga          | `if (data == null)` en la plantilla | Indicadores manuales     | Suspense                           |
+| Errores de render        | `ErrorBoundary` (Blazor)            | Páginas de error         | Error boundaries                   |
+
+## Errores frecuentes
+
+- **Guardar server state en un store global** y reimplementar caché a mano.
+- **No invalidar tras mutaciones**: la lista no refleja la promesa recién creada.
+- **Validar sólo en el cliente.**
+- **Formularios controlados enormes** que re-renderizan todo por tecla.
+- **Un único Suspense o error boundary** para toda la aplicación.
+- **Esperar que un error boundary capture errores de un `onClick`.**
+
+## Ejercicio interactivo
+
+<KnowledgeCheck
+  id="react.data-forms.q1"
+  question="Dos componentes de la misma pantalla llaman a `useQuery` con la key `['customers', 'cus_1']`. ¿Cuántas requests se hacen?"
+  options={[
+    { text: "Dos, una por componente.", explanation: "La librería deduplica por query key." },
+    {
+      text: "Una: comparten la entrada de caché y la request en vuelo.",
+      correct: true,
+      explanation: "Correcto. La query key identifica el dato; los dos componentes leen la misma caché.",
+    },
+    { text: "Ninguna hasta que el usuario haga clic.", explanation: "useQuery carga al montar por defecto." },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="react.data-forms.q2"
+  question="Después de registrar una promesa de pago con una mutación, la lista de promesas sigue mostrando los datos viejos. ¿Qué falta?"
+  options={[
+    { text: "Recargar la página.", explanation: "Funciona, pero rompe la experiencia y no es necesario." },
+    {
+      text: "Invalidar (o actualizar) la query de promesas en el onSuccess de la mutación.",
+      correct: true,
+      explanation: "Correcto. La librería vuelve a pedir los datos afectados por la escritura.",
+    },
+    { text: "Aumentar el staleTime.", explanation: "Haría que los datos viejos duren más." },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="react.data-forms.q3"
+  question="Un `onClick` lanza una excepción. ¿La captura el error boundary que envuelve al componente?"
+  options={[
+    {
+      text: "Sí, captura cualquier error de sus hijos.",
+      explanation: "Sólo captura errores durante el render y en métodos del ciclo de vida.",
+    },
+    {
+      text: "No: los errores de event handlers se manejan con try/catch y estado.",
+      correct: true,
+      explanation:
+        "Correcto. El handler puede guardar el error en estado y mostrarlo, o relanzarlo durante el render.",
+    },
+    { text: "Sólo en producción.", explanation: "El comportamiento es el mismo en desarrollo y producción." },
+  ]}
+/>

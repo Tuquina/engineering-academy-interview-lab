@@ -1,0 +1,350 @@
+---
+id: react.state-effects
+moduleId: react.hooks
+title: "useState, useReducer y useEffect: estado y sincronización sin errores"
+description: "Cómo manejar estado local con useState y useReducer (inmutabilidad, actualizaciones funcionales, reducers como funciones puras) y cuándo usar useEffect: sólo para sincronizar con sistemas externos, con dependencias correctas, limpieza y sin race conditions. Incluye los casos en que no necesitás un efecto."
+difficulty: intermediate
+order: 1
+objectives:
+  - "Actualizar estado de objetos y arrays sin mutarlos y usar actualizaciones funcionales."
+  - "Elegir entre useState y useReducer y escribir reducers puros con acciones tipadas."
+  - "Explicar el propósito real de useEffect: sincronizar con sistemas externos."
+  - "Declarar dependencias correctas, escribir funciones de limpieza y evitar race conditions."
+  - "Reconocer los casos en que un efecto sobra y reemplazarlo por cálculo en el render o event handlers."
+prerequisites: ["react.composition"]
+estimatedMinutes: 45
+tags: ["usestate", "usereducer", "useeffect", "inmutabilidad", "race conditions", "hooks"]
+version: "1.0.0"
+comparesWith: ["csharp", "java"]
+references:
+  - title: "React — useState"
+    url: "https://react.dev/reference/react/useState"
+  - title: "React — Extracting State Logic into a Reducer"
+    url: "https://react.dev/learn/extracting-state-logic-into-a-reducer"
+  - title: "React — Synchronizing with Effects"
+    url: "https://react.dev/learn/synchronizing-with-effects"
+  - title: "React — You Might Not Need an Effect"
+    url: "https://react.dev/learn/you-might-not-need-an-effect"
+  - title: "React — Lifecycle of Reactive Effects"
+    url: "https://react.dev/learn/lifecycle-of-reactive-effects"
+interviewQuestions:
+  - question: "¿Para qué sirve useEffect y cuándo no deberías usarlo?"
+    keyPoints:
+      - "Para sincronizar el componente con un sistema externo: suscripciones, WebSockets, timers, APIs del navegador, widgets no React."
+      - "No para calcular datos derivados de props o estado: eso se calcula durante el render."
+      - "No para responder a acciones del usuario: eso va en el event handler."
+      - "No para reiniciar estado al cambiar una prop: se usa una key."
+  - question: "¿Qué es una race condition en un useEffect que hace fetch y cómo se evita?"
+    keyPoints:
+      - "Si la dependencia cambia rápido, una respuesta vieja puede llegar después de una nueva y pisarla."
+      - "Se evita con una función de limpieza que ignora la respuesta (flag ignore) o cancela con AbortController."
+      - "Mejor aún: usar una librería de server state o Server Components que resuelven caché, deduplicación y cancelación."
+  - question: "¿Cuándo usarías useReducer en lugar de useState?"
+    keyPoints:
+      - "Cuando el estado tiene varias partes que cambian juntas o transiciones con reglas."
+      - "Cuando el próximo estado depende del anterior de formas complejas."
+      - "El reducer es una función pura testeable sin React; las acciones documentan qué puede pasar."
+summary:
+  - "El estado se reemplaza, nunca se muta: objetos y arrays nuevos con spread, map, filter."
+  - "Si el nuevo estado depende del anterior, se usa la forma funcional: setX(prev => ...)."
+  - "useReducer centraliza transiciones complejas en una función pura (estado, acción) → estado."
+  - "useEffect sincroniza con sistemas externos; se ejecuta después del commit."
+  - "Las dependencias deben incluir todo valor reactivo usado dentro; el linter lo verifica."
+  - "La limpieza deshace lo que hizo el efecto (desuscribir, cancelar, limpiar timers)."
+  - "Antes de escribir un efecto, preguntá si se puede calcular en el render o hacer en el event handler."
+---
+
+## ¿Qué problema resuelve?
+
+`useState` y `useEffect` son los dos hooks más usados y los que más bugs producen. El patrón problemático típico de
+quien empieza:
+
+```tsx
+function DebtSummary({ customerId }: { customerId: string }) {
+  const [debts, setDebts] = useState<Debt[]>([]);
+  const [total, setTotal] = useState(0);
+
+  useEffect(() => {
+    fetch(`/api/customers/${customerId}/debts`)
+      .then((r) => r.json())
+      .then(setDebts);
+  }, []); // ❌ falta customerId: al cambiar de cliente se muestran las deudas del anterior
+
+  useEffect(() => {
+    setTotal(debts.reduce((sum, d) => sum + d.balanceCents, 0)); // ❌ estado derivado con un efecto
+  }, [debts]);
+
+  return <p>Total: {total}</p>;
+}
+```
+
+Tiene tres errores: dependencias incompletas, una race condition al cambiar rápido de cliente y un efecto
+innecesario. Esta lección explica cómo usar estos hooks correctamente.
+
+## useState en profundidad
+
+### Inmutabilidad
+
+React decide si re-renderizar comparando **referencias** (`Object.is`). Si mutás un objeto y llamás al setter con
+el mismo objeto, React ve la misma referencia y puede no actualizar.
+
+```tsx
+const [debt, setDebt] = useState<Debt>(initial);
+const [promises, setPromises] = useState<PaymentPromise[]>([]);
+
+// ❌ Mutación
+debt.status = "paid";
+setDebt(debt);
+promises.push(newPromise);
+setPromises(promises);
+
+// ✅ Objetos y arrays nuevos
+setDebt({ ...debt, status: "paid" });
+setPromises([...promises, newPromise]); // agregar
+setPromises(promises.filter((p) => p.id !== id)); // quitar
+setPromises(promises.map((p) => (p.id === id ? { ...p, status: "kept" } : p))); // modificar uno
+```
+
+### Actualizaciones funcionales e inicialización perezosa
+
+```tsx
+setCount((previous) => previous + 1); // usa el valor más reciente, no el del render
+
+const [draft, setDraft] = useState(() => loadDraftFromStorage()); // la función se ejecuta sólo en el primer render
+```
+
+Pasar `useState(loadDraftFromStorage())` ejecutaría la función **en cada render** aunque sólo se use la primera vez.
+
+## useReducer: transiciones explícitas
+
+Cuando el estado tiene varias partes relacionadas o reglas de transición, un **reducer** las centraliza en una
+función pura `(estado, acción) → nuevo estado`:
+
+```tsx
+type CallState =
+  | { status: "idle" }
+  | { status: "dialing"; startedAt: number }
+  | { status: "in_call"; startedAt: number; notes: string }
+  | { status: "ended"; durationMs: number; outcome: "promise" | "no_answer" | "refused" };
+
+type CallAction =
+  | { type: "dial"; now: number }
+  | { type: "connected" }
+  | { type: "note"; text: string }
+  | { type: "hang_up"; now: number; outcome: "promise" | "no_answer" | "refused" };
+
+function callReducer(state: CallState, action: CallAction): CallState {
+  switch (action.type) {
+    case "dial":
+      return state.status === "idle" ? { status: "dialing", startedAt: action.now } : state;
+    case "connected":
+      return state.status === "dialing"
+        ? { status: "in_call", startedAt: state.startedAt, notes: "" }
+        : state;
+    case "note":
+      return state.status === "in_call" ? { ...state, notes: action.text } : state;
+    case "hang_up":
+      return state.status === "dialing" || state.status === "in_call"
+        ? { status: "ended", durationMs: action.now - state.startedAt, outcome: action.outcome }
+        : state;
+  }
+}
+
+function CallPanel() {
+  const [state, dispatch] = useReducer(callReducer, { status: "idle" });
+  return <button onClick={() => dispatch({ type: "dial", now: Date.now() })}>Llamar</button>;
+}
+```
+
+Ventajas: las transiciones inválidas son imposibles (la discriminated union del curso de TypeScript), el reducer se
+testea sin React y las acciones documentan todo lo que puede pasar. Es el mismo patrón que Redux, a escala de un
+componente.
+
+## useEffect: sincronizar con sistemas externos
+
+`useEffect` existe para **sincronizar un componente con algo que está fuera de React**: una conexión WebSocket, una
+suscripción, un timer, una API del navegador, un widget de terceros.
+
+```tsx
+function LiveCampaignStatus({ campaignId }: { campaignId: string }) {
+  const [status, setStatus] = useState<CampaignStatus | null>(null);
+
+  useEffect(() => {
+    const socket = new WebSocket(`wss://realtime.example.com/campaigns/${campaignId}`);
+    socket.addEventListener("message", (event) => setStatus(parseStatus(event.data)));
+
+    return () => socket.close(); // limpieza: deshacer lo que hizo el efecto
+  }, [campaignId]); // volver a sincronizar cuando cambia campaignId
+
+  return <StatusBadge status={status} />;
+}
+```
+
+<MermaidDiagram
+  caption="Ciclo de un efecto: se ejecuta después del commit; ante un cambio de dependencias, primero limpia y después vuelve a sincronizar."
+  chart={`
+sequenceDiagram
+  participant R as React
+  participant E as Efecto
+  participant S as Sistema externo
+  R->>R: commit (campaignId = A)
+  R->>E: ejecutar efecto
+  E->>S: conectar a A
+  R->>R: commit (campaignId = B)
+  R->>E: limpieza del render anterior
+  E->>S: desconectar de A
+  R->>E: ejecutar efecto
+  E->>S: conectar a B
+  R->>E: al desmontar: limpieza
+  E->>S: desconectar de B
+`}
+/>
+
+### Dependencias
+
+El array de dependencias debe incluir **todo valor reactivo** (props, estado, valores derivados de ellos) usado
+dentro del efecto. No es una forma de decidir "cuándo correr": describe **de qué depende la sincronización**. La
+regla de lint `react-hooks/exhaustive-deps` lo verifica; desactivarla casi siempre esconde un bug.
+
+| Array          | Cuándo se ejecuta                            |
+| -------------- | -------------------------------------------- |
+| Sin array      | Después de cada render (rara vez correcto)   |
+| `[]`           | Al montar (y limpia al desmontar)            |
+| `[campaignId]` | Al montar y cada vez que cambia `campaignId` |
+
+Si una dependencia cambia "demasiado" (un objeto o función creados en cada render), la solución es moverla dentro
+del efecto, derivarla de primitivos o estabilizarla, no quitarla del array.
+
+### Race conditions al cargar datos
+
+```tsx
+useEffect(() => {
+  const controller = new AbortController();
+  fetch(`/api/customers/${customerId}/debts`, { signal: controller.signal })
+    .then((r) => r.json())
+    .then(setDebts)
+    .catch((error) => {
+      if (error.name !== "AbortError") setError(error);
+    });
+  return () => controller.abort(); // si customerId cambia, se cancela la request anterior
+}, [customerId]);
+```
+
+Sin la limpieza, si el usuario pasa del cliente A al B y la respuesta de A llega después, la pantalla de B muestra
+las deudas de A. Aun así, **cargar datos con efectos a mano** obliga a resolver caché, deduplicación, reintentos y
+estados de carga: en aplicaciones reales se usa una librería de server state o Server Components (lección de datos).
+
+## No necesitás un efecto para...
+
+| Situación                                  | En lugar de un efecto                                       |
+| ------------------------------------------ | ----------------------------------------------------------- |
+| Calcular algo a partir de props o estado   | Calcularlo durante el render (`useMemo` si es costoso)      |
+| Responder a un clic o un submit            | Hacerlo en el event handler                                 |
+| Reiniciar el estado cuando cambia una prop | `key` en el componente                                      |
+| Notificar al padre cuando cambia un estado | Llamar al callback en el mismo handler que cambia el estado |
+| Enviar analytics al hacer una acción       | En el handler de esa acción                                 |
+| Inicializar algo una vez en la aplicación  | Fuera del componente, en el módulo                          |
+
+```tsx
+// ❌ Efecto para reaccionar a un submit
+const [submitted, setSubmitted] = useState(false);
+useEffect(() => {
+  if (submitted) savePromise(form);
+}, [submitted]);
+
+// ✅ El trabajo va en el handler de la acción
+async function handleSubmit() {
+  await savePromise(form);
+}
+```
+
+La regla de la documentación oficial: **si algo ocurre porque el usuario hizo algo, va en el event handler; si
+ocurre porque el componente se mostró y debe sincronizarse con algo externo, va en un efecto.**
+
+El challenge [useEffect problemático](/challenges/react-use-effect) tiene un componente con estos errores para
+corregir.
+
+## Comparación con C# y Java
+
+| Concepto                       | Blazor                                  | JavaFX                     | React                           |
+| ------------------------------ | --------------------------------------- | -------------------------- | ------------------------------- |
+| Estado local                   | Campos + `StateHasChanged`              | Properties observables     | `useState`                      |
+| Transiciones complejas         | Fluxor (Redux para Blazor)              | Máquinas de estado propias | `useReducer`                    |
+| Al aparecer / desaparecer      | `OnInitializedAsync`, `Dispose`         | Listeners de escena        | `useEffect` con limpieza        |
+| Reaccionar a parámetros nuevos | `OnParametersSetAsync`                  | Listeners de propiedades   | Dependencias del efecto (o key) |
+| Cancelación                    | `CancellationToken` en el ciclo de vida | Manual                     | Limpieza + `AbortController`    |
+
+La diferencia mental importante: en Blazor o en frameworks con ciclo de vida se piensa en **momentos** ("al
+inicializar", "al cambiar parámetros"). En React se piensa en **sincronización**: "este componente debe estar
+conectado a la campaña X mientras se muestre". React decide cuándo conectar y desconectar.
+
+## Errores frecuentes
+
+- **Mutar estado** y llamar al setter con la misma referencia.
+- **Dependencias incompletas** para que el efecto "corra una sola vez".
+- **Efectos para estado derivado** o para responder a eventos del usuario.
+- **Fetch sin limpieza**, con race conditions al cambiar de parámetro.
+- **Efectos que se disparan en cadena**: un efecto setea estado que dispara otro efecto que setea otro estado.
+- **Funciones async directamente como efecto** (`useEffect(async () => ...)`): el efecto debe devolver una función
+  de limpieza, no una Promise.
+
+## Ejercicio interactivo
+
+<KnowledgeCheck
+  id="react.state-effects.q1"
+  question="Un efecto con dependencias `[]` carga los datos de `customerId`. ¿Qué pasa cuando el usuario navega a otro cliente sin desmontar el componente?"
+  options={[
+    {
+      text: "El efecto se vuelve a ejecutar con el nuevo cliente.",
+      explanation: "Con [] sólo se ejecuta al montar.",
+    },
+    {
+      text: "Se siguen mostrando los datos del cliente anterior, porque el efecto no depende de customerId.",
+      correct: true,
+      explanation:
+        "Correcto. customerId debe estar en las dependencias, y la limpieza debe cancelar la request anterior.",
+    },
+    {
+      text: "React lanza un error por la dependencia faltante.",
+      explanation: "Sólo el linter lo advierte; en runtime no hay error.",
+    },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="react.state-effects.q2"
+  question="¿Cuál de estos casos SÍ justifica un useEffect?"
+  options={[
+    {
+      text: "Calcular el total de deudas cuando cambia la lista.",
+      explanation: "Es estado derivado: se calcula en el render.",
+    },
+    {
+      text: "Guardar una promesa de pago cuando el usuario envía el formulario.",
+      explanation: "Es respuesta a una acción: va en el handler del submit.",
+    },
+    {
+      text: "Suscribirse a un WebSocket de la campaña mientras el panel está visible.",
+      correct: true,
+      explanation:
+        "Correcto. Es sincronización con un sistema externo, con limpieza al desmontar o cambiar de campaña.",
+    },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="react.state-effects.q3"
+  question="¿Qué tiene de malo `promises.push(p); setPromises(promises)`?"
+  options={[
+    {
+      text: "Nada, push es más eficiente.",
+      explanation: "La eficiencia no compensa que React pueda no detectar el cambio.",
+    },
+    {
+      text: "Muta el array: el setter recibe la misma referencia y React puede no re-renderizar.",
+      correct: true,
+      explanation: "Correcto. Se crea un array nuevo: setPromises([...promises, p]) o la forma funcional.",
+    },
+    { text: "push no existe en arrays de estado.", explanation: "Existe; el problema es mutar el estado." },
+  ]}
+/>

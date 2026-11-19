@@ -1,0 +1,308 @@
+---
+id: react.quality
+moduleId: react.quality
+title: "Calidad frontend: optimización de renders, testing, accesibilidad, seguridad y arquitectura"
+description: "Lo que distingue un frontend profesional: optimizar renders con el Profiler y técnicas como virtualización, testear como lo usa una persona con Testing Library, construir interfaces accesibles (semántica, teclado, ARIA), evitar XSS con datos no confiables y organizar el código por funcionalidad."
+difficulty: intermediate
+order: 1
+objectives:
+  - "Diagnosticar renders lentos con el Profiler y aplicar la técnica adecuada (estado local, memo, virtualización, transiciones)."
+  - "Escribir tests con Testing Library centrados en el comportamiento visible y en queries accesibles."
+  - "Construir componentes accesibles: HTML semántico, teclado, foco, etiquetas y ARIA cuando hace falta."
+  - "Explicar cómo React previene XSS y qué casos siguen siendo peligrosos."
+  - "Organizar una aplicación frontend por funcionalidad con límites claros."
+prerequisites: ["react.data-forms"]
+estimatedMinutes: 45
+tags: ["performance", "testing library", "accesibilidad", "xss", "arquitectura frontend", "profiler"]
+version: "1.0.0"
+comparesWith: ["csharp", "java"]
+references:
+  - title: "React — Profiler"
+    url: "https://react.dev/reference/react/Profiler"
+  - title: "React — useTransition"
+    url: "https://react.dev/reference/react/useTransition"
+  - title: "Testing Library — Guiding Principles"
+    url: "https://testing-library.com/docs/guiding-principles"
+  - title: "Testing Library — Which query should I use?"
+    url: "https://testing-library.com/docs/queries/about#priority"
+  - title: "W3C — WCAG 2.2"
+    url: "https://www.w3.org/TR/WCAG22/"
+  - title: "WAI-ARIA Authoring Practices Guide"
+    url: "https://www.w3.org/WAI/ARIA/apg/"
+  - title: "OWASP — Cross Site Scripting Prevention Cheat Sheet"
+    url: "https://cheatsheetseries.owasp.org/cheatsheets/Cross_Site_Scripting_Prevention_Cheat_Sheet.html"
+interviewQuestions:
+  - question: "¿Cómo encararías una pantalla de React que se siente lenta al escribir en un buscador?"
+    keyPoints:
+      - "Medir con el Profiler de React DevTools qué componentes se renderizan y cuánto tardan."
+      - "Bajar el estado del buscador al componente que lo usa para no re-renderizar toda la página."
+      - "Virtualizar listas largas y memoizar filas si siguen siendo costosas."
+      - "Usar useDeferredValue o useTransition para que el input siga respondiendo mientras se recalcula la lista."
+  - question: "¿Qué significa testear como lo usa una persona con Testing Library?"
+    keyPoints:
+      - "Buscar elementos por rol y nombre accesible (getByRole), por label o por texto visible, no por clases ni estructura."
+      - "Interactuar con user-event como lo haría el usuario y verificar lo que se ve."
+      - "No testear detalles de implementación como estado interno o cantidad de renders."
+      - "Las queries por rol además verifican accesibilidad básica."
+  - question: "¿React previene XSS? ¿En qué casos no?"
+    keyPoints:
+      - "React escapa el texto que se inserta con llaves en JSX: un string con etiquetas se muestra como texto."
+      - "dangerouslySetInnerHTML inserta HTML sin escapar: requiere sanitizar (por ejemplo con DOMPurify)."
+      - "URLs con esquema javascript: en href, y datos no confiables en atributos o en scripts siguen siendo riesgos."
+      - "Contenido generado por LLMs o por usuarios se trata como no confiable."
+summary:
+  - "Optimizar con el Profiler: primero estado más local y composición; después memo, virtualización y transiciones."
+  - "useDeferredValue y useTransition mantienen la interfaz responsiva durante actualizaciones costosas."
+  - "Testing Library: queries por rol y nombre accesible, user-event e interacciones reales, aserciones sobre lo visible."
+  - "Accesibilidad: HTML semántico primero, todo operable con teclado, foco visible y gestionado, labels y contraste."
+  - "ARIA complementa la semántica cuando no hay un elemento nativo; un ARIA mal usado empeora la accesibilidad."
+  - "JSX escapa el texto; dangerouslySetInnerHTML y las URLs javascript: son las puertas de XSS."
+  - "Organizar por funcionalidad, con componentes de UI genéricos separados de la lógica de dominio."
+---
+
+## ¿Qué problema resuelve?
+
+Una interfaz puede "funcionar" y aun así ser lenta al escribir, imposible de usar con teclado o lector de
+pantalla, vulnerable a inyectar código desde un nombre de cliente y difícil de cambiar porque todo depende de todo.
+En una plataforma interna que usan operadores ocho horas por día, esas cuatro cosas importan tanto como las
+funcionalidades.
+
+## Optimización de renders
+
+El orden recomendado, de lo más barato a lo más complejo:
+
+1. **Medir** con el **Profiler** de React DevTools: qué componentes se renderizan en cada interacción y cuánto
+   tardan. Sin medición, no hay optimización.
+2. **Mover el estado hacia abajo**: si el texto del buscador vive en la página, cada tecla re-renderiza la página
+   completa. Si vive en el componente del buscador, sólo se re-renderiza él.
+3. **Composición**: pasar como `children` las partes que no dependen del estado que cambia; React no las
+   re-renderiza porque son elementos creados por el padre.
+4. **Memoizar** (`memo`, `useMemo`) los componentes o cálculos costosos que reciben props estables, o dejar que lo
+   haga el React Compiler.
+5. **Virtualizar** listas largas: renderizar sólo las filas visibles (TanStack Virtual, react-window). Una tabla de
+   10.000 filas con 50 visibles pasa de 10.000 componentes a ~60.
+6. **Transiciones**: marcar actualizaciones como no urgentes para que la interfaz siga respondiendo.
+
+```tsx
+import { useDeferredValue, useState } from "react";
+
+function CustomerSearch({ customers }: { customers: Customer[] }) {
+  const [query, setQuery] = useState("");
+  const deferredQuery = useDeferredValue(query); // el filtrado usa una versión "atrasada" del texto
+
+  return (
+    <>
+      <input value={query} onChange={(e) => setQuery(e.target.value)} aria-label="Buscar cliente" />
+      {/* El input responde en cada tecla; la lista se recalcula cuando hay tiempo */}
+      <CustomerTable customers={customers} query={deferredQuery} />
+    </>
+  );
+}
+```
+
+<MermaidDiagram
+  caption="De lo más simple a lo más complejo: la mayoría de los problemas se resuelven en los primeros pasos."
+  chart={`
+flowchart LR
+  M["Medir<br/>Profiler"] --> L["Estado más local<br/>y composición"]
+  L --> ME["memo / useMemo<br/>o React Compiler"]
+  ME --> V["Virtualizar<br/>listas largas"]
+  V --> T["useDeferredValue<br/>useTransition"]
+`}
+/>
+
+Los **Core Web Vitals** (LCP, INP, CLS) miden la experiencia real en el navegador; INP (_Interaction to Next
+Paint_) es justamente la métrica que empeora cuando cada tecla dispara renders costosos.
+
+## Testing con Testing Library
+
+Testing Library promueve un principio: **cuanto más se parezcan tus tests a cómo se usa el software, más confianza
+te dan**. No se testea el estado interno ni cuántas veces se renderizó; se testea lo que el usuario ve y hace.
+
+```tsx
+import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { describe, expect, it, vi } from "vitest";
+
+describe("PromiseForm", () => {
+  it("envía la fecha y el monto ingresados", async () => {
+    const user = userEvent.setup();
+    const onSubmit = vi.fn();
+    render(<PromiseForm onSubmit={onSubmit} />);
+
+    await user.type(screen.getByLabelText("Fecha"), "2026-12-01");
+    await user.type(screen.getByLabelText("Monto"), "15000");
+    await user.click(screen.getByRole("button", { name: "Registrar" }));
+
+    expect(onSubmit).toHaveBeenCalledWith({ promisedFor: "2026-12-01", amount: 15000 });
+  });
+
+  it("muestra un error si el monto es inválido", async () => {
+    const user = userEvent.setup();
+    render(<PromiseForm onSubmit={vi.fn()} />);
+    await user.click(screen.getByRole("button", { name: "Registrar" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Revisá la fecha y el monto");
+  });
+});
+```
+
+Prioridad de queries recomendada: `getByRole` (con `name`) → `getByLabelText` → `getByPlaceholderText` →
+`getByText` → `getByTestId` como último recurso. Buscar por rol tiene un beneficio extra: **si el test no encuentra
+el botón por su rol y nombre, probablemente un lector de pantalla tampoco**.
+
+| Variante  | Si no encuentra el elemento | Uso                                       |
+| --------- | --------------------------- | ----------------------------------------- |
+| `getBy`   | Lanza error                 | El elemento debe estar                    |
+| `queryBy` | Devuelve `null`             | Verificar que **no** está                 |
+| `findBy`  | Espera (Promise)            | El elemento aparece después (datos async) |
+
+## Accesibilidad
+
+La accesibilidad (a11y) es que la interfaz se pueda usar con teclado, lector de pantalla, zoom o alto contraste. El
+estándar de referencia es **WCAG 2.2**. Lo esencial para un desarrollador:
+
+1. **HTML semántico primero.** Un `<button>` ya es focusable, se activa con Enter y Espacio y se anuncia como botón.
+   Un `<div onClick>` no tiene nada de eso.
+2. **Todo operable con teclado**, con foco visible y un orden lógico.
+3. **Etiquetas**: cada input con su `<label>`; los botones de sólo ícono con `aria-label`.
+4. **Gestión del foco**: al abrir un diálogo, el foco entra; al cerrarlo, vuelve al disparador.
+5. **Anunciar cambios dinámicos**: mensajes de error o de estado con `role="alert"` o regiones `aria-live`.
+6. **Contraste** suficiente y no transmitir información sólo con color.
+
+```tsx
+// ❌ No accesible: no es focusable, no responde a teclado, no se anuncia como botón
+<div className="btn" onClick={markAsPaid}>
+  <CheckIcon />
+</div>
+
+// ✅ Accesible
+<button type="button" onClick={markAsPaid} aria-label="Marcar como pagada">
+  <CheckIcon aria-hidden />
+</button>
+```
+
+**ARIA** agrega semántica cuando no existe un elemento nativo (tabs, combobox, árbol). La primera regla de ARIA es
+no usarlo si existe un elemento HTML que hace lo mismo: un ARIA incorrecto es peor que ninguno. Para componentes
+complejos, librerías accesibles (Radix, React Aria) implementan los patrones de la _ARIA Authoring Practices Guide_.
+
+## Seguridad: XSS y datos no confiables
+
+**XSS** (_cross-site scripting_) es lograr que la página ejecute JavaScript de un atacante. React protege por
+defecto: el texto insertado con llaves se **escapa**.
+
+```tsx
+const name = '<img src=x onerror="alert(document.cookie)">';
+<p>{name}</p>; // ✅ se muestra literalmente como texto, no se ejecuta
+```
+
+Los casos que **siguen siendo peligrosos**:
+
+| Caso                                     | Riesgo                                             | Defensa                                            |
+| ---------------------------------------- | -------------------------------------------------- | -------------------------------------------------- |
+| `dangerouslySetInnerHTML`                | Inserta HTML sin escapar                           | Evitarlo; si es necesario, sanitizar con DOMPurify |
+| `href` con datos del usuario             | Una URL `javascript:` ejecuta código al hacer clic | Validar el esquema (sólo `https:`, `mailto:`)      |
+| Markdown o HTML generado por un LLM      | Puede contener HTML o enlaces maliciosos           | Renderizar con un parser seguro, sin HTML crudo    |
+| Datos en `<script>` (estado serializado) | Romper el contexto del script                      | Serialización segura del framework                 |
+| Librerías que manipulan el DOM directo   | Saltan el escape de React                          | Revisar cómo insertan contenido                    |
+
+En una plataforma de agentes, **las respuestas de un LLM son datos no confiables**: pueden contener cualquier cosa
+que el modelo haya leído o generado. Se muestran como texto o con un renderizador de Markdown que no permita HTML
+crudo. Una **Content Security Policy** (CSP) agrega una capa más de defensa a nivel del navegador.
+
+## Arquitectura frontend
+
+Organizar **por funcionalidad** escala mejor que organizar por tipo técnico (`components/`, `hooks/`, `utils/` con
+cientos de archivos cada uno):
+
+```text
+src/
+  shared/ui/              Button, Dialog, Table: genéricos, sin lógica de negocio
+  features/
+    debts/
+      components/         DebtTable, DebtRow
+      hooks/              useCustomerDebts, useRegisterPromise
+      api.ts              llamadas al backend tipadas
+      schemas.ts          esquemas Zod compartidos con el formulario
+    campaigns/
+  app/                    rutas y composición de pantallas
+```
+
+Principios: componentes de UI **genéricos y sin dominio**; la lógica de negocio fuera de los componentes (hooks,
+funciones puras); dependencias entre features explícitas y mínimas; y el acceso a la API centralizado y tipado.
+Esta plataforma sigue esa idea con `src/shared/ui` y `src/modules/<módulo>/presentation`.
+
+## Comparación con C# y Java
+
+| Tema                 | Blazor / .NET                                | Java (UI)                   | React                                     |
+| -------------------- | -------------------------------------------- | --------------------------- | ----------------------------------------- |
+| Profiling de UI      | Herramientas del navegador                   | Profilers de la JVM         | React DevTools Profiler                   |
+| Tests de componentes | bUnit                                        | TestFX                      | Testing Library + Vitest/Jest             |
+| Escape de HTML       | Razor escapa por defecto (`MarkupString` no) | JSF escapa por defecto      | JSX escapa (`dangerouslySetInnerHTML` no) |
+| Accesibilidad        | Mismos estándares web (WCAG)                 | Accessibility API de JavaFX | Mismos estándares web (WCAG, ARIA)        |
+
+## Errores frecuentes
+
+- **Optimizar sin el Profiler.**
+- **Tests que buscan por clases CSS** o verifican estado interno.
+- **`div` y `span` con `onClick`** en lugar de botones y enlaces.
+- **Inputs sin label**, íconos sin nombre accesible, foco perdido al cerrar modales.
+- **`dangerouslySetInnerHTML` con contenido del usuario o de un LLM.**
+- **Lógica de negocio dentro de los componentes de UI.**
+
+## Ejercicio interactivo
+
+<KnowledgeCheck
+  id="react.quality.q1"
+  question="Un test busca el botón con `container.querySelector('.btn-primary')`. ¿Qué recomienda Testing Library?"
+  options={[
+    {
+      text: "Está bien: las clases son estables.",
+      explanation: "Las clases son un detalle de implementación y no reflejan cómo lo encuentra un usuario.",
+    },
+    {
+      text: "Buscarlo con `getByRole('button', { name: 'Registrar' })`.",
+      correct: true,
+      explanation:
+        "Correcto. El test se parece al uso real y además verifica que el botón tiene nombre accesible.",
+    },
+    {
+      text: "Agregar un data-testid siempre.",
+      explanation: "Es el último recurso, cuando no hay una query accesible posible.",
+    },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="react.quality.q2"
+  question="Mostrás el nombre de un cliente con `<p>{customer.name}</p>` y el nombre contiene una etiqueta script. ¿Qué pasa?"
+  options={[
+    { text: "Se ejecuta el script.", explanation: "React escapa el texto insertado con llaves." },
+    {
+      text: "Se muestra como texto literal, sin ejecutarse.",
+      correct: true,
+      explanation:
+        "Correcto. El riesgo aparece con dangerouslySetInnerHTML, URLs javascript: o librerías que tocan el DOM directo.",
+    },
+    { text: "React lanza un error.", explanation: "No hay error: el texto se escapa y se muestra." },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="react.quality.q3"
+  question="¿Cuál es el problema de `<div onClick={save}>Guardar</div>`?"
+  options={[
+    {
+      text: "Ninguno, funciona igual que un botón.",
+      explanation: "Funciona con mouse, pero no con teclado ni con lector de pantalla.",
+    },
+    {
+      text: "No es focusable, no se activa con teclado y no se anuncia como botón.",
+      correct: true,
+      explanation: "Correcto. Un <button> trae todo eso gratis.",
+    },
+    {
+      text: "Es más lento que un botón.",
+      explanation: "El problema es de accesibilidad, no de performance.",
+    },
+  ]}
+/>

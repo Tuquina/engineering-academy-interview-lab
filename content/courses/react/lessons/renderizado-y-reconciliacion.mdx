@@ -1,0 +1,282 @@
+---
+id: react.rendering-reconciliation
+moduleId: react.rendering
+title: "Cómo renderiza React: render, commit, reconciliación y pureza"
+description: "El modelo que explica casi todos los bugs y problemas de performance de React: qué dispara un render, qué pasa en la fase de render y en la de commit, cómo reconcilia el árbol (tipos, posiciones y keys), qué es y qué no es el Virtual DOM, por qué los componentes deben ser puros y qué hace StrictMode."
+difficulty: intermediate
+order: 1
+objectives:
+  - "Enumerar qué dispara un render y explicar por qué re-renderizar no implica tocar el DOM."
+  - "Distinguir la fase de render de la fase de commit."
+  - "Predecir cuándo React conserva o descarta el estado de un componente según tipo, posición y key."
+  - "Explicar el Virtual DOM y sus límites conceptuales."
+  - "Escribir componentes puros y entender por qué StrictMode los ejecuta dos veces en desarrollo."
+prerequisites: ["react.introduction"]
+estimatedMinutes: 40
+tags: ["renderizado", "reconciliación", "virtual dom", "keys", "pureza", "strictmode"]
+version: "1.0.0"
+comparesWith: ["csharp", "java"]
+references:
+  - title: "React — Render and Commit"
+    url: "https://react.dev/learn/render-and-commit"
+  - title: "React — State as a Snapshot"
+    url: "https://react.dev/learn/state-as-a-snapshot"
+  - title: "React — Preserving and Resetting State"
+    url: "https://react.dev/learn/preserving-and-resetting-state"
+  - title: "React — Keeping Components Pure"
+    url: "https://react.dev/learn/keeping-components-pure"
+  - title: "React — StrictMode"
+    url: "https://react.dev/reference/react/StrictMode"
+interviewQuestions:
+  - question: "¿Qué dispara un re-render de un componente en React?"
+    keyPoints:
+      - "Un cambio de su estado (setState con un valor distinto según Object.is)."
+      - "El re-render de su componente padre, aunque las props no hayan cambiado (salvo memo)."
+      - "Un cambio en un contexto que consume."
+      - "Re-renderizar es ejecutar la función; el DOM sólo se toca si el resultado difiere."
+  - question: "¿Qué es la reconciliación y qué rol tienen las keys?"
+    keyPoints:
+      - "Es el algoritmo con el que React compara el árbol nuevo con el anterior para calcular los cambios mínimos."
+      - "Si en la misma posición hay el mismo tipo de componente, conserva la instancia y su estado; si cambia el tipo, la descarta."
+      - "En listas, las keys identifican a cada hijo para emparejar elementos que se movieron."
+      - "Cambiar la key de un componente fuerza a recrearlo y reinicia su estado."
+  - question: "¿Por qué un componente de React debe ser puro?"
+    keyPoints:
+      - "React puede llamar a un componente varias veces, interrumpir un render o descartarlo (concurrent rendering)."
+      - "El render no debe tener efectos: ni mutar variables externas, ni llamar APIs, ni modificar el DOM."
+      - "Los efectos van en event handlers o en useEffect."
+      - "StrictMode ejecuta los componentes dos veces en desarrollo para detectar impurezas."
+summary:
+  - "Un render es ejecutar la función del componente; puede ocurrir muchas veces y no implica cambiar el DOM."
+  - "Se dispara por un cambio de estado propio, el render del padre o un contexto que cambió."
+  - "Fase de render: calcular el árbol nuevo (pura). Fase de commit: aplicar al DOM los cambios mínimos."
+  - "El estado de cada render es una foto: dentro de ese render, el valor no cambia aunque llames al setter."
+  - "React conserva el estado si en la misma posición del árbol hay el mismo tipo; cambiar la key lo reinicia."
+  - "El Virtual DOM es un detalle de implementación; lo importante es que React calcula diferencias por posición, tipo y key."
+  - "Componentes puros: misma entrada, mismo JSX, sin efectos durante el render."
+---
+
+## ¿Qué problema resuelve?
+
+Casi todas las preguntas difíciles sobre React ("¿por qué este componente se renderiza tantas veces?", "¿por qué se
+perdió el texto del input?", "¿por qué el contador muestra un valor viejo?") se responden con el mismo modelo:
+**cómo y cuándo renderiza React**. Sin ese modelo, se recurre a `useMemo` y `useEffect` como parches.
+
+## Qué es un render
+
+**Renderizar** es que React **llame a la función del componente** para obtener la descripción de la UI. Nada más.
+Que un componente se renderice no significa que el DOM cambie.
+
+Un render se dispara por:
+
+1. **Un cambio de estado propio** (`setState` con un valor distinto, comparado con `Object.is`).
+2. **El render de su padre**: por defecto, cuando un componente se renderiza, **todos sus hijos también**, aunque
+   sus props no hayan cambiado.
+3. **Un cambio en un contexto** que el componente consume.
+
+Las props no aparecen en la lista: un hijo no se re-renderiza "porque cambiaron sus props", sino porque se
+renderizó su padre (que es quien le pasa props nuevas).
+
+## Render y commit
+
+<MermaidDiagram
+  caption="Disparo, render y commit. Sólo el commit toca el DOM, y sólo donde hay diferencias."
+  chart={`
+flowchart LR
+  T["1. Disparo<br/>setState, padre o contexto"] --> R["2. Render<br/>React llama a los componentes<br/>y obtiene el árbol nuevo"]
+  R --> D["Reconciliación<br/>compara árbol nuevo y anterior"]
+  D --> C["3. Commit<br/>aplica al DOM sólo los cambios"]
+  C --> E["Efectos<br/>useLayoutEffect y useEffect"]
+`}
+/>
+
+- **Fase de render:** React ejecuta los componentes y calcula el nuevo árbol. Debe ser **pura**: React puede
+  interrumpirla, repetirla o descartarla (por ejemplo, si llega una actualización más urgente).
+- **Fase de commit:** React aplica al DOM real las diferencias encontradas. Después ejecuta los efectos.
+
+Por eso re-renderizar es, en general, barato: ejecutar funciones de JavaScript y comparar objetos. Lo caro es tocar
+el DOM, y React lo minimiza.
+
+## El estado es una foto de cada render
+
+Cada render tiene **sus propios valores** de props y estado, fijos durante ese render:
+
+```tsx
+function Counter() {
+  const [count, setCount] = useState(0);
+
+  function handleClick() {
+    setCount(count + 1);
+    setCount(count + 1);
+    setCount(count + 1);
+    console.log(count); // 0: en este render, count vale 0
+  }
+  // Al hacer clic, count pasa a 1, no a 3: las tres llamadas calculan 0 + 1.
+
+  return <button onClick={handleClick}>{count}</button>;
+}
+```
+
+`setCount` no cambia la variable `count` del render actual: **programa** un render nuevo con otro valor. Si la
+actualización depende del valor anterior, se usa la **forma funcional**, que recibe el valor más reciente:
+
+```tsx
+setCount((previous) => previous + 1); // tres llamadas así suman 3
+```
+
+Además, React **agrupa** (_batching_) varias actualizaciones de un mismo evento en un único render.
+
+## Reconciliación: cómo decide React qué conservar
+
+Al comparar el árbol nuevo con el anterior, React aplica reglas simples:
+
+1. **Mismo tipo en la misma posición** → conserva la instancia (y su estado) y actualiza sus props.
+2. **Distinto tipo en la misma posición** → desmonta el anterior (se pierde su estado) y monta uno nuevo.
+3. **En listas**, empareja hijos por **key** en lugar de por posición.
+
+```tsx
+function DebtFilters({ advanced }: { advanced: boolean }) {
+  return (
+    <div>
+      {advanced ? <AdvancedFilters /> : <BasicFilters />}
+      {/* Cambiar de modo desmonta uno y monta el otro: el estado de cada filtro se pierde */}
+    </div>
+  );
+}
+```
+
+```tsx
+// Mismo tipo, misma posición: el estado del input se CONSERVA al cambiar de cliente
+<NoteEditor customerId={customerId} />
+
+// key distinta: React lo trata como otro componente y REINICIA su estado
+<NoteEditor key={customerId} customerId={customerId} />
+```
+
+El segundo caso es un patrón útil: **cambiar la key para reiniciar el estado** de un formulario cuando cambia la
+entidad que edita, en lugar de sincronizarlo con un efecto.
+
+<Callout type="danger" title="No declares componentes dentro de otros componentes">
+  Si `function Row() {}` se define dentro de `function Table() {}`, cada render de `Table` crea un tipo de
+  componente nuevo. Para React es un tipo distinto en la misma posición: desmonta y monta `Row` en cada
+  render, y se pierden el estado y el foco. Los componentes se declaran en el nivel superior del módulo.
+</Callout>
+
+## El Virtual DOM y sus límites
+
+El **Virtual DOM** es el nombre popular para la representación en memoria (objetos de JavaScript) del árbol de UI
+que React compara entre renders. Dos aclaraciones que suelen aparecer en entrevistas:
+
+- **No es "más rápido que el DOM".** Calcular diferencias tiene un costo. Su ventaja es permitir un modelo
+  declarativo (recalcular la vista completa) sin pagar el costo de reconstruir el DOM real cada vez.
+- **No es la única forma.** Otras librerías (Svelte, Solid) compilan la vista a actualizaciones finas del DOM sin
+  diffing. React prioriza un modelo simple y predecible; para el rendimiento, el **React Compiler** memoiza
+  automáticamente y reduce renders innecesarios.
+
+La comparación no es "inteligente": React no busca el mínimo absoluto de cambios entre dos árboles cualesquiera
+(ese problema es costoso). Usa las reglas de tipo, posición y key, que funcionan en tiempo lineal.
+
+## Componentes puros
+
+Un componente puro: **con las mismas props, estado y contexto, devuelve el mismo JSX y no produce efectos** durante
+el render.
+
+```tsx
+// ❌ Impuro: muta una variable externa durante el render
+let renderedRows = 0;
+function DebtRow({ debt }: { debt: Debt }) {
+  renderedRows++; // depende de cuántas veces React decidió renderizar
+  return <tr>{/* ... */}</tr>;
+}
+
+// ❌ Impuro: efecto durante el render
+function CustomerHeader({ id }: { id: string }) {
+  fetch(`/api/customers/${id}/views`, { method: "POST" }); // se ejecuta en cada render, quizás dos veces
+  return <h1>Cliente {id}</h1>;
+}
+```
+
+Los efectos van en **event handlers** (respuestas a acciones del usuario) o, si sincronizan con un sistema externo,
+en **`useEffect`** (lección de hooks). Mutar variables **locales** creadas durante el render sí está bien.
+
+### StrictMode
+
+En desarrollo, `<StrictMode>` **ejecuta cada componente dos veces** (y monta, desmonta y vuelve a montar los efectos)
+para que las impurezas aparezcan como comportamientos visibles: un contador que suma de a dos, una request
+duplicada. En producción no ocurre. Si algo "se ejecuta dos veces" en desarrollo, el problema casi nunca es
+StrictMode: es un efecto o un render impuro.
+
+## Comparación con C# y Java
+
+| Concepto                     | Blazor                                        | JavaFX / WPF                     | React                                            |
+| ---------------------------- | --------------------------------------------- | -------------------------------- | ------------------------------------------------ |
+| Qué dispara la actualización | `StateHasChanged`, eventos, parámetros nuevos | Cambios en propiedades enlazadas | setState, render del padre, contexto             |
+| Cómo se actualiza la vista   | Diff del árbol de render                      | Bindings finos por propiedad     | Re-render + reconciliación por tipo/posición/key |
+| Identidad en listas          | `@key`                                        | Identidad del objeto             | `key`                                            |
+| Evitar renders               | `ShouldRender()`                              | No aplica                        | `memo`, React Compiler                           |
+
+Blazor tomó un modelo muy parecido al de React (incluido `@key`), así que si lo usaste, la intuición se transfiere.
+
+## Errores frecuentes
+
+- **Pensar que un render es caro** y llenar el código de `useMemo` sin medir.
+- **Leer el estado justo después del setter** esperando el valor nuevo.
+- **Usar el valor actual en vez de la forma funcional** cuando la actualización depende del anterior.
+- **Definir componentes dentro de componentes.**
+- **Efectos en el cuerpo del componente** (requests, suscripciones, mutaciones externas).
+- **"Arreglar" StrictMode desactivándolo** en lugar de corregir la impureza.
+
+## Ejercicio interactivo
+
+<KnowledgeCheck
+  id="react.rendering-reconciliation.q1"
+  question="Un handler llama tres veces a `setCount(count + 1)` con `count` en 5. ¿Cuál es el valor en el siguiente render?"
+  options={[
+    { text: "8", explanation: "Las tres llamadas usan el mismo count del render actual: 5 + 1." },
+    {
+      text: "6",
+      correct: true,
+      explanation:
+        "Correcto. El estado es una foto del render. Con `setCount(c => c + 1)` tres veces sería 8.",
+    },
+    { text: "5", explanation: "El setter sí programa un nuevo valor; el problema es que siempre es 6." },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="react.rendering-reconciliation.q2"
+  question="Un `<NoteEditor customerId={id} />` conserva el texto del cliente anterior al cambiar de cliente. ¿Cuál es la solución más simple?"
+  options={[
+    {
+      text: "Un useEffect que limpie el estado cuando cambia customerId.",
+      explanation: "Funciona, pero produce un render extra con datos viejos; hay una opción más simple.",
+    },
+    {
+      text: "Pasar `key={id}` para que React lo trate como un componente nuevo y reinicie su estado.",
+      correct: true,
+      explanation: "Correcto. Cambiar la key reinicia el estado sin sincronizaciones manuales.",
+    },
+    { text: "Envolverlo en React.memo.", explanation: "memo evita renders; no reinicia estado." },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="react.rendering-reconciliation.q3"
+  question="En desarrollo, una request que se hace en el cuerpo de un componente aparece dos veces en la pestaña de red. ¿Qué indica?"
+  options={[
+    {
+      text: "Un bug de React que hay que evitar desactivando StrictMode.",
+      explanation: "StrictMode lo está mostrando a propósito.",
+    },
+    {
+      text: "Que el componente tiene un efecto durante el render; StrictMode lo ejecuta dos veces para detectarlo.",
+      correct: true,
+      explanation:
+        "Correcto. La request debe ir a un event handler, a useEffect o, mejor, a una capa de datos.",
+    },
+    {
+      text: "Que el servidor duplicó la respuesta.",
+      explanation: "Son dos requests salientes del navegador.",
+    },
+  ]}
+/>

@@ -1,0 +1,327 @@
+---
+id: nextjs.introduction
+moduleId: nextjs.intro
+title: "Introducción a Next.js: qué agrega sobre React y cómo se organiza un proyecto"
+description: "Qué es Next.js y qué problemas de una aplicación React resuelve: routing por archivos, renderizado en servidor, backend en el mismo proyecto y optimizaciones. Cómo se crea y ejecuta un proyecto, las convenciones de archivos del App Router, páginas, layouts, navegación y el mapa del curso."
+difficulty: basic
+order: 1
+objectives:
+  - "Explicar qué agrega Next.js sobre React y cuándo conviene usarlo."
+  - "Crear y ejecutar un proyecto y reconocer sus scripts y su configuración."
+  - "Usar las convenciones de archivos del App Router: page, layout, loading, error, not-found y route."
+  - "Crear páginas y layouts anidados y navegar con Link."
+  - "Describir a alto nivel cómo conviven servidor y cliente y las estrategias de renderizado."
+prerequisites: ["react.introduction"]
+estimatedMinutes: 35
+tags: ["nextjs", "introducción", "app router", "layouts", "routing", "c#", "java"]
+version: "1.0.0"
+comparesWith: ["csharp", "java"]
+references:
+  - title: "Next.js — Installation"
+    url: "https://nextjs.org/docs/app/getting-started/installation"
+  - title: "Next.js — Project Structure"
+    url: "https://nextjs.org/docs/app/getting-started/project-structure"
+  - title: "Next.js — Layouts and Pages"
+    url: "https://nextjs.org/docs/app/getting-started/layouts-and-pages"
+  - title: "Next.js — Linking and Navigating"
+    url: "https://nextjs.org/docs/app/getting-started/linking-and-navigating"
+  - title: "Next.js — Server and Client Components"
+    url: "https://nextjs.org/docs/app/getting-started/server-and-client-components"
+interviewQuestions:
+  - question: "¿Qué agrega Next.js sobre React?"
+    keyPoints:
+      - "React es una librería de UI; Next.js es un framework full stack construido sobre React."
+      - "Routing basado en archivos con layouts anidados."
+      - "Renderizado en servidor: Server Components, prerenderizado estático, streaming."
+      - "Backend en el mismo proyecto (Route Handlers, Server Actions), optimizaciones de imágenes, fuentes y bundling, y despliegue integrado."
+  - question: "¿Qué hace un layout en el App Router?"
+    keyPoints:
+      - "Define UI compartida que envuelve a las páginas de su segmento y de los segmentos hijos."
+      - "Se conserva entre navegaciones: no se vuelve a montar y mantiene su estado."
+      - "El layout raíz es obligatorio y contiene las etiquetas html y body."
+summary:
+  - "Next.js es un framework full stack sobre React: routing, renderizado en servidor, backend y optimizaciones."
+  - "El App Router usa carpetas como segmentos de URL y archivos especiales con roles definidos."
+  - "page.tsx hace pública una ruta; layout.tsx envuelve y se conserva entre navegaciones."
+  - "loading.tsx, error.tsx y not-found.tsx declaran los estados de carga, error e inexistencia de cada segmento."
+  - "route.ts define endpoints HTTP (Route Handlers)."
+  - "Por defecto los componentes son Server Components; 'use client' marca los que necesitan interactividad."
+  - "Link navega del lado del cliente con prefetch, sin recargar la página."
+---
+
+## Qué vas a aprender en este curso
+
+En el curso de React aprendiste a construir componentes. Una aplicación real necesita además rutas, carga de datos
+segura, SEO, un backend, autenticación y un despliegue. **Next.js** resuelve todo eso como framework. Esta misma
+plataforma está construida con Next.js.
+
+| Módulo                | Qué vas a poder hacer                                                                       |
+| --------------------- | ------------------------------------------------------------------------------------------- |
+| Introducción          | Crear un proyecto, entender sus archivos y armar páginas con layouts.                       |
+| Routing y renderizado | Rutas dinámicas y grupos; Server y Client Components; streaming, carga y errores.           |
+| Datos y mutaciones    | Cargar datos en el servidor, cachear y revalidar, mutar con Server Actions, exponer APIs.   |
+| Producción            | Autenticación y protección de rutas, metadata, imágenes, variables de entorno y despliegue. |
+
+## Qué es Next.js y qué agrega sobre React
+
+React es una **librería** para construir interfaces: no decide cómo se organizan las rutas, cómo se cargan los datos
+ni cómo se sirve la aplicación. Next.js es un **framework** que toma esas decisiones:
+
+| Necesidad           | Sólo React (por ejemplo, con Vite)              | Next.js                                              |
+| ------------------- | ----------------------------------------------- | ---------------------------------------------------- |
+| Rutas               | Librería aparte (React Router, TanStack Router) | Carpetas y archivos (App Router)                     |
+| Renderizado         | Todo en el navegador                            | Servidor y cliente; estático, dinámico, streaming    |
+| Datos               | Fetch desde el navegador a una API              | Directo desde Server Components al origen            |
+| Backend             | Proyecto separado                               | Route Handlers y Server Actions en el mismo proyecto |
+| SEO y primer render | El HTML inicial está vacío                      | HTML completo desde el servidor                      |
+| Optimizaciones      | Configuración manual                            | Imágenes, fuentes, code splitting, prefetch          |
+
+La analogía más cercana para quien viene de .NET es **ASP.NET Core con Razor Pages o Blazor**: un framework que
+integra routing, renderizado en servidor, componentes interactivos y backend. En Java, Spring Boot con Thymeleaf o
+Vaadin, aunque el modelo de componentes de React es muy distinto.
+
+## Crear y ejecutar un proyecto
+
+```bash
+pnpm create next-app@latest collections-app   # asistente: TypeScript, ESLint, Tailwind, App Router
+cd collections-app
+pnpm dev     # servidor de desarrollo con recarga en caliente en http://localhost:3000
+pnpm build   # build de producción (compila, prerenderiza y verifica tipos)
+pnpm start   # sirve el build de producción
+```
+
+Archivos principales:
+
+| Archivo / carpeta | Para qué                                                                          |
+| ----------------- | --------------------------------------------------------------------------------- |
+| `app/`            | Rutas y UI (App Router)                                                           |
+| `public/`         | Archivos estáticos servidos tal cual (`/logo.svg`)                                |
+| `next.config.ts`  | Configuración del framework                                                       |
+| `proxy.ts`        | Código que corre antes de cada request (en versiones anteriores, `middleware.ts`) |
+| `.env.local`      | Variables de entorno locales (no se commitea)                                     |
+
+Es habitual usar una carpeta `src/` con `src/app` adentro; así lo hace esta plataforma.
+
+## Convenciones de archivos del App Router
+
+En el App Router, **cada carpeta dentro de `app/` es un segmento de la URL**, y ciertos nombres de archivo tienen un
+rol especial:
+
+```text
+app/
+  layout.tsx                 → layout raíz (html y body), envuelve todo
+  page.tsx                   → /
+  debts/
+    layout.tsx               → envuelve todo lo que está bajo /debts
+    page.tsx                 → /debts
+    loading.tsx              → se muestra mientras /debts carga
+    error.tsx                → se muestra si /debts falla
+    [debtId]/
+      page.tsx               → /debts/123 (segmento dinámico)
+      not-found.tsx          → si la deuda no existe
+  api/
+    webhooks/payments/
+      route.ts               → endpoint HTTP POST /api/webhooks/payments
+```
+
+| Archivo         | Rol                                                             |
+| --------------- | --------------------------------------------------------------- |
+| `page.tsx`      | La UI de la ruta; sin `page`, la carpeta no es una ruta pública |
+| `layout.tsx`    | UI compartida que envuelve a sus hijos y se conserva al navegar |
+| `loading.tsx`   | Estado de carga del segmento (un Suspense automático)           |
+| `error.tsx`     | Estado de error del segmento (un error boundary automático)     |
+| `not-found.tsx` | UI cuando se llama a `notFound()` o la ruta no existe           |
+| `route.ts`      | Endpoint HTTP (Route Handler): exporta `GET`, `POST`, etc.      |
+
+<MermaidDiagram
+  caption="Cómo se anidan los archivos de un segmento: el layout envuelve al error boundary, al Suspense de carga y a la página."
+  chart={`
+flowchart TD
+  RL["app/layout.tsx<br/>layout raíz"] --> DL["debts/layout.tsx"]
+  DL --> EB["debts/error.tsx<br/>error boundary"]
+  EB --> LS["debts/loading.tsx<br/>Suspense"]
+  LS --> P["debts/page.tsx<br/>la página"]
+`}
+/>
+
+## Páginas y layouts
+
+Una **página** es un componente exportado por defecto desde `page.tsx`:
+
+```tsx
+// app/debts/page.tsx
+export default async function DebtsPage() {
+  const debts = await getOverdueDebts(); // puede consultar la base directamente: corre en el servidor
+  return (
+    <main>
+      <h1>Deudas vencidas</h1>
+      <DebtTable debts={debts} />
+    </main>
+  );
+}
+```
+
+Un **layout** envuelve a las páginas de su segmento y de los segmentos hijos, y **se conserva entre navegaciones**:
+al pasar de `/debts` a `/debts/123`, el layout de `/debts` no se vuelve a montar (mantiene su estado, por ejemplo un
+filtro abierto en una barra lateral).
+
+```tsx
+// app/layout.tsx: el layout raíz es obligatorio
+export default function RootLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <html lang="es">
+      <body>
+        <AppShell>{children}</AppShell>
+      </body>
+    </html>
+  );
+}
+```
+
+## Navegación
+
+```tsx
+import Link from "next/link";
+
+<Link href={`/debts/${debt.id}`}>Ver detalle</Link>;
+```
+
+`Link` navega **del lado del cliente**: no recarga la página, conserva los layouts y **prefetchea** las rutas
+visibles para que la navegación sea instantánea. Para navegar desde código (después de enviar un formulario, por
+ejemplo) se usa `useRouter` en el cliente o `redirect` en el servidor.
+
+## Servidor y cliente en una misma aplicación
+
+El concepto más importante del App Router (y el tema central de la lección de Server y Client Components):
+
+- Por defecto, **todos los componentes son Server Components**: se ejecutan en el servidor, pueden leer la base de
+  datos o secretos, y su código **no se envía al navegador**.
+- Los componentes que necesitan **interactividad** (estado, efectos, eventos, APIs del navegador) se marcan con
+  `"use client"` al principio del archivo.
+
+```tsx
+// app/debts/[debtId]/page.tsx: Server Component
+export default async function DebtPage({ params }: { params: Promise<{ debtId: string }> }) {
+  const { debtId } = await params;
+  const debt = await getDebt(debtId);
+  return (
+    <>
+      <DebtDetail debt={debt} /> {/* también Server Component: sólo muestra */}
+      <PromiseForm debtId={debt.id} /> {/* Client Component: tiene estado y eventos */}
+    </>
+  );
+}
+```
+
+```tsx
+// promise-form.tsx
+"use client";
+
+import { useState } from "react";
+
+export function PromiseForm({ debtId }: { debtId: string }) {
+  const [open, setOpen] = useState(false);
+  // ...
+}
+```
+
+## Estrategias de renderizado
+
+<FlowDiagram
+  steps={[
+    {
+      title: "Estático",
+      detail:
+        "Se genera en el build o se cachea; se sirve igual a todos. Ideal para contenido que cambia poco.",
+    },
+    {
+      title: "Dinámico",
+      detail: "Se genera en cada request: datos del usuario, cookies, parámetros de búsqueda.",
+    },
+    {
+      title: "Streaming",
+      detail:
+        "Se envía primero lo listo (un shell con esqueletos) y el resto llega a medida que se resuelve.",
+      tone: "runtime",
+    },
+  ]}
+  caption="Next.js combina las tres en una misma página según qué datos usa cada parte."
+/>
+
+Esta plataforma prerenderiza estáticamente las lecciones (salen del contenido del repositorio) y hace interactivas
+en el cliente las partes con estado (quizzes, notas, progreso).
+
+## Comparación con C# y Java
+
+| Concepto             | ASP.NET Core                            | Spring Boot          | Next.js (App Router)               |
+| -------------------- | --------------------------------------- | -------------------- | ---------------------------------- |
+| Routing              | Atributos / convenciones de Razor Pages | `@RequestMapping`    | Carpetas y archivos                |
+| Plantilla compartida | `_Layout.cshtml`                        | Layouts de Thymeleaf | `layout.tsx` anidados              |
+| Render en servidor   | Razor, Blazor Server/SSR                | Thymeleaf, JSP       | Server Components, prerenderizado  |
+| Interactividad       | Blazor (WebAssembly o Server)           | JavaScript aparte    | Client Components (`"use client"`) |
+| Endpoints API        | Controllers / Minimal APIs              | `@RestController`    | Route Handlers (`route.ts`)        |
+| Middleware           | Pipeline de middleware                  | Filters              | `proxy.ts`                         |
+
+## Errores frecuentes
+
+- **Poner `"use client"` en todo** por costumbre: se pierde el renderizado en servidor y crece el JavaScript enviado.
+- **Olvidar `page.tsx`**: una carpeta sin page no es una ruta.
+- **Usar `<a href>` para navegación interna** en lugar de `Link`: recarga toda la aplicación.
+- **Hacer fetch desde el cliente a una API propia** para datos que un Server Component podría leer directamente.
+- **Poner secretos en componentes cliente** o en variables `NEXT_PUBLIC_`: llegan al navegador.
+
+## Ejercicio interactivo
+
+<KnowledgeCheck
+  id="nextjs.introduction.q1"
+  question="Creás `app/campaigns/[campaignId]/` con un `layout.tsx` pero sin `page.tsx`. ¿Qué pasa al visitar `/campaigns/7`?"
+  options={[
+    { text: "Se muestra el layout vacío.", explanation: "Sin page.tsx el segmento no es una ruta pública." },
+    {
+      text: "404: la carpeta no es una ruta pública sin page.tsx.",
+      correct: true,
+      explanation: "Correcto. page.tsx es lo que hace accesible un segmento; el layout sólo envuelve.",
+    },
+    {
+      text: "Next.js genera una página por defecto.",
+      explanation: "No hay páginas generadas automáticamente.",
+    },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="nextjs.introduction.q2"
+  question="Al navegar de `/debts` a `/debts/123`, ¿qué pasa con el layout de `app/debts/layout.tsx`?"
+  options={[
+    {
+      text: "Se desmonta y se vuelve a montar.",
+      explanation: "Los layouts se conservan entre navegaciones de sus hijos.",
+    },
+    {
+      text: "Se conserva, con su estado, y sólo cambia la página interna.",
+      correct: true,
+      explanation: "Correcto. Es una de las ventajas de los layouts anidados.",
+    },
+    { text: "Se recarga toda la página.", explanation: "Con Link la navegación es del lado del cliente." },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="nextjs.introduction.q3"
+  question="Un componente de página consulta la base de datos con `await db.query(...)`. ¿Por qué es posible en Next.js?"
+  options={[
+    {
+      text: "Porque Next.js expone la base de datos al navegador.",
+      explanation: "Nunca: la base sólo es accesible desde el servidor.",
+    },
+    {
+      text: "Porque por defecto es un Server Component: se ejecuta en el servidor y su código no llega al navegador.",
+      correct: true,
+      explanation: "Correcto. Sólo los Client Components se envían y ejecutan en el navegador.",
+    },
+    {
+      text: "Porque las páginas se ejecutan en un Web Worker.",
+      explanation: "No; se ejecutan en el servidor.",
+    },
+  ]}
+/>

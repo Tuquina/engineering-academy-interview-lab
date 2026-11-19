@@ -1,0 +1,305 @@
+---
+id: nextjs.production
+moduleId: nextjs.production
+title: "Next.js en producción: autenticación, protección de rutas, metadata, imágenes, entorno, despliegue y observabilidad"
+description: "Lo necesario para llevar una aplicación Next.js a producción: sesiones con cookies seguras, protección de rutas en capas, metadata y SEO, optimización de imágenes y fuentes, variables de entorno (y qué llega al navegador), despliegue en Vercel o en contenedores, instrumentation y cabeceras de seguridad."
+difficulty: intermediate
+order: 1
+objectives:
+  - "Implementar sesiones con cookies seguras y proteger rutas en varias capas."
+  - "Definir metadata estática y dinámica para SEO y redes sociales."
+  - "Usar next/image y next/font y explicar qué optimizan."
+  - "Separar variables de entorno de servidor y de cliente sin filtrar secretos."
+  - "Desplegar en Vercel o con output standalone en un contenedor."
+  - "Instrumentar la aplicación y configurar cabeceras de seguridad."
+prerequisites: ["nextjs.data-mutations", "nodejs.auth-security"]
+estimatedMinutes: 45
+tags:
+  ["autenticación", "cookies", "metadata", "seo", "next/image", "variables de entorno", "vercel", "nextjs"]
+version: "1.0.0"
+comparesWith: ["csharp", "java"]
+references:
+  - title: "Next.js — Authentication"
+    url: "https://nextjs.org/docs/app/guides/authentication"
+  - title: "Next.js — Metadata and OG images"
+    url: "https://nextjs.org/docs/app/getting-started/metadata-and-og-images"
+  - title: "Next.js — Image Optimization"
+    url: "https://nextjs.org/docs/app/getting-started/images"
+  - title: "Next.js — Environment Variables"
+    url: "https://nextjs.org/docs/app/guides/environment-variables"
+  - title: "Next.js — Deploying"
+    url: "https://nextjs.org/docs/app/getting-started/deploying"
+  - title: "Next.js — instrumentation.js"
+    url: "https://nextjs.org/docs/app/api-reference/file-conventions/instrumentation"
+  - title: "Next.js — Content Security Policy"
+    url: "https://nextjs.org/docs/app/guides/content-security-policy"
+interviewQuestions:
+  - question: "¿Cómo protegerías las rutas privadas de una aplicación Next.js?"
+    keyPoints:
+      - "Chequeo optimista en proxy para redirigir rápido a quien no tiene sesión."
+      - "Verificación real de la sesión en una capa de acceso a datos usada por páginas y layouts."
+      - "Autorización en cada Server Action y Route Handler, sobre el recurso concreto."
+      - "No confiar sólo en el layout: los layouts no se vuelven a ejecutar en cada navegación y las acciones se invocan directamente."
+  - question: "¿Qué diferencia hay entre una variable de entorno con NEXT_PUBLIC_ y una sin prefijo?"
+    keyPoints:
+      - "Las NEXT_PUBLIC_ se incrustan en el bundle del cliente durante el build: son públicas."
+      - "Las demás sólo existen en el servidor."
+      - "Los secretos nunca llevan el prefijo; como las públicas se fijan en el build, cambiarlas requiere rebuild."
+  - question: "¿Qué optimiza next/image?"
+    keyPoints:
+      - "Genera tamaños y formatos modernos (WebP/AVIF) según el dispositivo."
+      - "Reserva el espacio con width y height para evitar saltos de layout (CLS)."
+      - "Carga diferida por defecto y prioridad para la imagen principal (LCP)."
+summary:
+  - "Sesión en cookie HttpOnly, Secure y SameSite; la verificación vive en una capa de acceso a datos."
+  - "Protección en capas: proxy (optimista), datos (real), cada Server Action y Route Handler (autorización por recurso)."
+  - "metadata y generateMetadata definen título, descripción, Open Graph y canonical por página."
+  - "next/image y next/font reducen bytes y saltos de layout; impactan LCP y CLS."
+  - "NEXT_PUBLIC_ llega al navegador; los secretos nunca."
+  - "Vercel despliega por git con previews por rama; output standalone permite contenedores."
+  - "instrumentation.ts inicializa OpenTelemetry; cabeceras y CSP agregan defensa en el navegador."
+---
+
+## ¿Qué problema resuelve?
+
+Una aplicación que funciona en `localhost` todavía no está lista: falta saber quién es el usuario y qué puede ver,
+que los buscadores y las redes la representen bien, que cargue rápido en un celular, que los secretos no lleguen al
+navegador, que se despliegue de forma repetible y que se pueda observar cuando falla. Esta lección cubre esos
+puntos con las herramientas de Next.js.
+
+## Autenticación: sesiones con cookies
+
+El patrón recomendado para una aplicación web propia es una **sesión en una cookie segura**, ya sea con el ID de una
+sesión guardada en el servidor o con un token firmado y cifrado (sesión _stateless_):
+
+```ts
+// src/modules/auth/session.ts
+import "server-only";
+import { cookies } from "next/headers";
+
+export async function createSession(userId: string, tenantId: string): Promise<void> {
+  const token = await encryptSession({ userId, tenantId, expiresAt: Date.now() + 8 * 60 * 60 * 1000 });
+  (await cookies()).set("session", token, {
+    httpOnly: true, // no accesible desde JavaScript: mitiga robo por XSS
+    secure: true, // sólo por HTTPS
+    sameSite: "lax", // mitiga CSRF
+    path: "/",
+    maxAge: 8 * 60 * 60,
+  });
+}
+
+export async function verifySession(): Promise<Session | null> {
+  const token = (await cookies()).get("session")?.value;
+  return token ? decryptAndValidateSession(token) : null; // firma, expiración y formato
+}
+```
+
+En la práctica, la autenticación de usuarios se delega a un proveedor (OIDC) con una librería como **Auth.js** u
+otra solución gestionada; Next.js sólo verifica la sesión. Los conceptos de sesiones, tokens, OIDC y autorización se
+estudian en la lección de autenticación del curso de Node.js.
+
+## Protección de rutas en capas
+
+<FlowDiagram
+  steps={[
+    {
+      title: "proxy.ts",
+      detail: "Chequeo optimista: si no hay cookie, redirigir a /login. Rápido, sin consultar la base.",
+    },
+    {
+      title: "Capa de acceso a datos",
+      detail: "verifySession() real en cada lectura; filtra por tenant.",
+      tone: "boundary",
+    },
+    {
+      title: "Server Actions y Route Handlers",
+      detail: "Autenticación y autorización sobre el recurso en cada uno.",
+      tone: "boundary",
+    },
+    { title: "UI", detail: "Ocultar botones sin permiso: experiencia, no seguridad." },
+  ]}
+  caption="Cada capa cubre algo distinto; la seguridad real está cerca de los datos."
+/>
+
+Un error frecuente es verificar la sesión **sólo en un layout**: los layouts se conservan entre navegaciones (no se
+vuelven a ejecutar) y las Server Actions se pueden invocar sin pasar por ninguna página. La verificación pertenece a
+la **capa de acceso a datos** que usan todas las lecturas y escrituras.
+
+## Metadata y SEO
+
+```tsx
+// app/layout.tsx: valores por defecto
+import type { Metadata } from "next";
+
+export const metadata: Metadata = {
+  title: { template: "%s · Cobranzas", default: "Cobranzas" },
+  description: "Gestión de cobranzas con agentes de IA.",
+};
+
+// app/(public)/help/[slug]/page.tsx: metadata dinámica
+export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
+  const article = await getHelpArticle((await params).slug);
+  return {
+    title: article.title, // "Cómo registrar un pago · Cobranzas"
+    description: article.summary,
+    alternates: { canonical: `/help/${article.slug}` },
+    openGraph: { title: article.title, description: article.summary, type: "article" },
+  };
+}
+```
+
+Next.js genera las etiquetas `<title>`, `<meta>` y Open Graph en el HTML del servidor. También existen convenciones
+de archivos para `sitemap.ts`, `robots.ts` e imágenes Open Graph generadas (`opengraph-image.tsx`). Las páginas
+privadas (paneles internos) se excluyen de la indexación.
+
+## Imágenes y fuentes
+
+```tsx
+import Image from "next/image";
+
+<Image
+  src="/illustrations/payment-plan.png"
+  alt="Plan de pagos en tres cuotas"
+  width={640}
+  height={360}
+  priority
+/>;
+```
+
+`next/image`:
+
+- Genera **tamaños adecuados** para cada pantalla y **formatos modernos** (WebP, AVIF).
+- **Reserva el espacio** con `width` y `height`, evitando que el contenido salte al cargar (métrica CLS).
+- **Carga diferida** por defecto; `priority` para la imagen principal (métrica LCP).
+- Las imágenes remotas requieren declarar los dominios permitidos en la configuración.
+
+`next/font` descarga las fuentes en el build y las sirve desde el propio dominio, sin requests a terceros y sin
+saltos de texto.
+
+## Variables de entorno
+
+| Variable                      | Disponible en            | Cuándo se resuelve      |
+| ----------------------------- | ------------------------ | ----------------------- |
+| `DATABASE_URL`, `LLM_API_KEY` | Sólo servidor            | En runtime              |
+| `NEXT_PUBLIC_APP_URL`         | Servidor **y navegador** | Se incrusta en el build |
+
+Todo lo que empieza con `NEXT_PUBLIC_` se **copia al JavaScript del cliente** durante el build: es público. Los
+secretos nunca llevan ese prefijo. Y como las públicas se fijan en el build, cambiarlas requiere volver a construir.
+Archivos: `.env` (valores por defecto), `.env.local` (locales, no se commitean), `.env.production`, etc. Como en
+cualquier servicio, las variables se **validan al iniciar** con un esquema.
+
+## Despliegue
+
+**Vercel** (de los creadores de Next.js) es el camino más directo: conectar el repositorio, y cada push genera un
+despliegue; cada rama o pull request tiene una **URL de preview**; `main` despliega a producción. Las variables de
+entorno se configuran por entorno (production, preview, development) en el proyecto.
+
+```bash
+pnpm build   # lo mismo que ejecuta la plataforma; conviene correrlo en CI antes de desplegar
+```
+
+Para **contenedores** (Kubernetes, ECS, Cloud Run), `output: "standalone"` en `next.config.ts` genera una carpeta con
+el servidor y sólo las dependencias necesarias, ideal para una imagen de Docker pequeña. En ese caso hay que proveer
+la caché compartida y el almacenamiento que Vercel resuelve de forma gestionada si hay varias réplicas.
+
+<MermaidDiagram
+  caption="Flujo típico: CI verifica, la plataforma construye y cada rama tiene su preview antes de producción."
+  chart={`
+flowchart LR
+  PR["Pull request"] --> CI["CI<br/>typecheck, lint, tests"]
+  CI --> PV["Preview<br/>URL por rama"]
+  PV -->|"revisión y merge"| MAIN["main"]
+  MAIN --> PROD["Producción"]
+  PROD -->|"rollback instantáneo si falla"| PREV["Despliegue anterior"]
+`}
+/>
+
+## Observabilidad, seguridad y performance
+
+- **`instrumentation.ts`:** se ejecuta al iniciar el servidor; es el lugar para inicializar **OpenTelemetry** y
+  conectar trazas y logs (lección de observabilidad del curso de Node.js). Su función `onRequestError` permite
+  reportar errores del servidor a la herramienta de monitoreo.
+- **Cabeceras de seguridad** (`headers()` en `next.config.ts` o desde proxy): `Content-Security-Policy`,
+  `Strict-Transport-Security`, `X-Content-Type-Options`, `Referrer-Policy`, `frame-ancestors` para evitar que la
+  aplicación se embeba en otros sitios.
+- **Performance:** medir **Core Web Vitals** reales (LCP, INP, CLS) con `useReportWebVitals` o la analítica de la
+  plataforma; analizar el tamaño del bundle; mantener el límite `"use client"` bajo y cachear lo que se pueda.
+- **Dependencias:** actualizar Next.js con regularidad; las versiones corrigen vulnerabilidades del framework.
+
+## Comparación con C# y Java
+
+| Concepto          | ASP.NET Core                              | Spring Boot                              | Next.js                                          |
+| ----------------- | ----------------------------------------- | ---------------------------------------- | ------------------------------------------------ |
+| Sesión con cookie | Cookie authentication                     | Spring Session, `HttpSession`            | `cookies()` + sesión cifrada o en servidor       |
+| Proteger rutas    | `[Authorize]`, policies                   | Spring Security                          | proxy + capa de datos + chequeos por acción      |
+| Metadata / SEO    | Tag helpers, `ViewData["Title"]`          | Thymeleaf                                | `metadata`, `generateMetadata`                   |
+| Configuración     | `appsettings.json` + variables de entorno | `application.yml` + variables de entorno | `.env*` + variables; `NEXT_PUBLIC_` públicas     |
+| Despliegue        | Azure App Service, contenedores           | Contenedores, Kubernetes                 | Vercel, o `output: "standalone"` en contenedores |
+| Telemetría        | OpenTelemetry .NET                        | OpenTelemetry Java agent                 | `instrumentation.ts` + OpenTelemetry             |
+
+## Errores frecuentes
+
+- **Secretos con `NEXT_PUBLIC_`.**
+- **Verificar la sesión sólo en el layout** o sólo en proxy.
+- **Cookies de sesión sin `HttpOnly` o sin `Secure`.**
+- **Imágenes sin dimensiones**, que producen saltos de layout.
+- **No configurar variables por entorno** y desplegar previews contra la base de producción.
+- **Desplegar sin `pnpm build` en CI**: los errores de tipos o de prerenderizado aparecen en producción.
+
+## Ejercicio interactivo
+
+<KnowledgeCheck
+  id="nextjs.production.q1"
+  question="Definís `NEXT_PUBLIC_LLM_API_KEY` para usar el modelo desde un Client Component. ¿Qué problema hay?"
+  options={[
+    {
+      text: "Ninguno: las variables de entorno son privadas.",
+      explanation: "Las que tienen NEXT_PUBLIC_ se copian al bundle del cliente.",
+    },
+    {
+      text: "La clave queda incrustada en el JavaScript del navegador y cualquiera puede verla.",
+      correct: true,
+      explanation:
+        "Correcto. La llamada al modelo debe hacerse en el servidor (Server Action o Route Handler) con una variable sin prefijo.",
+    },
+    { text: "Que hay que reiniciar el servidor.", explanation: "El problema es de seguridad, no operativo." },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="nextjs.production.q2"
+  question="La sesión se verifica sólo en `app/(app)/layout.tsx`. ¿Qué riesgo hay?"
+  options={[
+    {
+      text: "Ninguno: el layout envuelve todas las páginas privadas.",
+      explanation:
+        "Los layouts no se vuelven a ejecutar en cada navegación y no protegen las Server Actions.",
+    },
+    {
+      text: "Las Server Actions y los Route Handlers se pueden invocar sin pasar por el layout.",
+      correct: true,
+      explanation: "Correcto. La verificación pertenece a la capa de datos y a cada acción o handler.",
+    },
+    { text: "Que el layout se vuelve lento.", explanation: "El problema es de seguridad." },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="nextjs.production.q3"
+  question="La imagen principal de la página de pago aparece tarde y hace saltar el contenido. ¿Qué ajustes de next/image ayudan?"
+  options={[
+    {
+      text: "Quitar width y height para que se adapte.",
+      explanation: "Sin dimensiones no se reserva el espacio y el contenido salta.",
+    },
+    {
+      text: "Indicar width y height (o fill con un contenedor dimensionado) y priority en la imagen principal.",
+      correct: true,
+      explanation: "Correcto. Se reserva el espacio (CLS) y se prioriza la carga (LCP).",
+    },
+    {
+      text: "Usar una etiqueta img común.",
+      explanation: "Se pierden las optimizaciones de tamaño, formato y carga.",
+    },
+  ]}
+/>

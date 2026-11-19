@@ -1,0 +1,362 @@
+---
+id: nextjs.data-mutations
+moduleId: nextjs.data
+title: "Datos en Next.js: data fetching, caché y revalidación, Server Actions, Route Handlers y proxy"
+description: "Cómo leer y escribir datos en el App Router: fetching en Server Components con una capa de acceso a datos, el modelo de caché con 'use cache', cacheLife y cacheTag, revalidación con revalidateTag y updateTag, mutaciones con Server Actions (y su seguridad), APIs con Route Handlers y qué hacer en proxy."
+difficulty: advanced
+order: 1
+objectives:
+  - "Leer datos en Server Components a través de una capa de acceso a datos con autorización."
+  - "Cachear datos y componentes con 'use cache', cacheLife y cacheTag, y entender qué es dinámico."
+  - "Invalidar la caché tras una mutación con revalidateTag, updateTag o revalidatePath."
+  - "Implementar Server Actions validadas y autorizadas, con estados pendientes y errores."
+  - "Elegir entre Server Actions y Route Handlers, y saber para qué sirve proxy."
+prerequisites: ["nextjs.server-client-components"]
+estimatedMinutes: 50
+tags:
+  [
+    "data fetching",
+    "caché",
+    "use cache",
+    "revalidación",
+    "server actions",
+    "route handlers",
+    "proxy",
+    "nextjs",
+  ]
+version: "1.0.0"
+comparesWith: ["csharp", "java"]
+references:
+  - title: "Next.js — Fetching Data"
+    url: "https://nextjs.org/docs/app/getting-started/fetching-data"
+  - title: "Next.js — Caching"
+    url: "https://nextjs.org/docs/app/getting-started/caching"
+  - title: "Next.js — Revalidating"
+    url: "https://nextjs.org/docs/app/getting-started/revalidating"
+  - title: "Next.js — Mutating Data"
+    url: "https://nextjs.org/docs/app/getting-started/mutating-data"
+  - title: "Next.js — Route Handlers"
+    url: "https://nextjs.org/docs/app/getting-started/route-handlers"
+  - title: "Next.js — Proxy"
+    url: "https://nextjs.org/docs/app/getting-started/proxy"
+  - title: "Next.js — Data Security"
+    url: "https://nextjs.org/docs/app/guides/data-security"
+interviewQuestions:
+  - question: "¿Qué es una Server Action y qué cuidados de seguridad requiere?"
+    keyPoints:
+      - "Una función async marcada con 'use server' que se ejecuta en el servidor y se invoca desde el cliente (formularios o código)."
+      - "Next.js la expone como un endpoint POST: cualquiera puede llamarla directamente, no sólo la UI."
+      - "Cada acción debe autenticar, autorizar sobre el recurso y validar sus argumentos como datos externos."
+      - "Después de mutar, se invalida la caché afectada (updateTag, revalidateTag, revalidatePath)."
+  - question: "¿Cuándo usarías un Route Handler en lugar de una Server Action?"
+    keyPoints:
+      - "Route Handler para APIs consumidas por terceros, webhooks, clientes móviles o cuando se necesita control total de HTTP (métodos, headers, streaming)."
+      - "Server Action para mutaciones originadas en la propia UI de Next.js."
+      - "Ambos delegan en los mismos casos de uso; la lógica no vive en el adaptador."
+  - question: "¿Cómo funciona la caché de datos en Next.js con Cache Components?"
+    keyPoints:
+      - "Se cachea explícitamente con la directiva 'use cache' en funciones o componentes; los argumentos forman la clave."
+      - "cacheLife define cuánto dura (perfiles como minutes, hours, days); cacheTag etiqueta para invalidar."
+      - "revalidateTag invalida con stale-while-revalidate; updateTag expira de inmediato para leer lo propio escrito."
+      - "Lo que no se cachea y depende de la request (cookies, headers, datos frescos) se renderiza dinámicamente dentro de Suspense."
+summary:
+  - "Los Server Components leen datos directamente; una capa de acceso a datos centraliza autorización y DTOs."
+  - "Con Cache Components, nada se cachea por accidente: se cachea con 'use cache' y cacheLife."
+  - "cacheTag etiqueta entradas; revalidateTag(tag, 'max') revalida en segundo plano; updateTag expira ya (sólo en Server Actions)."
+  - "Las Server Actions son endpoints POST: autenticar, autorizar y validar en cada una."
+  - "useActionState y useOptimistic dan estados pendientes, errores y UI optimista a las acciones."
+  - "Route Handlers (route.ts) exponen APIs HTTP: webhooks, terceros, móviles."
+  - "proxy.ts corre antes de cada request: redirecciones, headers, chequeos optimistas; no es el lugar de la autorización real."
+---
+
+## ¿Qué problema resuelve?
+
+En una aplicación Next.js, los datos se leen en Server Components, se escriben desde formularios y botones, se
+exponen a terceros por APIs y se cachean para no ir a la base en cada request. Cada una de esas operaciones tiene
+una herramienta propia, y combinarlas mal produce los problemas clásicos: datos de otro tenant en la caché,
+formularios que no reflejan lo que guardaron y acciones del servidor que cualquiera puede invocar sin permisos.
+
+<Callout type="info" title="Versión del modelo">
+  Esta lección describe el modelo de **Cache Components** de Next.js 16 (`cacheComponents: true`), que es el
+  que traen por defecto los proyectos nuevos. En proyectos con el modelo anterior, la caché se configuraba con
+  opciones de `fetch` y de segmento (`revalidate`, `dynamic`); la documentación oficial mantiene una guía para
+  ese caso.
+</Callout>
+
+## Leer datos: una capa de acceso a datos
+
+Los Server Components pueden consultar la base directamente, pero conviene que lo hagan a través de una **capa de
+acceso a datos** que centralice tres cosas: la consulta, la **autorización** y el **DTO** que se devuelve.
+
+```tsx
+// src/modules/debts/data-access.ts
+import "server-only";
+import { cache } from "react";
+
+/** Deduplica por request: si varios componentes piden la sesión, se resuelve una vez. */
+export const getCurrentUser = cache(async () => {
+  const session = await verifySession(); // lee la cookie y la valida
+  if (!session) redirect("/login");
+  return session.user;
+});
+
+export async function getDebtSummary(customerId: string): Promise<DebtSummaryDto> {
+  const user = await getCurrentUser();
+  const debts = await debtRepository.listByCustomer(user.tenantId, customerId); // filtra por tenant
+  return toDebtSummaryDto(debts); // sólo los campos que la UI necesita
+}
+```
+
+`cache` de React deduplica **dentro de una misma request** (no es una caché persistente). `server-only` hace fallar
+el build si el módulo se importa desde un Client Component.
+
+## Caché: 'use cache', cacheLife y cacheTag
+
+Con Cache Components, **nada se cachea implícitamente**. Se cachea de forma explícita con la directiva `"use cache"`,
+en una función de datos o en un componente completo:
+
+```tsx
+import { cacheLife, cacheTag } from "next/cache";
+
+/** Plantillas de mensajes de un tenant: cambian poco, se leen en cada campaña. */
+export async function getMessageTemplates(tenantId: string) {
+  "use cache";
+  cacheLife("hours"); // cuánto dura la entrada
+  cacheTag(`templates:${tenantId}`); // etiqueta para invalidar cuando cambien
+  return templateRepository.listByTenant(tenantId);
+}
+```
+
+- **Los argumentos forman parte de la clave de caché**: `getMessageTemplates("tnt_a")` y `("tnt_b")` son entradas
+  distintas. Por eso el `tenantId` se pasa como argumento, nunca se omite.
+- **`cacheLife`** acepta perfiles (`seconds`, `minutes`, `hours`, `days`, `weeks`, `max`) o un objeto con
+  `stale`, `revalidate` y `expire`.
+- Dentro de un scope con `"use cache"` no se pueden leer `cookies()` ni `headers()`: los datos de la request se
+  leen afuera y se pasan como argumentos.
+
+### Lo que no se cachea: contenido dinámico con Suspense
+
+Lo que depende de la request (la sesión, los `searchParams`, datos que deben estar frescos) no se cachea: se
+renderiza en el momento, **dentro de un Suspense**, mientras el resto de la página sale prerenderizado.
+
+<MermaidDiagram
+  caption="Una página combina un shell prerenderizado, partes cacheadas y partes dinámicas que llegan por streaming."
+  chart={`
+flowchart LR
+  subgraph PAGE["Página /campaigns/7"]
+    SH["Shell estático<br/>layout y navegación"]
+    CA["Plantillas del tenant<br/>use cache + cacheLife hours"]
+    DY["Progreso en vivo<br/>dinámico dentro de Suspense"]
+  end
+  SH -->|"prerenderizado"| OUT["Respuesta inmediata"]
+  CA -->|"caché con tag templates"| OUT
+  DY -->|"streaming por request"| OUT
+`}
+/>
+
+## Revalidar después de mutar
+
+| Función                     | Efecto                                                              | Dónde                          |
+| --------------------------- | ------------------------------------------------------------------- | ------------------------------ |
+| `revalidateTag(tag, "max")` | Marca como vieja la entrada; se sirve la vieja mientras se regenera | Server Actions, Route Handlers |
+| `updateTag(tag)`            | Expira de inmediato: el usuario ve su propio cambio en la respuesta | Sólo Server Actions            |
+| `revalidatePath(path)`      | Invalida lo asociado a una ruta                                     | Server Actions, Route Handlers |
+| `refresh()`                 | Vuelve a renderizar la ruta actual en el cliente sin tocar la caché | Server Actions                 |
+
+Regla práctica: **`updateTag` cuando el usuario espera ver su cambio inmediatamente** (editó una plantilla y vuelve a
+la lista); **`revalidateTag` cuando un pequeño retraso es aceptable** (un webhook actualiza datos que otros verán).
+
+## Server Actions: mutaciones desde la UI
+
+Una **Server Action** es una función `async` marcada con `"use server"` que se ejecuta en el servidor y se invoca
+desde el cliente, típicamente como `action` de un formulario:
+
+```tsx
+// src/modules/debts/actions.ts
+"use server";
+
+import { updateTag } from "next/cache";
+import { z } from "zod";
+
+const RegisterPromiseSchema = z.object({
+  debtId: z.string().min(1),
+  promisedFor: z.iso.date(),
+  amountCents: z.coerce.number().int().positive(),
+});
+
+export type ActionState = { error?: string; ok?: boolean };
+
+export async function registerPromiseAction(
+  _previous: ActionState,
+  formData: FormData,
+): Promise<ActionState> {
+  const user = await getCurrentUser(); // 1. autenticación
+  const parsed = RegisterPromiseSchema.safeParse(Object.fromEntries(formData)); // 2. validación
+  if (!parsed.success) return { error: "Revisá la fecha y el monto." };
+
+  const result = await registerPaymentPromise.execute({ ...parsed.data, actor: user }); // 3. caso de uso (autoriza)
+  if (!result.ok) return { error: messageFor(result.error) };
+
+  updateTag(`debt:${parsed.data.debtId}`); // 4. invalidar lo que cambió
+  return { ok: true };
+}
+```
+
+```tsx
+"use client";
+
+import { useActionState } from "react";
+import { registerPromiseAction } from "@/modules/debts/actions";
+
+export function PromiseForm({ debtId }: { debtId: string }) {
+  const [state, formAction, pending] = useActionState(registerPromiseAction, {});
+  return (
+    <form action={formAction}>
+      <input type="hidden" name="debtId" value={debtId} />
+      {/* campos promisedFor y amountCents */}
+      <button disabled={pending}>{pending ? "Guardando…" : "Registrar promesa"}</button>
+      {state.error && <p role="alert">{state.error}</p>}
+    </form>
+  );
+}
+```
+
+<Callout type="danger" title="Una Server Action es un endpoint público">
+  Next.js expone cada Server Action como un endpoint `POST`. Cualquiera puede invocarla con argumentos
+  arbitrarios, no sólo tu formulario. Por eso cada acción **autentica, autoriza sobre el recurso concreto y
+  valida** todos sus argumentos (incluido el `debtId` del input oculto, que el usuario puede cambiar). La
+  documentación oficial lo repite como advertencia.
+</Callout>
+
+Los formularios con `action` funcionan incluso **antes de que se cargue el JavaScript** (mejora progresiva) y, con
+JavaScript, sin recargar la página.
+
+## Route Handlers: APIs HTTP
+
+Un `route.ts` exporta funciones por método HTTP y usa las APIs estándar `Request` y `Response`:
+
+```ts
+// app/api/webhooks/payments/route.ts
+export async function POST(request: Request): Promise<Response> {
+  const rawBody = await request.text();
+  if (!verifySignature(rawBody, request.headers)) return new Response(null, { status: 401 });
+  await webhookInbox.saveIfNew(parsePaymentEvent(rawBody));
+  return new Response(null, { status: 200 });
+}
+```
+
+| Usá Server Actions para...                | Usá Route Handlers para...                                   |
+| ----------------------------------------- | ------------------------------------------------------------ |
+| Mutaciones desde la propia UI de Next.js  | Webhooks de terceros                                         |
+| Formularios con mejora progresiva         | APIs consumidas por apps móviles, otros servicios o terceros |
+| Integración con useActionState y la caché | Control total de HTTP: métodos, headers, status, streaming   |
+
+En los dos casos, el adaptador **delega en el mismo caso de uso**: la lógica no se duplica (lección de APIs por
+capas del curso de Node.js).
+
+## proxy.ts: antes de cada request
+
+`proxy.ts` (llamado `middleware.ts` antes de Next.js 16) ejecuta código **antes** de que se resuelva la ruta:
+redirecciones, reescrituras, headers, y **chequeos optimistas** como "si no hay cookie de sesión, redirigir a
+`/login`".
+
+```ts
+// proxy.ts
+import { NextResponse, type NextRequest } from "next/server";
+
+export function proxy(request: NextRequest) {
+  const hasSession = request.cookies.has("session");
+  if (!hasSession && request.nextUrl.pathname.startsWith("/debts")) {
+    return NextResponse.redirect(new URL("/login", request.url));
+  }
+  return NextResponse.next();
+}
+
+export const config = { matcher: ["/debts/:path*", "/campaigns/:path*"] };
+```
+
+La documentación es explícita: proxy **no** es una solución de autorización completa ni el lugar para consultas
+lentas. La autorización real se verifica en la capa de acceso a datos, en cada Server Action y en cada Route Handler.
+
+## Comparación con C# y Java
+
+| Concepto                  | ASP.NET Core                                | Spring Boot                    | Next.js                                   |
+| ------------------------- | ------------------------------------------- | ------------------------------ | ----------------------------------------- |
+| Leer datos para una vista | Razor Page / controller + servicio          | Controller + servicio + modelo | Server Component + capa de acceso a datos |
+| Caché de salida / datos   | Output caching, `IMemoryCache`, HybridCache | `@Cacheable`                   | `"use cache"`, `cacheLife`, `cacheTag`    |
+| Invalidación por etiqueta | Output cache tags (`EvictByTagAsync`)       | `@CacheEvict`                  | `revalidateTag`, `updateTag`              |
+| Formularios que mutan     | POST a handlers de Razor Pages              | POST a controllers             | Server Actions                            |
+| API HTTP                  | Controllers / Minimal APIs                  | `@RestController`              | Route Handlers                            |
+| Pre-procesamiento         | Middleware                                  | Filters                        | `proxy.ts`                                |
+
+## Errores frecuentes
+
+- **Server Actions sin autorización** confiando en que "sólo las llama mi formulario".
+- **Omitir el tenant en funciones cacheadas**: los argumentos son la clave de la caché.
+- **Leer cookies dentro de `"use cache"`.**
+- **No invalidar tras mutar**, o invalidar todo con `revalidatePath("/")`.
+- **Autorizar sólo en `proxy.ts`.**
+- **Duplicar lógica** entre una Server Action y un Route Handler en lugar de compartir el caso de uso.
+
+## Ejercicio interactivo
+
+<KnowledgeCheck
+  id="nextjs.data-mutations.q1"
+  question="Una Server Action recibe `debtId` de un input oculto y actualiza la deuda sin más chequeos, porque 'el formulario sólo muestra deudas del usuario'. ¿Qué problema hay?"
+  options={[
+    {
+      text: "Ninguno: los inputs ocultos no se pueden modificar.",
+      explanation: "Se pueden modificar, y además la acción se puede invocar sin el formulario.",
+    },
+    {
+      text: "La acción es un endpoint POST: cualquiera puede invocarla con otro debtId; hay que autorizar sobre el recurso.",
+      correct: true,
+      explanation: "Correcto. Autenticar, autorizar y validar en cada Server Action.",
+    },
+    {
+      text: "Que debería usar GET.",
+      explanation: "Las mutaciones no usan GET; el problema es de autorización.",
+    },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="nextjs.data-mutations.q2"
+  question="Un usuario edita una plantilla de mensajes y al volver a la lista debe ver su cambio inmediatamente. ¿Qué usás en la Server Action?"
+  options={[
+    {
+      text: "`revalidateTag('templates', 'max')`",
+      explanation: "Sirve la versión vieja mientras regenera: el usuario podría no ver su cambio.",
+    },
+    {
+      text: "`updateTag('templates:' + tenantId)`",
+      correct: true,
+      explanation:
+        "Correcto. Expira la entrada de inmediato para leer lo propio escrito; sólo se usa en Server Actions.",
+    },
+    {
+      text: "Nada: la caché se actualiza sola.",
+      explanation: "La entrada viviría hasta que venza su cacheLife.",
+    },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="nextjs.data-mutations.q3"
+  question="Un proveedor de pagos necesita notificar a la aplicación. ¿Qué mecanismo corresponde?"
+  options={[
+    {
+      text: "Una Server Action.",
+      explanation: "Están pensadas para la propia UI, no para terceros con su propio formato HTTP.",
+    },
+    {
+      text: "Un Route Handler con POST que verifica la firma y guarda el evento.",
+      correct: true,
+      explanation: "Correcto. Los webhooks y APIs para terceros se exponen con Route Handlers.",
+    },
+    {
+      text: "proxy.ts.",
+      explanation: "proxy corre antes de las rutas; no es un endpoint ni debe hacer trabajo lento.",
+    },
+  ]}
+/>

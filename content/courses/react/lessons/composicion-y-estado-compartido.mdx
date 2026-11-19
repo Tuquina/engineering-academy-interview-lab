@@ -1,0 +1,327 @@
+---
+id: react.composition
+moduleId: react.rendering
+title: "Arquitectura de componentes: composición, lifting state y render props"
+description: "Cómo dividir una interfaz en componentes y cómo comparten datos: una sola fuente de verdad, levantar el estado al ancestro común, componer con children y slots en lugar de heredar, render props, componentes compuestos y cuándo el prop drilling es un problema real."
+difficulty: intermediate
+order: 2
+objectives:
+  - "Dividir una pantalla en componentes con responsabilidades claras."
+  - "Decidir dónde vive cada estado y levantarlo al ancestro común cuando hace falta compartirlo."
+  - "Componer con children y slots, y explicar por qué React no usa herencia de componentes."
+  - "Reconocer render props y componentes compuestos y cuándo conviene cada patrón."
+  - "Evaluar el prop drilling y sus alternativas sin abusar del contexto."
+prerequisites: ["react.rendering-reconciliation"]
+estimatedMinutes: 35
+tags: ["composición", "lifting state", "children", "render props", "arquitectura de componentes"]
+version: "1.0.0"
+comparesWith: ["csharp", "java"]
+references:
+  - title: "React — Thinking in React"
+    url: "https://react.dev/learn/thinking-in-react"
+  - title: "React — Sharing State Between Components"
+    url: "https://react.dev/learn/sharing-state-between-components"
+  - title: "React — Passing Props to a Component (children)"
+    url: "https://react.dev/learn/passing-props-to-a-component"
+  - title: "React — Passing Data Deeply with Context"
+    url: "https://react.dev/learn/passing-data-deeply-with-context"
+interviewQuestions:
+  - question: "¿Qué significa levantar el estado (lifting state up)?"
+    keyPoints:
+      - "Mover el estado al ancestro común más cercano de los componentes que lo necesitan."
+      - "El ancestro pasa el valor por props y funciones para modificarlo."
+      - "Garantiza una única fuente de verdad y evita copias desincronizadas."
+  - question: "¿Por qué React prefiere composición sobre herencia?"
+    keyPoints:
+      - "Los componentes se combinan pasando elementos como props (children o slots con nombre)."
+      - "La especialización se logra configurando un componente genérico con props."
+      - "La herencia acopla y complica cuando la UI cambia; la composición permite combinaciones libres."
+  - question: "¿Qué es el prop drilling y cómo lo resolverías?"
+    keyPoints:
+      - "Pasar props por varios niveles intermedios que no las usan."
+      - "Primero intentar composición: pasar el componente ya armado como children para saltear niveles."
+      - "Context para datos realmente globales del subárbol (tema, usuario, configuración)."
+      - "Una librería de estado o de server state cuando son datos de servidor o compartidos ampliamente."
+summary:
+  - "Cada pieza de estado tiene una única fuente de verdad: el componente más bajo que lo necesita completo."
+  - "Si dos hermanos necesitan el mismo estado, se levanta al ancestro común y se pasa por props."
+  - "No guardes en estado lo que se puede calcular de props o de otro estado."
+  - "children y los slots con nombre permiten componer sin herencia."
+  - "Render props y componentes compuestos dan flexibilidad; los custom hooks reemplazan muchos render props."
+  - "El prop drilling se resuelve primero con composición, después con contexto."
+---
+
+## ¿Qué problema resuelve?
+
+Pensá en la pantalla de gestión de una campaña: filtros arriba, una tabla de deudores, un panel lateral con el
+detalle del deudor seleccionado y un contador de seleccionados en el encabezado. ¿Dónde vive el "deudor
+seleccionado"? ¿Y los filtros? Si cada componente guarda su propia copia, el encabezado dice 3 seleccionados
+mientras la tabla muestra 4.
+
+Esta lección trata de **cómo dividir la interfaz** y **dónde vive cada estado** para que haya una sola verdad.
+
+## Dividir la interfaz
+
+El proceso recomendado por la documentación de React (_Thinking in React_):
+
+1. **Dividir la pantalla en una jerarquía de componentes**, con un criterio parecido al de responsabilidad única.
+2. **Construir una versión estática** con props, sin estado.
+3. **Encontrar el estado mínimo**: lo que cambia con el tiempo, no viene por props y **no se puede calcular**.
+4. **Decidir dónde vive** cada estado.
+5. **Agregar el flujo inverso**: callbacks para que los hijos pidan cambios.
+
+<MermaidDiagram
+  caption="El estado vive en el ancestro común de quienes lo necesitan; baja por props y los cambios suben por callbacks."
+  chart={`
+flowchart TD
+  P["CampaignPage<br/>estado: filters, selectedIds"] -->|"filters, onChange"| F["FiltersBar"]
+  P -->|"debts filtradas, selectedIds, onToggle"| T["DebtTable"]
+  P -->|"selectedIds.size"| H["Header"]
+  P -->|"deudor seleccionado"| D["DetailPanel"]
+  T --> R["DebtRow"]
+`}
+/>
+
+## Una sola fuente de verdad y estado derivado
+
+El paso 3 es el que más errores evita: **no guardes en estado lo que se puede calcular**.
+
+```tsx
+// ❌ Estado duplicado: filteredDebts puede desincronizarse de debts o de filters
+const [debts, setDebts] = useState<Debt[]>([]);
+const [filters, setFilters] = useState<Filters>(initialFilters);
+const [filteredDebts, setFilteredDebts] = useState<Debt[]>([]);
+useEffect(() => setFilteredDebts(applyFilters(debts, filters)), [debts, filters]);
+
+// ✅ Derivado durante el render: siempre consistente
+const [filters, setFilters] = useState<Filters>(initialFilters);
+const filteredDebts = applyFilters(debts, filters);
+const selectedCount = selectedIds.size;
+```
+
+La versión derivada no puede desincronizarse y evita un render extra. Si el cálculo fuera realmente costoso (medido),
+se memoiza con `useMemo`.
+
+## Lifting state up
+
+Cuando dos componentes necesitan el mismo estado, se **levanta** al ancestro común más cercano:
+
+```tsx
+export function CampaignPage({ debts }: { debts: Debt[] }) {
+  const [filters, setFilters] = useState<Filters>(initialFilters);
+  const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(new Set());
+
+  const visibleDebts = applyFilters(debts, filters);
+
+  function toggle(id: string) {
+    setSelectedIds((previous) => {
+      const next = new Set(previous);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next; // un Set nuevo: nunca mutar el anterior
+    });
+  }
+
+  return (
+    <>
+      <Header selectedCount={selectedIds.size} />
+      <FiltersBar value={filters} onChange={setFilters} />
+      <DebtTable debts={visibleDebts} selectedIds={selectedIds} onToggle={toggle} />
+    </>
+  );
+}
+```
+
+`FiltersBar` y `DebtTable` son ahora **componentes controlados**: no tienen estado propio para esos datos; los
+reciben y avisan cambios. Eso los hace reutilizables y fáciles de testear.
+
+¿Y si el estado se levanta demasiado? Cada cambio re-renderiza al ancestro y a todos sus hijos. La regla: el estado
+vive **lo más abajo posible**, pero **lo suficientemente arriba** como para que todos los que lo necesitan lo vean.
+Un input de búsqueda que sólo usa la tabla no debería vivir en la página.
+
+## Composición con children y slots
+
+React no usa herencia entre componentes. Para reutilizar estructura, se **componen** pasando elementos como props:
+
+```tsx
+// Un layout genérico con "slots" con nombre
+function Panel({
+  title,
+  actions,
+  children,
+}: {
+  title: string;
+  actions?: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="panel">
+      <header>
+        <h2>{title}</h2>
+        {actions}
+      </header>
+      <div className="panel-body">{children}</div>
+    </section>
+  );
+}
+
+// Especialización por configuración, no por herencia
+<Panel title="Promesas de pago" actions={<Button onClick={openNewPromise}>Nueva</Button>}>
+  <PromiseList debtId={debtId} />
+</Panel>;
+```
+
+Si venís de WPF o JavaFX, la idea de heredar de un control base para especializarlo no aplica: en React se hace un
+componente genérico configurable y se lo combina. La documentación oficial no recomienda herencia de componentes en
+ningún caso.
+
+## Render props y componentes compuestos
+
+Cuando un componente necesita que el padre decida **cómo** renderizar una parte con datos que sólo el componente
+conoce, se pasa una **función** que devuelve JSX (render prop):
+
+```tsx
+function VirtualList<T>({ items, renderItem }: { items: T[]; renderItem: (item: T) => React.ReactNode }) {
+  const visible = useVisibleWindow(items); // lógica de virtualización interna
+  return <div>{visible.map(renderItem)}</div>;
+}
+
+<VirtualList items={debts} renderItem={(debt) => <DebtRow key={debt.id} debt={debt} />} />;
+```
+
+Muchos usos históricos de render props (compartir lógica con estado) hoy se resuelven mejor con **custom hooks**
+(lección de hooks). Siguen siendo útiles para delegar el renderizado, como en listas virtualizadas o tablas.
+
+Los **componentes compuestos** son un conjunto de componentes que cooperan y comparten estado implícito (vía
+contexto), con una API declarativa:
+
+```tsx
+<Tabs defaultValue="debts">
+  <Tabs.List>
+    <Tabs.Trigger value="debts">Deudas</Tabs.Trigger>
+    <Tabs.Trigger value="history">Historial</Tabs.Trigger>
+  </Tabs.List>
+  <Tabs.Content value="debts">
+    <DebtTable />
+  </Tabs.Content>
+  <Tabs.Content value="history">
+    <ContactHistory />
+  </Tabs.Content>
+</Tabs>
+```
+
+Es el patrón de las librerías de componentes accesibles (Radix, React Aria, shadcn/ui).
+
+## Prop drilling
+
+**Prop drilling** es pasar una prop por varios niveles que no la usan, sólo para que llegue abajo. Con dos o tres
+niveles es normal y explícito. Cuando molesta, la primera herramienta es **composición**:
+
+```tsx
+// ❌ Layout y Sidebar reciben `user` sólo para pasarlo
+<Layout user={user} />
+
+// ✅ El padre arma el componente que necesita user y lo pasa ya construido
+<Layout sidebar={<UserMenu user={user} />} />
+```
+
+La segunda es **Context**, para datos que muchos componentes de un subárbol necesitan (tema, usuario actual,
+tenant, configuración). Context no es una librería de estado general: cada cambio de su valor re-renderiza a todos
+los consumidores (se ve en la lección de hooks). Para datos del servidor, una librería de server state es mejor
+opción.
+
+<FlowDiagram
+  steps={[
+    { title: "¿Lo usa un solo componente?", detail: "Estado local en ese componente." },
+    { title: "¿Lo comparten hermanos?", detail: "Levantar al ancestro común." },
+    { title: "¿Atraviesa muchos niveles?", detail: "Composición: pasar elementos ya armados." },
+    { title: "¿Lo necesita todo un subárbol?", detail: "Context (tema, usuario, tenant)." },
+    {
+      title: "¿Viene del servidor?",
+      detail: "Server state: TanStack Query o Server Components.",
+      tone: "runtime",
+    },
+  ]}
+  caption="Dónde ubicar el estado, de lo más local a lo más global."
+/>
+
+## Comparación con C# y Java
+
+| Necesidad                     | WPF / Blazor                                       | JavaFX                  | React                          |
+| ----------------------------- | -------------------------------------------------- | ----------------------- | ------------------------------ |
+| Reutilizar estructura         | Herencia de controles, templates, `RenderFragment` | Herencia, FXML includes | Composición: `children`, slots |
+| Compartir estado entre vistas | ViewModel compartido, `CascadingValue`             | Modelo compartido       | Lifting state, Context         |
+| Delegar renderizado           | `DataTemplate`, `RenderFragment<T>`                | `CellFactory`           | Render props                   |
+| Fuente de verdad              | ViewModel                                          | Modelo con propiedades  | Estado en el ancestro común    |
+
+## Errores frecuentes
+
+- **Duplicar estado** que se puede derivar, y sincronizarlo con efectos.
+- **Copiar props en estado** (`useState(props.value)`): el estado no se actualiza si la prop cambia.
+- **Levantar todo al componente raíz** "por las dudas", re-renderizando toda la pantalla en cada tecla.
+- **Usar Context para todo**, incluidos datos que cambian a cada rato.
+- **Intentar herencia de componentes.**
+- **Componentes gigantes** con decenas de estados y responsabilidades.
+
+## Ejercicio interactivo
+
+<KnowledgeCheck
+  id="react.composition.q1"
+  question="El encabezado muestra cuántas deudas están seleccionadas en la tabla, que es un componente hermano. ¿Dónde debe vivir `selectedIds`?"
+  options={[
+    {
+      text: "En la tabla, y el encabezado lo lee con una ref.",
+      explanation: "Leer estado de un hermano con refs rompe el flujo de datos de React.",
+    },
+    {
+      text: "En el ancestro común de la tabla y el encabezado, que lo pasa a ambos por props.",
+      correct: true,
+      explanation: "Correcto. Lifting state up: una sola fuente de verdad para los dos.",
+    },
+    {
+      text: "En los dos, sincronizados con useEffect.",
+      explanation: "Dos copias del mismo estado tienden a desincronizarse.",
+    },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="react.composition.q2"
+  question="Un componente guarda `const [total, setTotal] = useState(0)` y lo actualiza en un useEffect cada vez que cambia `debts`. ¿Qué mejorarías?"
+  options={[
+    {
+      text: "Calcular `const total = sum(debts)` durante el render.",
+      correct: true,
+      explanation: "Correcto. Es estado derivado: calcularlo evita desincronizaciones y un render extra.",
+    },
+    {
+      text: "Usar useLayoutEffect en lugar de useEffect.",
+      explanation: "Sigue siendo estado duplicado y un render extra.",
+    },
+    {
+      text: "Guardarlo en un contexto.",
+      explanation: "No resuelve la duplicación y agrega renders a más componentes.",
+    },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="react.composition.q3"
+  question="`user` pasa por Layout, Sidebar y Nav sólo para llegar a `UserMenu`. ¿Cuál es la primera alternativa a considerar?"
+  options={[
+    {
+      text: "Una librería global de estado.",
+      explanation: "Es una solución pesada para un problema de estructura.",
+    },
+    {
+      text: "Composición: pasar `<UserMenu user={user} />` ya armado como prop o children.",
+      correct: true,
+      explanation:
+        "Correcto. Los niveles intermedios dejan de conocer user. Si muchos componentes lo necesitan, Context.",
+    },
+    {
+      text: "Una variable global importada.",
+      explanation: "No dispara renders al cambiar y dificulta los tests.",
+    },
+  ]}
+/>

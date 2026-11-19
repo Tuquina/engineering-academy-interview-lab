@@ -1,0 +1,314 @@
+---
+id: react.memo-refs-context
+moduleId: react.hooks
+title: "useMemo, useCallback, memo, useRef, Context y custom hooks"
+description: "Las herramientas para optimizar y estructurar componentes: memoización con useMemo, useCallback y React.memo (y qué cambia con el React Compiler), refs para valores que no disparan renders y para el DOM, Context para datos de un subárbol y sus costos, y custom hooks para reutilizar lógica con estado."
+difficulty: intermediate
+order: 2
+objectives:
+  - "Explicar qué memoizan useMemo, useCallback y React.memo y cuándo realmente ayudan."
+  - "Entender el rol del React Compiler en la memoización automática."
+  - "Usar useRef para valores mutables que no deben disparar renders y para acceder al DOM."
+  - "Diseñar un Context con su provider y su hook, conociendo su impacto en renders."
+  - "Extraer lógica con estado a custom hooks con una API clara."
+prerequisites: ["react.state-effects"]
+estimatedMinutes: 40
+tags: ["usememo", "usecallback", "react.memo", "useref", "context", "custom hooks", "react compiler"]
+version: "1.0.0"
+comparesWith: ["csharp", "java"]
+references:
+  - title: "React — useMemo"
+    url: "https://react.dev/reference/react/useMemo"
+  - title: "React — useCallback"
+    url: "https://react.dev/reference/react/useCallback"
+  - title: "React — memo"
+    url: "https://react.dev/reference/react/memo"
+  - title: "React — React Compiler"
+    url: "https://react.dev/learn/react-compiler"
+  - title: "React — Referencing Values with Refs"
+    url: "https://react.dev/learn/referencing-values-with-refs"
+  - title: "React — Reusing Logic with Custom Hooks"
+    url: "https://react.dev/learn/reusing-logic-with-custom-hooks"
+interviewQuestions:
+  - question: "¿Cuál es la diferencia entre useMemo, useCallback y React.memo?"
+    keyPoints:
+      - "useMemo memoiza el resultado de un cálculo entre renders mientras no cambien sus dependencias."
+      - "useCallback memoiza una función (equivale a useMemo que devuelve la función)."
+      - "React.memo envuelve un componente para saltear su render si sus props son iguales (comparación superficial)."
+      - "useCallback/useMemo sólo ayudan a memo si se pasan a un hijo memoizado o a dependencias de efectos."
+  - question: "¿Cuándo usarías useRef en lugar de useState?"
+    keyPoints:
+      - "Cuando el valor debe persistir entre renders pero cambiarlo no debe actualizar la pantalla (IDs de timers, valores previos, instancias externas)."
+      - "Para acceder a un nodo del DOM (foco, medidas, scroll)."
+      - "No se debe leer ni escribir ref.current durante el render."
+  - question: "¿Qué problemas de performance puede causar Context y cómo se mitigan?"
+    keyPoints:
+      - "Cuando cambia el valor del provider, se re-renderizan todos los componentes que lo consumen."
+      - "Pasar un objeto nuevo en cada render del provider re-renderiza a todos los consumidores aunque los datos sean iguales."
+      - "Mitigaciones: memoizar el valor, separar contextos por frecuencia de cambio, mantener Context para datos poco cambiantes."
+      - "Para estado global muy cambiante, una librería con suscripciones selectivas."
+summary:
+  - "useMemo cachea un cálculo; useCallback cachea una función; memo saltea el render si las props no cambiaron."
+  - "Memoizar tiene costo: se justifica con cálculos caros medidos o para que memo y los efectos funcionen."
+  - "El React Compiler memoiza automáticamente componentes y valores; reduce la necesidad de hacerlo a mano."
+  - "useRef guarda un valor mutable que sobrevive entre renders sin dispararlos; también referencia nodos del DOM."
+  - "Context evita el prop drilling para datos de un subárbol; cada cambio re-renderiza a todos sus consumidores."
+  - "Un custom hook es una función use... que combina hooks; comparte lógica, no estado."
+---
+
+## ¿Qué problema resuelve?
+
+Con el modelo de render de React, cada vez que un componente se renderiza se recalculan sus valores, se crean
+funciones nuevas y se re-renderizan sus hijos. Casi siempre eso es barato. A veces no: una tabla de 2.000 filas que
+se re-renderiza en cada tecla del buscador, o un cálculo de scoring que tarda 80 ms. Y hay lógica (suscripciones,
+formularios, temporizadores) que se repite en muchos componentes.
+
+Esta lección cubre las herramientas para esos casos y, sobre todo, **cuándo no usarlas**.
+
+## Memoización: useMemo, useCallback y memo
+
+```tsx
+// useMemo: cachea el RESULTADO de un cálculo mientras no cambien las dependencias
+const ranked = useMemo(() => rankDebtsByRecoveryScore(debts, weights), [debts, weights]);
+
+// useCallback: cachea una FUNCIÓN (misma referencia entre renders)
+const handleSelect = useCallback((id: string) => {
+  setSelectedIds((previous) => new Set(previous).add(id));
+}, []);
+
+// memo: saltea el render del componente si sus props son iguales (comparación superficial)
+const DebtRow = memo(function DebtRow({ debt, onSelect }: { debt: Debt; onSelect: (id: string) => void }) {
+  return <tr onClick={() => onSelect(debt.id)}>{/* ... */}</tr>;
+});
+```
+
+Estas herramientas trabajan juntas. `memo` compara las props con `Object.is`: si el padre pasa una función creada en
+cada render, la prop "cambió" y `memo` no sirve. Por eso `useCallback` sólo tiene sentido cuando la función va a un
+hijo memoizado o a las dependencias de un efecto.
+
+<MermaidDiagram
+  caption="memo saltea el render del hijo sólo si todas sus props mantienen la misma referencia."
+  chart={`
+flowchart TD
+  P["Padre se re-renderiza"] --> Q{"¿El hijo está envuelto en memo?"}
+  Q -->|"No"| R["El hijo se renderiza"]
+  Q -->|"Sí"| C{"¿Todas las props son iguales<br/>según Object.is?"}
+  C -->|"Sí"| S["Se saltea el render del hijo"]
+  C -->|"No: objeto o función nuevos"| R
+`}
+/>
+
+### Cuándo vale la pena
+
+- **Sí:** un cálculo medido como costoso (ordenar miles de elementos, scoring), listas grandes con filas
+  memoizadas, valores que son dependencias de efectos y que de otro modo cambiarían en cada render, el valor de un
+  Context.
+- **No:** cálculos triviales (`a + b`, un `filter` de 20 elementos), funciones que se pasan a elementos HTML nativos
+  (`<button onClick>` no es un componente memoizado).
+
+Memoizar no es gratis: agrega comparaciones, memoria y complejidad. **Medí primero** con el Profiler de React
+DevTools.
+
+### El React Compiler
+
+El **React Compiler** es una herramienta de build que analiza los componentes y **memoiza automáticamente** valores,
+funciones y JSX donde es seguro. En proyectos que lo usan, gran parte del `useMemo`, `useCallback` y `memo` manual
+deja de ser necesaria. Requiere que los componentes sigan las reglas de React (pureza, hooks en el nivel superior,
+no mutar props ni estado): otra razón para escribir componentes puros.
+
+## useRef: memoria sin renders y acceso al DOM
+
+`useRef` devuelve un objeto `{ current }` que **persiste entre renders**, y cuyo cambio **no dispara un render**.
+
+```tsx
+// 1. Referencia a un nodo del DOM
+function AmountInput() {
+  const inputRef = useRef<HTMLInputElement>(null);
+  return (
+    <>
+      <input ref={inputRef} type="number" />
+      <button type="button" onClick={() => inputRef.current?.focus()}>
+        Editar monto
+      </button>
+    </>
+  );
+}
+
+// 2. Valor mutable que no afecta lo que se ve
+function AutoSave({ draft }: { draft: string }) {
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  function scheduleSave(value: string) {
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => saveDraft(value), 800); // debounce
+  }
+  // ...
+}
+```
+
+| Necesitás...                                      | Usá        |
+| ------------------------------------------------- | ---------- |
+| Un valor que se muestra en pantalla               | `useState` |
+| Un valor que persiste pero no afecta lo que se ve | `useRef`   |
+| Acceso imperativo al DOM (foco, scroll, medidas)  | `useRef`   |
+
+Regla: **no leas ni escribas `ref.current` durante el render** (salvo para inicializarlo); hacelo en handlers o
+efectos. Si el valor afecta lo que se muestra, es estado.
+
+## Context: datos para todo un subárbol
+
+Context permite que un componente lea un valor de un ancestro sin recibirlo por props:
+
+```tsx
+interface TenantContextValue {
+  tenantId: string;
+  currency: "ARS" | "USD";
+  timezone: string;
+}
+
+const TenantContext = createContext<TenantContextValue | null>(null);
+
+export function TenantProvider({
+  value,
+  children,
+}: {
+  value: TenantContextValue;
+  children: React.ReactNode;
+}) {
+  return <TenantContext value={value}>{children}</TenantContext>;
+}
+
+/** Hook de acceso: falla rápido si se usa fuera del provider. */
+export function useTenant(): TenantContextValue {
+  const value = useContext(TenantContext);
+  if (!value) throw new Error("useTenant debe usarse dentro de TenantProvider");
+  return value;
+}
+```
+
+En React 19 el contexto se usa directamente como provider (`<TenantContext value={...}>`); en versiones
+anteriores se escribía `<TenantContext.Provider value={...}>`.
+
+### El costo de Context
+
+**Cada vez que cambia el valor del provider, se re-renderizan todos los componentes que lo consumen.** Dos
+consecuencias:
+
+1. Si el provider crea un objeto nuevo en cada render (`value={{ tenantId, currency }}`), todos los consumidores
+   se re-renderizan aunque los datos no hayan cambiado. Se memoiza el valor con `useMemo` (o lo hace el compiler).
+2. Mezclar datos que cambian mucho (el texto de un buscador) con datos estables (el tenant) en un mismo contexto
+   re-renderiza a todos por cada tecla. Se separan contextos por frecuencia de cambio.
+
+Context es ideal para datos **poco cambiantes y ampliamente usados**: tema, usuario, tenant, idioma, configuración.
+Para estado global muy dinámico, librerías con suscripciones selectivas (Zustand, Redux Toolkit, Jotai) son mejores;
+para datos del servidor, una librería de server state.
+
+## Custom hooks: reutilizar lógica con estado
+
+Un **custom hook** es una función cuyo nombre empieza con `use` y que usa otros hooks. Extrae lógica para
+reutilizarla y para dejar los componentes legibles:
+
+```tsx
+/** Valor que se actualiza sólo cuando el usuario deja de escribir durante `delayMs`. */
+export function useDebouncedValue<T>(value: T, delayMs: number): T {
+  const [debounced, setDebounced] = useState(value);
+
+  useEffect(() => {
+    const timer = setTimeout(() => setDebounced(value), delayMs);
+    return () => clearTimeout(timer);
+  }, [value, delayMs]);
+
+  return debounced;
+}
+
+function CustomerSearch() {
+  const [query, setQuery] = useState("");
+  const debouncedQuery = useDebouncedValue(query, 300);
+  const results = useCustomerSearch(debouncedQuery); // otro custom hook, por ejemplo con TanStack Query
+
+  return <input value={query} onChange={(e) => setQuery(e.target.value)} aria-label="Buscar cliente" />;
+}
+```
+
+Puntos clave:
+
+- **Comparten lógica, no estado:** cada componente que llama a `useDebouncedValue` tiene su propio estado.
+- Siguen las **reglas de los hooks** (nivel superior, sólo desde componentes o hooks).
+- Una buena API de hook devuelve lo que el componente necesita, con nombres claros, y oculta los detalles.
+- Se testean con `renderHook` de Testing Library.
+
+## Comparación con C# y Java
+
+| Concepto                    | Blazor / .NET                     | Java (UI)                    | React                  |
+| --------------------------- | --------------------------------- | ---------------------------- | ---------------------- |
+| Evitar renders innecesarios | `ShouldRender()`                  | No aplica                    | `memo`, React Compiler |
+| Cachear un cálculo          | `Lazy<T>`, campos calculados      | Campos calculados            | `useMemo`              |
+| Referencia a un elemento    | `@ref` / `ElementReference`       | `fx:id`, referencias a nodos | `useRef`               |
+| Datos para un subárbol      | `CascadingValue`, DI con scope    | DI, singletons               | Context                |
+| Reutilizar lógica           | Servicios inyectados, clases base | Clases helper, herencia      | Custom hooks           |
+
+## Errores frecuentes
+
+- **Memoizar todo por defecto.** Agrega complejidad sin beneficio medido.
+- **`useCallback` sin un hijo memoizado** que lo aproveche.
+- **Objetos y funciones literales como props de un componente memoizado**, que anulan `memo`.
+- **Usar refs para datos que se muestran**: la pantalla no se actualiza.
+- **Un único Context gigante** con datos de distinta frecuencia de cambio.
+- **Custom hooks que no usan hooks**: son funciones comunes; no les pongas `use`.
+
+## Ejercicio interactivo
+
+<KnowledgeCheck
+  id="react.memo-refs-context.q1"
+  question="`DebtRow` está envuelto en `memo`, pero el padre le pasa `onSelect={(id) => select(id)}`. ¿Se saltean los renders de las filas cuando el padre se re-renderiza?"
+  options={[
+    {
+      text: "Sí, memo compara el contenido de la función.",
+      explanation: "memo compara referencias con Object.is.",
+    },
+    {
+      text: "No: la arrow function es nueva en cada render y la prop cambia de referencia.",
+      correct: true,
+      explanation:
+        "Correcto. Hace falta useCallback para estabilizarla (o el React Compiler lo hace automáticamente).",
+    },
+    { text: "Sólo si la lista tiene keys.", explanation: "Las keys identifican filas, no evitan renders." },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="react.memo-refs-context.q2"
+  question="Necesitás guardar el ID de un `setInterval` para poder limpiarlo después. ¿Qué usás?"
+  options={[
+    { text: "useState", explanation: "Funciona, pero provoca renders innecesarios: el ID no se muestra." },
+    {
+      text: "useRef",
+      correct: true,
+      explanation: "Correcto. Persiste entre renders y cambiarlo no re-renderiza.",
+    },
+    {
+      text: "Una variable local del componente",
+      explanation: "Se pierde en cada render: cada render es una ejecución nueva.",
+    },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="react.memo-refs-context.q3"
+  question="Un provider pasa `value={{ user, theme }}` y todos los consumidores se re-renderizan en cada render del provider. ¿Por qué?"
+  options={[
+    {
+      text: "Porque Context siempre re-renderiza todo el árbol.",
+      explanation: "Sólo re-renderiza a los consumidores cuando el valor cambia.",
+    },
+    {
+      text: "Porque el objeto literal es nuevo en cada render y React lo considera un valor distinto.",
+      correct: true,
+      explanation: "Correcto. Memoizar el valor (useMemo) o separar contextos lo resuelve.",
+    },
+    {
+      text: "Porque user y theme son estados.",
+      explanation: "Ser estado no causa re-renders si el objeto del valor es estable.",
+    },
+  ]}
+/>

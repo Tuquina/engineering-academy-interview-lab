@@ -230,8 +230,8 @@ C# y Java, errores frecuentes, knowledge checks y preguntas de entrevista.
 | ------------------------ | --------- | ---------- |
 | TypeScript               | 11        | ✅ Tanda 1 |
 | Node.js                  | 9         | ✅ Tanda 2 |
-| React                    | 0         | Pendiente  |
-| Next.js                  | 0         | Pendiente  |
+| React                    | 7         | ✅ Tanda 3 |
+| Next.js                  | 5         | ✅ Tanda 3 |
 | LLMs y agentes de IA     | 0         | Pendiente  |
 | PostgreSQL               | 0         | Pendiente  |
 | Redis                    | 0         | Pendiente  |
@@ -240,6 +240,15 @@ C# y Java, errores frecuentes, knowledge checks y preguntas de entrevista.
 
 ### Implementado y verificado
 
+- **React (7 lecciones):** introducción (UI declarativa, JSX, props, estado, eventos, listas y keys), render y
+  commit, reconciliación y pureza, composición y lifting state, useState/useReducer/useEffect (y cuándo no usar
+  efectos), memoización, refs, Context y custom hooks, server state con TanStack Query, formularios, Actions de
+  React 19, Suspense y error boundaries, y calidad (Profiler, Testing Library, accesibilidad, XSS, arquitectura).
+- **Next.js (5 lecciones):** introducción y convenciones del App Router, routing (layouts, route groups, rutas
+  dinámicas, errores con `retry`), Server y Client Components (hidratación, streaming), datos (capa de acceso a
+  datos, `use cache`, `cacheLife`, `cacheTag`, `updateTag`, Server Actions, Route Handlers, `proxy`) y producción
+  (sesiones, protección en capas, metadata, imágenes, entorno, despliegue, instrumentation). Verificado contra la
+  documentación incluida en `next.4.6`.
 - **Node.js (9 lecciones):** introducción (qué es, LTS, Docker, `package.json`, npm y pnpm, ESM y CommonJS,
   `process`, módulos del núcleo, servidor con `node:http` y frameworks), event loop, streams y backpressure,
   thread pool, worker threads y memoria (GC, fugas), APIs por capas (REST, Problem Details, middleware,
@@ -272,9 +281,9 @@ C# y Java, errores frecuentes, knowledge checks y preguntas de entrevista.
 
 | Elemento                    | Actual                                       | Objetivo |
 | --------------------------- | -------------------------------------------- | -------- |
-| Lecciones sustantivas       | 20                                           | 40       |
+| Lecciones sustantivas       | 32                                           | 40       |
 | Challenges                  | 11 + 4 de arquitectura (+ 6 ejercicios SQL)  | 25       |
-| Preguntas de evaluación     | 60 knowledge checks + 27 del Interview Arena | 60 ✅    |
+| Preguntas de evaluación     | 96 knowledge checks + 27 del Interview Arena | 60 ✅    |
 | Flashcards                  | 32                                           | 30 ✅    |
 | Diagramas                   | 13 (10 interactivos + 1 flujo + 2 Mermaid)   | 12 ✅    |
 | Simuladores o laboratorios  | 9 (3 laboratorios + 6 simuladores)           | 5 ✅     |

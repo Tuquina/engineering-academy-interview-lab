@@ -10,6 +10,25 @@
   "tags": ["react", "hooks", "frontend"],
   "modules": [
     {
+      "id": "react.intro",
+      "slug": "introduccion",
+      "title": "Introducción",
+      "description": "Qué es React, la idea de UI declarativa y la sintaxis básica: componentes, JSX, props, estado, eventos, listas y renderizado condicional.",
+      "order": 0,
+      "topics": [
+        "Qué es React y qué problema resuelve",
+        "UI declarativa frente a manipulación del DOM",
+        "Crear un proyecto: Vite o Next.js",
+        "Componentes y JSX",
+        "Props",
+        "Estado con useState",
+        "Eventos",
+        "Renderizado condicional",
+        "Listas y keys",
+        "Estilos y estructura de archivos"
+      ]
+    },
+    {
       "id": "react.rendering",
       "slug": "componentes-y-renderizado",
       "title": "Componentes y renderizado",

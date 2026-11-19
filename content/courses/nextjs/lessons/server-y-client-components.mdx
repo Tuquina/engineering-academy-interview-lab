@@ -1,0 +1,334 @@
+---
+id: nextjs.server-client-components
+moduleId: nextjs.routing-rendering
+title: "Server Components y Client Components: renderizado, hidratación, streaming y Suspense"
+description: "El modelo central del App Router: qué es un React Server Component, qué hace 'use client' y dónde poner el límite, qué se puede pasar del servidor al cliente, cómo funcionan el prerenderizado, la hidratación y el streaming, y cómo se diseñan los estados de carga con Suspense y loading.tsx."
+difficulty: intermediate
+order: 2
+objectives:
+  - "Explicar qué es un Server Component y qué ventajas y limitaciones tiene."
+  - "Ubicar el límite 'use client' lo más abajo posible en el árbol."
+  - "Pasar datos y componentes del servidor al cliente respetando la serialización."
+  - "Describir el ciclo prerenderizado, hidratación y streaming."
+  - "Diseñar estados de carga con Suspense y loading.tsx, y evitar cascadas de requests."
+prerequisites: ["nextjs.routing", "react.data-forms"]
+estimatedMinutes: 45
+tags:
+  ["server components", "client components", "use client", "hidratación", "streaming", "suspense", "nextjs"]
+version: "1.0.0"
+comparesWith: ["csharp", "java"]
+references:
+  - title: "Next.js — Server and Client Components"
+    url: "https://nextjs.org/docs/app/getting-started/server-and-client-components"
+  - title: "React — Server Components"
+    url: "https://react.dev/reference/rsc/server-components"
+  - title: "React — 'use client'"
+    url: "https://react.dev/reference/rsc/use-client"
+  - title: "Next.js — loading.js"
+    url: "https://nextjs.org/docs/app/api-reference/file-conventions/loading"
+  - title: "Next.js — Fetching Data (streaming)"
+    url: "https://nextjs.org/docs/app/getting-started/fetching-data"
+interviewQuestions:
+  - question: "¿Qué diferencia hay entre un Server Component y un Client Component?"
+    keyPoints:
+      - "El Server Component se ejecuta sólo en el servidor: puede acceder a la base y a secretos, y su código no se envía al navegador."
+      - "No puede usar estado, efectos, event handlers ni APIs del navegador."
+      - "El Client Component se prerenderiza en el servidor y además se hidrata y ejecuta en el navegador; tiene interactividad."
+      - "'use client' marca el límite: ese archivo y todo lo que importa forman parte del bundle del cliente."
+  - question: "¿Qué es la hidratación y qué es un error de hidratación?"
+    keyPoints:
+      - "El HTML llega prerenderizado; la hidratación es cuando React en el navegador adjunta los event handlers y toma el control."
+      - "Requiere que el primer render del cliente coincida con el HTML del servidor."
+      - "Fechas, números aleatorios, window o datos distintos entre servidor y cliente provocan errores de hidratación."
+  - question: "¿Qué ventajas tiene el streaming con Suspense?"
+    keyPoints:
+      - "Se envía primero el shell con la UI lista y fallbacks para lo que tarda."
+      - "Cada sección llega cuando se resuelve, sin esperar a la más lenta."
+      - "Mejora el tiempo hasta el primer contenido visible y la percepción de velocidad."
+      - "Los límites de Suspense definen qué partes cargan de forma independiente."
+summary:
+  - "Server Components: corren en el servidor, acceden a datos directamente y no agregan JavaScript al cliente."
+  - "Client Components ('use client'): estado, efectos, eventos y APIs del navegador; se hidratan en el cliente."
+  - "El límite 'use client' va lo más abajo posible: hojas interactivas dentro de un árbol de servidor."
+  - "Del servidor al cliente sólo pasan props serializables; los Server Components pueden pasarse como children."
+  - "Prerenderizado → HTML; hidratación → interactividad; streaming → secciones que llegan a medida que se resuelven."
+  - "Suspense y loading.tsx declaran qué mostrar mientras se resuelven datos lentos."
+  - "Pedir datos en paralelo y cerca de donde se usan evita cascadas."
+---
+
+## ¿Qué problema resuelve?
+
+En una SPA tradicional, el navegador descarga una página vacía, descarga todo el JavaScript, lo ejecuta, recién
+entonces pide los datos a una API y finalmente muestra la pantalla. Cuatro viajes y mucho JavaScript antes de ver
+algo, y además hay que construir y proteger una API para cada dato que necesita la UI.
+
+**React Server Components** (RSC) cambian ese modelo: los componentes que sólo **muestran datos** se ejecutan en el
+servidor, cerca de la base, y envían el resultado ya renderizado. Sólo los componentes **interactivos** viajan al
+navegador como JavaScript.
+
+## Server Components
+
+```tsx
+// app/(app)/customers/[customerId]/page.tsx: Server Component (es el valor por defecto)
+import { db } from "@/infrastructure/db";
+
+export default async function CustomerPage({ params }: { params: Promise<{ customerId: string }> }) {
+  const { customerId } = await params;
+  const customer = await db.customers.findForCurrentTenant(customerId); // acceso directo, sin API intermedia
+
+  return (
+    <main>
+      <h1>{customer.name}</h1>
+      <DebtSummary customerId={customer.id} />
+      <ContactHistory customerId={customer.id} />
+    </main>
+  );
+}
+```
+
+| Pueden                                                 | No pueden                                             |
+| ------------------------------------------------------ | ----------------------------------------------------- |
+| Ser `async` y esperar datos                            | Usar `useState`, `useEffect` ni otros hooks de estado |
+| Acceder a la base, al sistema de archivos y a secretos | Tener event handlers (`onClick`)                      |
+| Usar librerías pesadas sin enviarlas al navegador      | Usar APIs del navegador (`window`, `localStorage`)    |
+| Renderizar Client Components                           |                                                       |
+
+Ventajas: **menos JavaScript** en el cliente, **datos cerca del origen** (menos latencia y sin endpoints extra) y
+**secretos seguros** (nunca salen del servidor).
+
+## Client Components y el límite "use client"
+
+`"use client"` al principio de un archivo marca un **límite**: ese módulo, y todo lo que importa, forma parte del
+bundle que se envía al navegador.
+
+```tsx
+"use client";
+
+import { useState } from "react";
+
+export function ContactNotes({ initialNotes }: { initialNotes: string }) {
+  const [notes, setNotes] = useState(initialNotes);
+  return (
+    <textarea value={notes} onChange={(e) => setNotes(e.target.value)} aria-label="Notas del contacto" />
+  );
+}
+```
+
+Los Client Components **también se prerenderizan en el servidor** para generar el HTML inicial. La diferencia es que
+además se **hidratan** y ejecutan en el navegador.
+
+<MermaidDiagram
+  caption="Un árbol mayormente de servidor con hojas interactivas: sólo las hojas marcadas con use client viajan al navegador."
+  chart={`
+flowchart TD
+  P["page.tsx<br/>Server"] --> H["CustomerHeader<br/>Server"]
+  P --> D["DebtSummary<br/>Server: consulta la base"]
+  P --> C["ContactHistory<br/>Server"]
+  D --> F["PromiseForm<br/>Client: use client"]
+  C --> N["ContactNotes<br/>Client: use client"]
+  H --> B["CallButton<br/>Client: use client"]
+`}
+/>
+
+**Regla de diseño:** el límite va **lo más abajo posible**. Si toda la página es cliente sólo porque tiene un botón
+interactivo, se pierde el beneficio. Se extrae el botón a un Client Component pequeño y el resto queda en el servidor.
+
+## Qué puede pasar del servidor al cliente
+
+Las props de un Client Component que recibe datos desde un Server Component **viajan por la red**, así que deben ser
+**serializables**: strings, números, booleanos, arrays, objetos planos, `Date`, `Map`, `Set`, Promises y JSX. No se
+pueden pasar funciones comunes ni instancias de clases con métodos (con la excepción de las Server Functions, que
+viajan como referencias invocables).
+
+```tsx
+// ❌ Una función común no es serializable
+<PromiseForm onSubmit={(data) => save(data)} />
+
+// ✅ Una Server Action sí puede pasarse (viaja como referencia a una función del servidor)
+<PromiseForm action={registerPromiseAction} />
+```
+
+Un patrón importante: un Client Component puede recibir **Server Components como `children`**. Así un contenedor
+interactivo (un panel desplegable, unas pestañas) puede envolver contenido renderizado en el servidor:
+
+```tsx
+// app/(app)/customers/[customerId]/page.tsx
+<CollapsiblePanel title="Historial de contactos">
+  {/* ContactHistory sigue siendo Server Component: llega ya renderizado */}
+  <ContactHistory customerId={customerId} />
+</CollapsiblePanel>
+```
+
+<Callout type="danger" title="Cuidado con lo que se envía al cliente">
+  Todo lo que se pasa como prop a un Client Component termina en el HTML y en el payload de la página. Si
+  pasás el objeto `customer` completo de la base, también viajan los campos internos. Pasá DTOs con lo
+  estrictamente necesario, y marcá los módulos con secretos con `import "server-only"` para que fallen si se
+  importan desde el cliente.
+</Callout>
+
+## Prerenderizado, hidratación y streaming
+
+<MermaidDiagram
+  caption="El servidor envía HTML que se ve de inmediato; las secciones lentas llegan después por streaming y React hidrata las partes interactivas."
+  chart={`
+sequenceDiagram
+  participant B as Navegador
+  participant S as Servidor Next.js
+  B->>S: GET /customers/42
+  S-->>B: HTML del shell + fallbacks de Suspense
+  Note over B: el usuario ya ve la página
+  S-->>B: HTML de DebtSummary (cuando se resuelve)
+  S-->>B: HTML de ContactHistory (cuando se resuelve)
+  B->>B: descarga el JS de los Client Components
+  B->>B: hidratación: los botones y formularios se vuelven interactivos
+`}
+/>
+
+1. **Prerenderizado:** el servidor genera HTML (en el build si la página es estática, o por request si es dinámica).
+2. **Streaming:** el HTML se envía **por partes**. Lo que está listo sale primero; lo que espera datos se reemplaza
+   por su fallback y llega cuando se resuelve.
+3. **Hidratación:** React en el navegador recorre el HTML existente, adjunta los event handlers y toma el control
+   de los Client Components.
+
+### Errores de hidratación
+
+La hidratación exige que **el primer render del cliente coincida con el HTML del servidor**. Si no coincide, React
+avisa con un error de hidratación. Causas típicas:
+
+- Fechas y horas formateadas con la zona horaria del navegador (`new Date().toLocaleString()`).
+- Valores aleatorios o `Date.now()` durante el render.
+- Leer `window` o `localStorage` durante el render.
+- HTML inválido (un `div` dentro de un `p`).
+
+Soluciones: calcular esos valores en el servidor y pasarlos como props, leer APIs del navegador en un efecto, o
+renderizar esa parte sólo en el cliente. Esta plataforma, por ejemplo, guarda el progreso en `localStorage` y lo lee
+después de hidratar, mostrando un estado neutro en el HTML inicial.
+
+## Suspense y loading.tsx
+
+En un Server Component `async`, cada `await` puede demorar la página entera. **Suspense** permite que cada sección
+cargue de forma independiente:
+
+```tsx
+import { Suspense } from "react";
+
+export default async function CustomerPage({ params }: { params: Promise<{ customerId: string }> }) {
+  const { customerId } = await params;
+  return (
+    <main>
+      <CustomerHeader customerId={customerId} /> {/* rápido */}
+      <Suspense fallback={<DebtSummarySkeleton />}>
+        <DebtSummary customerId={customerId} /> {/* consulta pesada: no bloquea al resto */}
+      </Suspense>
+      <Suspense fallback={<ContactHistorySkeleton />}>
+        <ContactHistory customerId={customerId} /> {/* depende de un servicio externo lento */}
+      </Suspense>
+    </main>
+  );
+}
+```
+
+`loading.tsx` es un atajo: envuelve automáticamente la página del segmento en un Suspense con ese archivo como
+fallback, y se muestra al instante al navegar.
+
+### Evitar cascadas
+
+```tsx
+// ❌ Cascada: la segunda consulta empieza cuando termina la primera
+const customer = await getCustomer(id);
+const debts = await getDebts(id);
+
+// ✅ En paralelo
+const [customer, debts] = await Promise.all([getCustomer(id), getDebts(id)]);
+
+// ✅ O mejor: cada componente pide lo suyo dentro de su propio Suspense
+```
+
+Un patrón útil es **iniciar** la Promise en el componente padre y pasarla a un hijo que la lee con `use(promise)`
+dentro de un Suspense: la request empieza antes y no bloquea al padre.
+
+## Comparación con C# y Java
+
+| Concepto               | ASP.NET Core / Blazor                          | Java                        | Next.js + RSC                |
+| ---------------------- | ---------------------------------------------- | --------------------------- | ---------------------------- |
+| Render en servidor     | Razor, Blazor SSR estático                     | Thymeleaf, JSP              | Server Components            |
+| Interactividad         | Blazor Server (SignalR) / WebAssembly          | JavaScript aparte           | Client Components hidratados |
+| Mezclar por componente | Modos de render por componente (`@rendermode`) | No nativo                   | Límite `"use client"`        |
+| Streaming              | Streaming rendering de Blazor                  | Respuestas chunked manuales | Suspense + streaming         |
+
+Blazor en .NET 8+ con modos de render por componente es probablemente la analogía más cercana: páginas en servidor
+con islas interactivas. La diferencia es que en RSC los componentes interactivos se ejecutan en el navegador (no
+por una conexión persistente al servidor como Blazor Server).
+
+## Errores frecuentes
+
+- **`"use client"` en la página o el layout** por un detalle interactivo.
+- **Pasar objetos completos de la base** a Client Components.
+- **Importar código con secretos** en un archivo que termina en el bundle del cliente.
+- **Cascadas de `await`** en lugar de pedir en paralelo o con Suspense.
+- **Un único `loading.tsx`** cuando partes de la página podrían mostrarse antes.
+- **Valores no deterministas en el render** que causan errores de hidratación.
+
+## Ejercicio interactivo
+
+<KnowledgeCheck
+  id="nextjs.server-client-components.q1"
+  question="Una página de cliente es un Server Component y tiene un único botón 'Llamar' con un onClick. ¿Cómo la estructurás?"
+  options={[
+    {
+      text: "Agregar 'use client' a la página.",
+      explanation: "Toda la página pasaría al bundle del cliente y perdería el acceso directo a datos.",
+    },
+    {
+      text: "Extraer el botón a un Client Component pequeño y dejar la página en el servidor.",
+      correct: true,
+      explanation: "Correcto. El límite 'use client' va lo más abajo posible.",
+    },
+    {
+      text: "Mover toda la lógica a un useEffect.",
+      explanation: "No hace falta ningún efecto para un botón.",
+    },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="nextjs.server-client-components.q2"
+  question="Un Client Component muestra `new Date().toLocaleTimeString()` durante el render y aparece un error de hidratación. ¿Por qué?"
+  options={[
+    {
+      text: "Porque Date no existe en el servidor.",
+      explanation: "Existe; el problema es que el valor difiere.",
+    },
+    {
+      text: "Porque la hora (y la zona horaria) difieren entre el render del servidor y el primer render del cliente.",
+      correct: true,
+      explanation:
+        "Correcto. Se pasa la hora desde el servidor, se formatea con una zona fija o se calcula después de hidratar.",
+    },
+    {
+      text: "Porque los Client Components no se prerenderizan.",
+      explanation: "Sí se prerenderizan; por eso el HTML debe coincidir.",
+    },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="nextjs.server-client-components.q3"
+  question="Una página tiene una sección rápida y otra que tarda 3 segundos por un servicio externo. ¿Qué mejora la experiencia?"
+  options={[
+    {
+      text: "Hacer las dos consultas en serie dentro de la página.",
+      explanation: "La página entera esperaría 3 segundos.",
+    },
+    {
+      text: "Envolver la sección lenta en un Suspense con un esqueleto.",
+      correct: true,
+      explanation:
+        "Correcto. Con streaming, la sección rápida se ve al instante y la lenta llega cuando se resuelve.",
+    },
+    {
+      text: "Convertir la página en Client Component y cargar todo con useEffect.",
+      explanation: "Agrega viajes de red y JavaScript; empeora la experiencia.",
+    },
+  ]}
+/>
