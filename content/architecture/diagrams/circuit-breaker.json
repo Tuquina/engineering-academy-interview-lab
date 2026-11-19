@@ -1,0 +1,139 @@
+{
+  "id": "circuit-breaker",
+  "title": "Circuit Breaker: estados y transiciones",
+  "description": "Un servicio llama a un proveedor externo a través de un circuit breaker. La máquina de estados decide si dejar pasar la llamada, fallar rápido o probar si el proveedor se recuperó.",
+  "kind": "architecture",
+  "tags": ["circuit breaker", "resiliencia", "máquina de estados"],
+  "nodes": [
+    {
+      "id": "caller",
+      "label": "Servicio de contactos",
+      "kind": "service",
+      "column": 0,
+      "row": 1,
+      "responsibility": "Necesita enviar mensajes por el proveedor. Debe seguir respondiendo aunque el proveedor esté caído.",
+      "examples": ["sendMessage(debtor, template)"]
+    },
+    {
+      "id": "breaker",
+      "label": "Circuit breaker",
+      "kind": "adapter",
+      "column": 1,
+      "row": 1,
+      "responsibility": "Envuelve la llamada: mide fallas y, según el estado, deja pasar, rechaza de inmediato o permite una prueba.",
+      "examples": ["breaker.execute(() => provider.send(msg))", "Una instancia por dependencia externa"]
+    },
+    {
+      "id": "provider",
+      "label": "Proveedor de mensajería",
+      "kind": "external",
+      "column": 3,
+      "row": 1,
+      "responsibility": "Dependencia lenta o caída a veces. Sin breaker, cada llamada espera el timeout completo y consume recursos.",
+      "examples": ["API de WhatsApp Business"]
+    },
+    {
+      "id": "fallback",
+      "label": "Fallback",
+      "kind": "queue",
+      "column": 1,
+      "row": 2,
+      "responsibility": "Qué hacer cuando el circuito está abierto: encolar para más tarde, usar otro canal o informar el error claramente.",
+      "examples": ["Encolar el mensaje para reintentar", "Cambiar a SMS"]
+    },
+    {
+      "id": "closed",
+      "label": "Cerrado",
+      "kind": "domain",
+      "column": 2,
+      "row": 0,
+      "responsibility": "Estado normal: las llamadas pasan y se cuentan las fallas en una ventana.",
+      "examples": ["Abre si falla el 50% de las últimas 20 llamadas"]
+    },
+    {
+      "id": "open",
+      "label": "Abierto",
+      "kind": "domain",
+      "column": 3,
+      "row": 0,
+      "responsibility": "Las llamadas fallan de inmediato sin tocar al proveedor, durante un tiempo de espera.",
+      "examples": ["Rechaza por 30 s"]
+    },
+    {
+      "id": "half-open",
+      "label": "Semiabierto",
+      "kind": "domain",
+      "column": 4,
+      "row": 0,
+      "responsibility": "Pasado el tiempo de espera, deja pasar unas pocas llamadas de prueba. Si salen bien cierra; si fallan vuelve a abrir.",
+      "examples": ["1 a 3 llamadas de prueba"]
+    }
+  ],
+  "edges": [
+    { "id": "c-caller-breaker", "from": "caller", "to": "breaker", "kind": "sync" },
+    {
+      "id": "c-breaker-provider",
+      "from": "breaker",
+      "to": "provider",
+      "kind": "sync",
+      "label": "si no está abierto"
+    },
+    {
+      "id": "c-breaker-fallback",
+      "from": "breaker",
+      "to": "fallback",
+      "kind": "sync",
+      "label": "si está abierto"
+    },
+    {
+      "id": "c-closed-open",
+      "from": "closed",
+      "to": "open",
+      "kind": "dependency",
+      "label": "umbral de fallas"
+    },
+    {
+      "id": "c-open-half",
+      "from": "open",
+      "to": "half-open",
+      "kind": "dependency",
+      "label": "pasa el tiempo"
+    },
+    {
+      "id": "c-half-closed",
+      "from": "half-open",
+      "to": "closed",
+      "kind": "dependency",
+      "label": "prueba exitosa"
+    },
+    {
+      "id": "c-half-open",
+      "from": "half-open",
+      "to": "open",
+      "kind": "dependency",
+      "label": "prueba fallida"
+    }
+  ],
+  "steps": [
+    {
+      "title": "1. Cerrado: las llamadas pasan",
+      "description": "El breaker deja pasar y mide. Una falla aislada no cambia nada.",
+      "highlight": ["caller", "breaker", "provider", "closed", "c-caller-breaker", "c-breaker-provider"]
+    },
+    {
+      "title": "2. Se supera el umbral: abre",
+      "description": "Con muchas fallas seguidas, insistir sólo agrega carga a un proveedor que no responde y bloquea recursos propios esperando timeouts.",
+      "highlight": ["closed", "open", "c-closed-open"]
+    },
+    {
+      "title": "3. Abierto: fallar rápido",
+      "description": "Las llamadas se rechazan al instante y se usa el fallback. El servicio sigue respondiendo con latencia baja.",
+      "highlight": ["breaker", "fallback", "open", "c-breaker-fallback"]
+    },
+    {
+      "title": "4. Semiabierto: probar con cuidado",
+      "description": "Pasado el tiempo de espera, unas pocas llamadas de prueba deciden si cerrar o volver a abrir.",
+      "highlight": ["open", "half-open", "closed", "c-open-half", "c-half-closed", "c-half-open"]
+    }
+  ]
+}

@@ -1,0 +1,141 @@
+---
+id: pattern.circuit-breaker
+kind: architecture
+category: resilience
+title: "Circuit Breaker"
+summary: "Dejar de llamar a una dependencia que está fallando para fallar rápido y darle tiempo a recuperarse."
+difficulty: intermediate
+order: 140
+definition: "Un circuit breaker envuelve las llamadas a una dependencia y cuenta sus fallas. Cuando superan un umbral, se abre: las llamadas fallan de inmediato sin tocar la dependencia durante un tiempo. Después pasa a semiabierto y deja pasar algunas llamadas de prueba para decidir si vuelve a cerrarse."
+problem: "Cuando una dependencia externa se degrada, cada llamada espera el timeout completo. Los recursos propios (conexiones, workers, memoria) se agotan esperando, la latencia sube para todos los usuarios y los reintentos agregan más carga a la dependencia que ya está caída: una falla local se convierte en una caída en cascada."
+benefits:
+  - "Falla rápido: la latencia se mantiene baja aunque la dependencia esté caída."
+  - "Protege recursos propios de quedar bloqueados esperando timeouts."
+  - "Reduce la carga sobre la dependencia para que pueda recuperarse."
+  - "Hace visible el estado de la dependencia (métricas de apertura)."
+costs:
+  - "Elegir umbrales y tiempos requiere datos reales; mal ajustado, abre de más o de menos."
+  - "Con varias réplicas, cada una tiene su propio estado salvo que se comparta."
+  - "Necesita un fallback con sentido de negocio; fallar rápido no alcanza por sí solo."
+alternatives:
+  - name: "Timeouts y reintentos con backoff"
+    when: "Para fallas transitorias y breves. Son complementarios: el breaker evita que los reintentos martillen a una dependencia caída."
+  - name: "Bulkhead"
+    when: "Aislar recursos (pools de conexiones separados por dependencia) para que una dependencia lenta no consuma los recursos de las demás."
+commonMistakes:
+  - "Contar como fallas los errores del cliente (400, 404) que no indican un problema de la dependencia."
+  - "No definir un fallback y propagar el error abierto como un 500 genérico."
+  - "Usar un único breaker para dependencias distintas."
+  - "Reintentar dentro del breaker sin límite, anulando su efecto."
+avoidWhen:
+  - "Llamadas a recursos locales y confiables donde una falla indica un bug, no una degradación."
+  - "Operaciones en las que no existe ningún comportamiento alternativo útil y el proceso es batch sin usuarios esperando."
+interviewQuestions:
+  - question: "¿Qué diferencia hay entre un circuit breaker y un retry?"
+    answer: "El retry asume que la falla es transitoria e insiste; el breaker detecta que la falla es persistente y deja de insistir. Se usan juntos: reintentos acotados con backoff para fallas puntuales, y el breaker por fuera para cortar cuando la tasa de fallas indica una caída."
+  - question: "¿Qué fallback usarías si el proveedor de mensajería está caído?"
+    answer: "Depende del negocio: encolar el mensaje para reintentar más tarde respetando las ventanas horarias, cambiar a otro canal permitido (SMS o email) o marcar el contacto como pendiente y no contarlo como gestión fallida. Lo importante es que la decisión sea explícita y no un error genérico."
+diagrams: ["circuit-breaker"]
+related: ["decorator", "saga"]
+relatedLessons: ["nodejs.event-loop"]
+tags: ["circuit breaker", "resiliencia", "timeouts", "fallback"]
+---
+
+## Motivación
+
+El servicio de contactos envía miles de mensajes por hora a través de un proveedor externo. Cuando el proveedor se
+degrada, cada envío espera 10 segundos de timeout; los workers quedan bloqueados, la cola crece y los demás
+canales, que funcionan bien, dejan de procesarse.
+
+## Ejemplo incorrecto
+
+```ts
+export async function send(message: Message) {
+  for (let attempt = 1; attempt <= 5; attempt++) {
+    try {
+      return await provider.send(message, { timeoutMs: 10_000 });
+    } catch {
+      // Con el proveedor caído: 5 intentos × 10 s = 50 s bloqueados por mensaje,
+      // y cinco veces más carga sobre un proveedor que ya no responde.
+    }
+  }
+  throw new Error("No se pudo enviar");
+}
+```
+
+## Implementación correcta
+
+```ts
+type BreakerState =
+  | { kind: "closed"; failures: number }
+  | { kind: "open"; until: number }
+  | { kind: "half-open"; inFlight: boolean };
+
+export class CircuitOpenError extends Error {}
+
+export class CircuitBreaker {
+  private state: BreakerState = { kind: "closed", failures: 0 };
+
+  constructor(
+    private readonly options: { failureThreshold: number; openMs: number },
+    private readonly now: () => number = Date.now,
+  ) {}
+
+  async execute<T>(operation: () => Promise<T>): Promise<T> {
+    if (this.state.kind === "open") {
+      if (this.now() < this.state.until) throw new CircuitOpenError("Circuito abierto");
+      this.state = { kind: "half-open", inFlight: false };
+    }
+    if (this.state.kind === "half-open") {
+      if (this.state.inFlight) throw new CircuitOpenError("Prueba en curso");
+      this.state.inFlight = true;
+    }
+    try {
+      const result = await operation();
+      this.state = { kind: "closed", failures: 0 };
+      return result;
+    } catch (error) {
+      this.recordFailure();
+      throw error;
+    }
+  }
+
+  private recordFailure() {
+    const failures = this.state.kind === "closed" ? this.state.failures + 1 : this.options.failureThreshold;
+    this.state =
+      failures >= this.options.failureThreshold
+        ? { kind: "open", until: this.now() + this.options.openMs }
+        : { kind: "closed", failures };
+  }
+}
+
+// Uso: un breaker por dependencia y un fallback de negocio
+const whatsappBreaker = new CircuitBreaker({ failureThreshold: 5, openMs: 30_000 });
+
+export async function send(message: Message): Promise<"sent" | "deferred"> {
+  try {
+    await whatsappBreaker.execute(() => provider.send(message, { timeoutMs: 3_000 }));
+    return "sent";
+  } catch {
+    await retryQueue.enqueue(message, { notBefore: Date.now() + 60_000 }); // se reintenta más tarde
+    return "deferred";
+  }
+}
+```
+
+Esta versión cuenta fallas consecutivas; las implementaciones de producción suelen usar una ventana deslizante
+(porcentaje de fallas en las últimas N llamadas) y un mínimo de llamadas antes de abrir.
+
+## Ejercicio
+
+El proveedor responde `400 Bad Request` cuando el número de teléfono es inválido. ¿Debe contar como falla para el
+breaker? ¿Y un `429 Too Many Requests`?
+
+<Reveal>
+
+Un `400` por un dato inválido no indica que el proveedor esté degradado: es un error de ese mensaje y no debe
+abrir el circuito (de lo contrario, unos pocos números mal cargados cortarían todos los envíos). Un `429` sí indica
+presión sobre la dependencia: debe contar, o mejor aún, respetar el header `Retry-After` y reducir el ritmo de
+envío. En el código, `execute` debería recibir un predicado que decida qué errores cuentan.
+
+</Reveal>

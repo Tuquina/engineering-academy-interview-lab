@@ -1,0 +1,35 @@
+import {
+  Activity,
+  Archive,
+  Bot,
+  CalendarClock,
+  Cog,
+  Database,
+  Globe,
+  Inbox,
+  Monitor,
+  Server,
+  Split,
+  Waypoints,
+  Webhook,
+  Zap,
+  type LucideIcon,
+} from "lucide-react";
+import type { ComponentType } from "../domain/canvas";
+
+export const COMPONENT_ICONS: Readonly<Record<ComponentType, LucideIcon>> = {
+  "web-client": Monitor,
+  "api-gateway": Waypoints,
+  "load-balancer": Split,
+  service: Server,
+  postgres: Database,
+  redis: Zap,
+  queue: Inbox,
+  worker: Cog,
+  "external-api": Globe,
+  "object-storage": Archive,
+  observability: Activity,
+  "llm-provider": Bot,
+  "webhook-endpoint": Webhook,
+  scheduler: CalendarClock,
+};

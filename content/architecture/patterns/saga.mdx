@@ -1,0 +1,117 @@
+---
+id: pattern.saga
+kind: architecture
+category: distributed-data
+title: "Saga"
+summary: "Coordinar una operación que abarca varios servicios con pasos locales y compensaciones en lugar de una transacción distribuida."
+difficulty: advanced
+order: 120
+definition: "Una saga divide una operación de negocio que abarca varios servicios en una secuencia de transacciones locales. Cada paso tiene una compensación: una acción semántica que deshace su efecto. Si un paso falla, se ejecutan las compensaciones de los pasos ya completados. Puede coordinarse con un orquestador central o por coreografía (cada servicio reacciona a eventos del anterior)."
+problem: "Una operación de negocio necesita modificar datos en varios servicios, cada uno con su base. No hay transacción ACID que los abarque, y los protocolos de commit en dos fases son frágiles y poco soportados. Sin un mecanismo explícito, una falla a mitad de camino deja el sistema en un estado inconsistente."
+benefits:
+  - "Mantiene la consistencia de negocio sin transacciones distribuidas."
+  - "Cada servicio conserva su autonomía y su base."
+  - "El estado de la saga deja un registro auditable de qué ocurrió."
+costs:
+  - "Los estados intermedios son visibles: otros pueden ver un plan pendiente que luego se cancela."
+  - "Diseñar compensaciones correctas es difícil; algunas acciones no se pueden deshacer (un mensaje enviado)."
+  - "Requiere idempotencia en cada paso y compensación, porque todo se reintenta."
+alternatives:
+  - name: "Una transacción local"
+    when: "Si los datos pueden vivir en el mismo servicio y la misma base, una transacción es mucho más simple. A veces la mejor solución es revisar los límites entre servicios."
+  - name: "Coreografía con eventos"
+    when: "Con pocos pasos y servicios poco acoplados, cada servicio reacciona a eventos sin un orquestador. Con muchos pasos, el flujo se vuelve difícil de seguir."
+commonMistakes:
+  - "No persistir el estado de la saga y perder el progreso si el orquestador se reinicia."
+  - "Compensaciones no idempotentes que fallan al reintentarse."
+  - "Poner al final los pasos no compensables (enviar un mensaje) en lugar de después de los pasos que pueden fallar."
+  - "Ignorar que los estados intermedios son visibles para otros procesos."
+avoidWhen:
+  - "Todos los datos pueden modificarse en una sola transacción local."
+  - "La inconsistencia temporal no es aceptable para el negocio y no se puede rediseñar el flujo."
+interviewQuestions:
+  - question: "¿Orquestación o coreografía?"
+    answer: "La orquestación centraliza el flujo en un componente que se puede leer, monitorear y modificar en un lugar; agrega un punto de coordinación. La coreografía desacopla más, pero el flujo queda implícito en las suscripciones de cada servicio y es difícil de seguir con más de tres o cuatro pasos. Para flujos de negocio con compensaciones, la orquestación suele ser más mantenible."
+  - question: "¿Qué hacés con un paso que no se puede compensar?"
+    answer: "Se ubica lo más tarde posible, cuando los pasos que pueden fallar ya se completaron (pivote de la saga). Si aun así hay que revertir, la compensación es semántica: enviar un segundo mensaje de corrección, emitir una nota de crédito, en lugar de 'deshacer'."
+  - question: "¿Cómo garantizás que un paso no se ejecute dos veces?"
+    answer: "Cada llamada lleva una clave de idempotencia derivada de la saga y el paso (sagaId + nombre del paso), y el servicio que la recibe guarda el resultado asociado a esa clave para devolverlo si llega repetida."
+diagrams: ["saga"]
+related: ["transactional-outbox", "circuit-breaker"]
+relatedLessons: []
+tags: ["saga", "compensación", "orquestación", "consistencia"]
+---
+
+## Motivación
+
+Acordar un plan de pagos requiere crear el plan (servicio de planes), cobrar la primera cuota (servicio de pagos)
+y enviar la confirmación (servicio de notificaciones). Si el cobro falla, el plan no debe quedar activo.
+
+## Ejemplo incorrecto
+
+```ts
+export async function createPaymentPlan(input: PlanInput) {
+  const plan = await plansApi.create(input); // servicio 1
+  await paymentsApi.charge(plan.firstInstallment); // servicio 2: si falla, el plan queda creado
+  await notificationsApi.sendConfirmation(plan.id); // servicio 3
+  return plan;
+}
+```
+
+Si el proceso cae después del paso 1, nadie sabe que hay un plan huérfano. Si `charge` falla por timeout, no se
+sabe si cobró o no, y reintentarlo puede cobrar dos veces.
+
+## Implementación correcta
+
+```ts
+type Step = "create-plan" | "charge" | "confirm" | "done" | "compensating" | "failed";
+
+interface PlanSaga {
+  id: string;
+  step: Step;
+  planId?: string;
+  chargeId?: string;
+}
+
+export async function advance(saga: PlanSaga, deps: SagaDeps): Promise<PlanSaga> {
+  const key = (step: string) => `${saga.id}:${step}`; // idempotencia por saga y paso
+  switch (saga.step) {
+    case "create-plan": {
+      const plan = await deps.plans.createPending(saga.id, key("create-plan"));
+      return deps.store.save({ ...saga, planId: plan.id, step: "charge" });
+    }
+    case "charge": {
+      const result = await deps.payments.charge(saga.planId!, key("charge"));
+      if (result.status === "declined") return deps.store.save({ ...saga, step: "compensating" });
+      await deps.plans.activate(saga.planId!, key("activate"));
+      return deps.store.save({ ...saga, chargeId: result.chargeId, step: "confirm" });
+    }
+    case "confirm": {
+      await deps.notifications.planConfirmed(saga.planId!, key("confirm")); // no compensable: va al final
+      return deps.store.save({ ...saga, step: "done" });
+    }
+    case "compensating": {
+      await deps.plans.cancel(saga.planId!, key("cancel-plan"));
+      return deps.store.save({ ...saga, step: "failed" });
+    }
+    default:
+      return saga;
+  }
+}
+```
+
+Un worker llama a `advance` hasta llegar a `done` o `failed`. Como el estado se persiste después de cada paso y
+cada llamada es idempotente, se puede reintentar tras una caída sin repetir efectos.
+
+## Ejercicio
+
+El cobro responde con timeout: no sabés si se cobró. ¿Qué hace la saga?
+
+<Reveal>
+
+No compensa a ciegas ni cobra de nuevo con otra clave. Reintenta `charge` con **la misma clave de idempotencia**:
+si el cobro se había hecho, el servicio de pagos devuelve el resultado original; si no, lo ejecuta. Si el servicio
+sigue sin responder, la saga queda en `charge` con reintentos con backoff y, pasado un límite, pasa a revisión
+manual con alerta. Nunca se asume el resultado de una operación que terminó con timeout.
+
+</Reveal>

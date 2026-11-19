@@ -1,0 +1,124 @@
+---
+id: pattern.transactional-outbox
+kind: architecture
+category: integration
+title: "Transactional Outbox"
+summary: "Guardar el cambio de negocio y el evento a publicar en la misma transacción local, y publicar después."
+difficulty: advanced
+order: 130
+definition: "El patrón Outbox resuelve la escritura doble entre una base de datos y un broker: el servicio inserta el evento en una tabla outbox dentro de la misma transacción que el cambio de negocio, y un proceso separado (relay) lo publica al broker. Combinado con consumidores idempotentes (inbox), logra que cada evento tenga efecto exactamente una vez."
+problem: "Guardar en la base y publicar un evento son dos operaciones en sistemas distintos. Si el proceso falla entre ambas, o una de ellas falla, el sistema queda inconsistente: un pago registrado que nadie se entera, o un evento anunciado de un pago que nunca se guardó."
+benefits:
+  - "Atomicidad entre el cambio de negocio y el evento usando sólo transacciones locales."
+  - "Ningún evento se pierde aunque el broker esté caído: queda en la outbox hasta publicarse."
+  - "La outbox sirve como registro auditable de los eventos emitidos."
+costs:
+  - "Entrega al menos una vez: los consumidores deben ser idempotentes."
+  - "Un componente más (relay o CDC) que operar y monitorear."
+  - "Latencia adicional entre el cambio y la publicación."
+  - "La tabla outbox crece y requiere limpieza."
+alternatives:
+  - name: "Change Data Capture"
+    when: "Leer el log de la base (WAL) en lugar de hacer polling sobre la outbox: menos latencia y menos carga, más infraestructura."
+  - name: "Publicar sólo después del commit y aceptar pérdidas"
+    when: "Para eventos no críticos (métricas, notificaciones opcionales) donde perder uno ocasionalmente es aceptable."
+commonMistakes:
+  - "Publicar al broker dentro de la transacción de base: si el commit falla, el evento ya salió."
+  - "Asumir exactamente una vez sin hacer idempotentes a los consumidores."
+  - "Un relay sin bloqueo que, con varias réplicas, publica cada evento varias veces."
+  - "No monitorear la antigüedad del evento pendiente más viejo."
+avoidWhen:
+  - "No hay broker ni consumidores externos: un evento en proceso dentro de la misma transacción alcanza."
+  - "Los eventos son puramente informativos y su pérdida ocasional no tiene impacto."
+interviewQuestions:
+  - question: "¿Qué problema resuelve el patrón Outbox?"
+    answer: "La escritura doble: no se puede actualizar una base y publicar en un broker de forma atómica. Outbox convierte la publicación en una escritura más dentro de la transacción local, y un relay publica después. El resultado es entrega al menos una vez, que con consumidores idempotentes se vuelve efecto exactamente una vez."
+  - question: "¿Cómo escalás el relay a varias réplicas sin duplicar trabajo?"
+    answer: "Con SELECT ... FOR UPDATE SKIP LOCKED sobre lotes de eventos pendientes: cada réplica toma filas distintas. Si el orden por entidad importa, se particiona por clave (por ejemplo, debtId) y cada partición la procesa un único relay a la vez."
+  - question: "¿Qué es el patrón Inbox?"
+    answer: "Es el complemento del lado del consumidor: una tabla con los IDs de eventos ya procesados. El consumidor inserta el ID en la misma transacción que su efecto; si el ID ya existe, descarta el evento. Así un duplicado no produce un segundo efecto."
+diagrams: ["transactional-outbox", "event-driven"]
+related: ["saga", "cqrs"]
+relatedLessons: []
+tags: ["outbox", "inbox", "eventos", "idempotencia", "dual write"]
+---
+
+## Motivación
+
+Cuando se registra un pago, el servicio de campañas debe cancelar los contactos programados para ese deudor. Si el
+evento `PaymentRegistered` se pierde, la persona que ya pagó sigue recibiendo mensajes de cobranza: un problema
+legal y reputacional, no sólo técnico.
+
+## Ejemplo incorrecto
+
+```ts
+export async function registerPayment(db: Db, broker: Broker, payment: NewPayment) {
+  await db.transaction(async (tx) => {
+    await tx.insert(payments).values(payment);
+    // Si el broker publica y luego el commit falla, se anunció un pago inexistente.
+    await broker.publish("payments", { type: "PaymentRegistered", ...payment });
+  });
+  // Y si se publica después del commit y el proceso cae justo antes, el evento se pierde.
+}
+```
+
+## Implementación correcta
+
+```ts
+// 1. Una sola transacción local
+export async function registerPayment(db: Db, payment: NewPayment) {
+  await db.transaction(async (tx) => {
+    await tx.insert(payments).values(payment);
+    await tx.insert(outbox).values({
+      id: crypto.randomUUID(),
+      type: "PaymentRegistered",
+      aggregateId: payment.debtId,
+      payload: payment,
+    });
+  });
+}
+
+// 2. Relay: publica pendientes; varias réplicas pueden correr a la vez
+export async function relayOnce(db: Db, broker: Broker, batchSize = 100) {
+  await db.transaction(async (tx) => {
+    const pending = await tx.execute(sql`
+      SELECT id, type, aggregate_id, payload FROM outbox
+      WHERE published_at IS NULL ORDER BY created_at
+      LIMIT ${batchSize} FOR UPDATE SKIP LOCKED`);
+    for (const event of pending) {
+      await broker.publish("payments", { eventId: event.id, type: event.type, payload: event.payload });
+    }
+    if (pending.length > 0) {
+      await tx.execute(
+        sql`UPDATE outbox SET published_at = now() WHERE id = ANY(${pending.map((e) => e.id)})`,
+      );
+    }
+  });
+}
+
+// 3. Consumidor idempotente (inbox)
+export async function onPaymentRegistered(db: Db, message: { eventId: string; payload: NewPayment }) {
+  await db.transaction(async (tx) => {
+    const inserted = await tx.execute(sql`
+      INSERT INTO inbox (event_id) VALUES (${message.eventId}) ON CONFLICT DO NOTHING RETURNING event_id`);
+    if (inserted.length === 0) return; // duplicado: ya se procesó
+    await tx.execute(sql`UPDATE scheduled_contacts SET status = 'cancelled'
+                         WHERE debt_id = ${message.payload.debtId} AND status = 'pending'`);
+  });
+}
+```
+
+Si el relay cae después de publicar y antes de marcar, el evento se publica de nuevo; la inbox lo descarta.
+
+## Ejercicio
+
+¿Qué métrica pondrías en una alerta para saber que el outbox dejó de funcionar, antes de que un usuario lo note?
+
+<Reveal>
+
+La antigüedad del evento pendiente más viejo: `now() - min(created_at) WHERE published_at IS NULL`. Contar
+pendientes no alcanza (puede haber muchos en un pico y estar bien); que el más viejo tenga varios minutos indica
+que el relay está caído o bloqueado. Del lado del consumidor, el lag de la cola y la cantidad de mensajes en la DLQ
+completan el panorama.
+
+</Reveal>

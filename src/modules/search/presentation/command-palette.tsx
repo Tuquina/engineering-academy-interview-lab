@@ -1,6 +1,16 @@
 "use client";
 
-import { BookOpen, FileText, Hash, LayoutGrid, Map as MapIcon, Search, type LucideIcon } from "lucide-react";
+import {
+  BookOpen,
+  Dumbbell,
+  FileText,
+  Hash,
+  Layers,
+  LayoutGrid,
+  Map as MapIcon,
+  Search,
+  type LucideIcon,
+} from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { cn } from "@/shared/lib/cn";
@@ -13,6 +23,8 @@ const KIND_META: Readonly<Record<SearchEntryKind, { label: string; icon: LucideI
   course: { label: "Curso", icon: BookOpen },
   path: { label: "Ruta", icon: MapIcon },
   cheatsheet: { label: "Cheatsheet", icon: FileText },
+  pattern: { label: "Patrón", icon: Layers },
+  practice: { label: "Práctica", icon: Dumbbell },
 };
 
 /**
@@ -99,7 +111,7 @@ export function CommandPalette({ entries }: { entries: readonly SearchEntry[] })
             aria-controls={listId}
             aria-activedescendant={results[active] ? `${listId}-${active}` : undefined}
             aria-autocomplete="list"
-            aria-label="Buscar lecciones, secciones, cursos y cheatsheets"
+            aria-label="Buscar lecciones, patrones y prácticas"
             placeholder="Buscar lecciones, temas, cursos…"
             value={query}
             onChange={(event) => {
@@ -118,7 +130,7 @@ export function CommandPalette({ entries }: { entries: readonly SearchEntry[] })
           )}
           {query.trim() === "" && (
             <li className="text-muted px-3 py-6 text-center text-sm">
-              Escribí para buscar en lecciones, apartados, cursos, rutas y cheatsheets.
+              Escribí para buscar en lecciones, apartados, cursos, rutas, cheatsheets, patrones y prácticas.
             </li>
           )}
           {results.map((result, index) => {

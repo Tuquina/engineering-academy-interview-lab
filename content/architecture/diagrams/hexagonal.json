@@ -1,0 +1,175 @@
+{
+  "id": "hexagonal",
+  "title": "Arquitectura hexagonal (puertos y adaptadores)",
+  "description": "Un caso de uso de registro de pagos: los adaptadores traducen el mundo exterior hacia puertos definidos por la aplicación, y todas las dependencias de código apuntan hacia el núcleo.",
+  "kind": "architecture",
+  "tags": ["hexagonal", "puertos y adaptadores", "dependencias"],
+  "nodes": [
+    {
+      "id": "core",
+      "label": "Núcleo de la aplicación",
+      "kind": "boundary",
+      "column": 2,
+      "row": 0,
+      "responsibility": "Todo lo que está dentro no conoce HTTP, colas, ORMs ni proveedores: sólo casos de uso, dominio y puertos.",
+      "examples": ["src/modules/payments/{domain,application}"]
+    },
+    {
+      "id": "client",
+      "label": "Cliente HTTP",
+      "kind": "actor",
+      "column": 0,
+      "row": 1,
+      "responsibility": "Inicia la interacción. Podría ser el panel de operadores, otra API o un test E2E.",
+      "examples": ["Panel de operadores", "Webhook de una pasarela"]
+    },
+    {
+      "id": "http",
+      "label": "Route Handler (adaptador de entrada)",
+      "kind": "adapter",
+      "column": 1,
+      "row": 1,
+      "responsibility": "Valida la request, la traduce a un comando del caso de uso y traduce el resultado a una respuesta HTTP. No contiene reglas de negocio.",
+      "examples": ["app/api/payments/route.ts con validación Zod", "Mapeo de errores de dominio a 409/422"]
+    },
+    {
+      "id": "consumer",
+      "label": "Consumidor de cola (adaptador de entrada)",
+      "kind": "adapter",
+      "column": 1,
+      "row": 2,
+      "responsibility": "Otra forma de invocar el mismo caso de uso: lee mensajes de una cola y los convierte en comandos.",
+      "examples": ["Worker que consume eventos de la pasarela", "Job programado de conciliación"]
+    },
+    {
+      "id": "usecase",
+      "label": "RegisterPayment (puerto de entrada)",
+      "kind": "port",
+      "column": 2,
+      "row": 1,
+      "parent": "core",
+      "responsibility": "Caso de uso: orquesta el dominio y los puertos de salida. Es la API de la aplicación, testeable sin Next.js ni base de datos.",
+      "examples": [
+        "registerPayment(command, deps)",
+        "Clase RegisterPaymentUseCase con dependencias inyectadas"
+      ]
+    },
+    {
+      "id": "domain",
+      "label": "Dominio: Debt, Payment",
+      "kind": "domain",
+      "column": 3,
+      "row": 1,
+      "parent": "core",
+      "responsibility": "Reglas de negocio puras: imputar un pago a cuotas, rechazar montos inválidos, calcular saldo. Sin dependencias de infraestructura.",
+      "examples": ["debt.applyPayment(amount)", "Value object Money en centavos"]
+    },
+    {
+      "id": "repo-port",
+      "label": "Puerto PaymentRepository",
+      "kind": "port",
+      "column": 3,
+      "row": 2,
+      "parent": "core",
+      "responsibility": "Interfaz definida por la aplicación según lo que necesita (no según lo que ofrece la base).",
+      "examples": ["interface PaymentRepository { findDebt(id); save(debt) }"]
+    },
+    {
+      "id": "notify-port",
+      "label": "Puerto Notifier",
+      "kind": "port",
+      "column": 3,
+      "row": 0,
+      "parent": "core",
+      "responsibility": "Contrato para avisar al deudor, sin saber si el canal es WhatsApp, email o SMS.",
+      "examples": ["interface Notifier { paymentConfirmed(debtorId, amount) }"]
+    },
+    {
+      "id": "pg-adapter",
+      "label": "PostgresPaymentRepository",
+      "kind": "adapter",
+      "column": 4,
+      "row": 2,
+      "responsibility": "Implementa el puerto con SQL o un ORM. Traduce filas a entidades de dominio y viceversa.",
+      "examples": ["Implementación con Drizzle", "InMemoryPaymentRepository para tests"]
+    },
+    {
+      "id": "msg-adapter",
+      "label": "Adaptador de mensajería",
+      "kind": "adapter",
+      "column": 4,
+      "row": 0,
+      "responsibility": "Implementa Notifier contra un proveedor concreto, con sus timeouts, reintentos y formato.",
+      "examples": ["WhatsAppNotifier", "FakeNotifier que registra llamadas en tests"]
+    },
+    {
+      "id": "db",
+      "label": "PostgreSQL",
+      "kind": "database",
+      "column": 5,
+      "row": 2,
+      "responsibility": "Almacenamiento. Es un detalle de infraestructura desde el punto de vista del núcleo.",
+      "examples": ["Tablas debts, payments con restricciones"]
+    },
+    {
+      "id": "provider",
+      "label": "Proveedor de mensajería",
+      "kind": "external",
+      "column": 5,
+      "row": 0,
+      "responsibility": "Servicio externo con su propia disponibilidad y límites.",
+      "examples": ["API de WhatsApp Business", "Proveedor de email transaccional"]
+    }
+  ],
+  "edges": [
+    { "id": "e-client-http", "from": "client", "to": "http", "kind": "sync", "label": "POST /payments" },
+    { "id": "e-http-usecase", "from": "http", "to": "usecase", "kind": "sync", "label": "execute(command)" },
+    { "id": "e-consumer-usecase", "from": "consumer", "to": "usecase", "kind": "sync" },
+    { "id": "e-usecase-domain", "from": "usecase", "to": "domain", "kind": "sync", "label": "reglas" },
+    { "id": "e-usecase-repo", "from": "usecase", "to": "repo-port", "kind": "sync", "label": "save()" },
+    { "id": "e-usecase-notify", "from": "usecase", "to": "notify-port", "kind": "sync" },
+    {
+      "id": "e-pg-implements",
+      "from": "pg-adapter",
+      "to": "repo-port",
+      "kind": "dependency",
+      "label": "implementa"
+    },
+    {
+      "id": "e-msg-implements",
+      "from": "msg-adapter",
+      "to": "notify-port",
+      "kind": "dependency",
+      "label": "implementa"
+    },
+    { "id": "e-pg-db", "from": "pg-adapter", "to": "db", "kind": "sync", "label": "SQL" },
+    { "id": "e-msg-provider", "from": "msg-adapter", "to": "provider", "kind": "sync", "label": "HTTPS" }
+  ],
+  "steps": [
+    {
+      "title": "1. La request entra por un adaptador",
+      "description": "El Route Handler valida el body y lo traduce a un comando. Si mañana el mismo caso de uso se dispara desde una cola, sólo se agrega otro adaptador de entrada.",
+      "highlight": ["client", "http", "e-client-http", "consumer"]
+    },
+    {
+      "title": "2. El adaptador invoca el puerto de entrada",
+      "description": "RegisterPayment es la frontera de la aplicación: recibe datos ya validados y devuelve un resultado, sin saber que hay HTTP detrás.",
+      "highlight": ["http", "usecase", "e-http-usecase", "e-consumer-usecase"]
+    },
+    {
+      "title": "3. El dominio aplica las reglas",
+      "description": "La lógica de imputación del pago vive en el dominio y se prueba con tests unitarios puros.",
+      "highlight": ["usecase", "domain", "e-usecase-domain"]
+    },
+    {
+      "title": "4. La persistencia pasa por un puerto de salida",
+      "description": "El caso de uso llama a PaymentRepository; en producción la implementación es Postgres, en tests una versión en memoria.",
+      "highlight": ["repo-port", "pg-adapter", "db", "e-usecase-repo", "e-pg-implements", "e-pg-db"]
+    },
+    {
+      "title": "5. Las dependencias de código apuntan hacia adentro",
+      "description": "Los adaptadores importan los puertos; el núcleo nunca importa un adaptador. Por eso se puede cambiar el proveedor de mensajería sin tocar el caso de uso.",
+      "highlight": ["e-pg-implements", "e-msg-implements", "repo-port", "notify-port"]
+    }
+  ]
+}

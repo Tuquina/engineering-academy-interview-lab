@@ -2,6 +2,7 @@
 
 import { useMemo } from "react";
 import { useFlashcardsState } from "@/modules/flashcards/presentation/flashcards-context";
+import { useInterviewsState } from "@/modules/interviews/presentation/interviews-context";
 import { usePreferences } from "@/modules/preferences/presentation/preferences-context";
 import { toDayKey } from "@/shared/kernel/day-key";
 import type { LessonIndex } from "@/shared/kernel/lesson-link";
@@ -50,6 +51,7 @@ export function useLearnerSnapshot(data: LearnerData, isClient: boolean): Learne
   const progress = useProgressState();
   const flashcards = useFlashcardsState();
   const preferences = usePreferences();
+  const interviews = useInterviewsState();
 
   return useMemo(() => {
     const now = new Date();
@@ -90,8 +92,9 @@ export function useLearnerSnapshot(data: LearnerData, isClient: boolean): Learne
         strugglingLessonIds: strugglingCards
           .filter((c) => c.lapses >= 2 && c.lessonId)
           .map((c) => c.lessonId as string),
+        weakInterviewQuestions: Object.keys(interviews.weakPoints).length,
       }),
       today,
     };
-  }, [data, progress, flashcards, preferences.activePathId, isClient]);
+  }, [data, progress, flashcards, interviews, preferences.activePathId, isClient]);
 }

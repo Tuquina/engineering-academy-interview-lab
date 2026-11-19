@@ -1,0 +1,125 @@
+{
+  "id": "transactional-outbox",
+  "title": "Transactional Outbox e Inbox",
+  "description": "El cambio de negocio y el evento se guardan en la misma transacción local; un relay publica después. Del otro lado, una tabla inbox hace al consumidor idempotente.",
+  "kind": "sequence-flow",
+  "tags": ["outbox", "inbox", "dual write", "idempotencia"],
+  "nodes": [
+    {
+      "id": "service",
+      "label": "Servicio de pagos",
+      "kind": "service",
+      "column": 0,
+      "row": 1,
+      "responsibility": "Registra el pago. No publica directamente al broker dentro del caso de uso.",
+      "examples": ["registerPayment() abre una transacción"]
+    },
+    {
+      "id": "tx",
+      "label": "Transacción local",
+      "kind": "boundary",
+      "column": 1,
+      "row": 0,
+      "responsibility": "Ambas escrituras se confirman o se descartan juntas: no existe el estado 'pago guardado sin evento'.",
+      "examples": ["BEGIN; INSERT payments; INSERT outbox; COMMIT;"]
+    },
+    {
+      "id": "payments-table",
+      "label": "Tabla payments",
+      "kind": "database",
+      "column": 1,
+      "row": 0,
+      "parent": "tx",
+      "responsibility": "El cambio de negocio.",
+      "examples": ["INSERT INTO payments (...)"]
+    },
+    {
+      "id": "outbox-table",
+      "label": "Tabla outbox",
+      "kind": "database",
+      "column": 1,
+      "row": 2,
+      "parent": "tx",
+      "responsibility": "El evento a publicar, con id único, tipo, payload y estado de publicación.",
+      "examples": ["outbox(id uuid, type, payload jsonb, published_at null)"]
+    },
+    {
+      "id": "relay",
+      "label": "Relay",
+      "kind": "worker",
+      "column": 2,
+      "row": 2,
+      "responsibility": "Lee eventos pendientes, los publica y los marca como publicados. Si cae entre publicar y marcar, el evento se publica dos veces: entrega al menos una vez.",
+      "examples": ["SELECT ... FOR UPDATE SKIP LOCKED", "Change Data Capture del WAL"]
+    },
+    {
+      "id": "broker",
+      "label": "Broker",
+      "kind": "queue",
+      "column": 3,
+      "row": 2,
+      "responsibility": "Distribuye el evento a los consumidores.",
+      "examples": ["Kafka", "SQS"]
+    },
+    {
+      "id": "consumer",
+      "label": "Consumidor",
+      "kind": "worker",
+      "column": 4,
+      "row": 1,
+      "responsibility": "Procesa el evento sólo si su id no está en la inbox, en la misma transacción que su efecto.",
+      "examples": ["INSERT INTO inbox(event_id) ON CONFLICT DO NOTHING"]
+    },
+    {
+      "id": "inbox",
+      "label": "Tabla inbox",
+      "kind": "database",
+      "column": 4,
+      "row": 0,
+      "responsibility": "Registro de eventos ya procesados: convierte la entrega al menos una vez en efecto exactamente una vez.",
+      "examples": ["inbox(event_id primary key, processed_at)"]
+    }
+  ],
+  "edges": [
+    {
+      "id": "o-service-payments",
+      "from": "service",
+      "to": "payments-table",
+      "kind": "sync",
+      "label": "INSERT"
+    },
+    { "id": "o-service-outbox", "from": "service", "to": "outbox-table", "kind": "sync", "label": "INSERT" },
+    {
+      "id": "o-relay-outbox",
+      "from": "relay",
+      "to": "outbox-table",
+      "kind": "sync",
+      "label": "lee pendientes"
+    },
+    { "id": "o-relay-broker", "from": "relay", "to": "broker", "kind": "async", "label": "publica" },
+    { "id": "o-broker-consumer", "from": "broker", "to": "consumer", "kind": "async" },
+    { "id": "o-consumer-inbox", "from": "consumer", "to": "inbox", "kind": "sync", "label": "deduplica" }
+  ],
+  "steps": [
+    {
+      "title": "1. El problema: escritura doble",
+      "description": "Guardar en la base y luego publicar al broker son dos sistemas: si el proceso cae entre ambos, se pierde el evento; si se publica primero y la transacción falla, se anuncia algo que no ocurrió.",
+      "highlight": ["service", "payments-table", "broker"]
+    },
+    {
+      "title": "2. Una sola transacción local",
+      "description": "El pago y el evento se insertan juntos. La atomicidad la da PostgreSQL, no un protocolo distribuido.",
+      "highlight": ["service", "payments-table", "outbox-table", "o-service-payments", "o-service-outbox"]
+    },
+    {
+      "title": "3. El relay publica después",
+      "description": "Un worker lee la outbox y publica. Varias réplicas pueden repartirse el trabajo con FOR UPDATE SKIP LOCKED.",
+      "highlight": ["relay", "outbox-table", "broker", "o-relay-outbox", "o-relay-broker"]
+    },
+    {
+      "title": "4. El consumidor es idempotente",
+      "description": "Como el relay puede publicar dos veces, el consumidor registra el id del evento en su inbox dentro de la misma transacción que su efecto.",
+      "highlight": ["consumer", "inbox", "o-broker-consumer", "o-consumer-inbox"]
+    }
+  ]
+}

@@ -1,0 +1,116 @@
+{
+  "id": "event-driven",
+  "title": "Arquitectura orientada a eventos",
+  "description": "Un productor publica un hecho y varios consumidores reaccionan de forma independiente. Incluye reintentos, consumidores idempotentes y una cola de mensajes fallidos (DLQ).",
+  "kind": "architecture",
+  "tags": ["eventos", "pub/sub", "dlq", "idempotencia"],
+  "nodes": [
+    {
+      "id": "producer",
+      "label": "Servicio de pagos (productor)",
+      "kind": "service",
+      "column": 0,
+      "row": 1,
+      "responsibility": "Publica PaymentRegistered cuando el pago quedó confirmado. No sabe quién lo consume.",
+      "examples": ["Publicación vía outbox para no perder eventos"]
+    },
+    {
+      "id": "topic",
+      "label": "Topic payments",
+      "kind": "queue",
+      "column": 1,
+      "row": 1,
+      "responsibility": "Retiene eventos y los entrega a cada suscripción. La entrega típica es al menos una vez: puede haber duplicados.",
+      "examples": ["Topic de Kafka particionado por debtId", "SNS con una cola SQS por consumidor"]
+    },
+    {
+      "id": "ledger",
+      "label": "Proyección de saldo",
+      "kind": "worker",
+      "column": 2,
+      "row": 0,
+      "responsibility": "Actualiza la vista de saldos. Es idempotente: registra el eventId procesado en la misma transacción.",
+      "examples": ["INSERT INTO processed_events ... ON CONFLICT DO NOTHING"]
+    },
+    {
+      "id": "notifier",
+      "label": "Notificaciones",
+      "kind": "worker",
+      "column": 2,
+      "row": 1,
+      "responsibility": "Envía el comprobante al deudor. Un duplicado aquí se nota (dos mensajes), por eso deduplica por eventId.",
+      "examples": ["Worker con deduplicación en Redis con TTL"]
+    },
+    {
+      "id": "campaigns",
+      "label": "Campañas",
+      "kind": "worker",
+      "column": 2,
+      "row": 2,
+      "responsibility": "Cancela contactos programados para quien ya pagó.",
+      "examples": ["Consumidor que marca contactos como cancelados"]
+    },
+    {
+      "id": "dlq",
+      "label": "Dead Letter Queue",
+      "kind": "queue",
+      "column": 3,
+      "row": 1,
+      "responsibility": "Recibe los mensajes que fallaron tras N reintentos, para no bloquear la cola y poder analizarlos y reprocesarlos.",
+      "examples": ["Cola *-dlq con alarma", "Herramienta de redrive tras corregir el bug"]
+    },
+    {
+      "id": "ops",
+      "label": "Operación",
+      "kind": "actor",
+      "column": 4,
+      "row": 1,
+      "responsibility": "Alguien debe mirar la DLQ: una DLQ sin alertas es un lugar donde se pierden datos en silencio.",
+      "examples": ["Alerta si la DLQ tiene mensajes", "Runbook de reproceso"]
+    }
+  ],
+  "edges": [
+    { "id": "v-producer-topic", "from": "producer", "to": "topic", "kind": "async", "label": "publica" },
+    { "id": "v-topic-ledger", "from": "topic", "to": "ledger", "kind": "async" },
+    { "id": "v-topic-notifier", "from": "topic", "to": "notifier", "kind": "async" },
+    { "id": "v-topic-campaigns", "from": "topic", "to": "campaigns", "kind": "async" },
+    {
+      "id": "v-notifier-dlq",
+      "from": "notifier",
+      "to": "dlq",
+      "kind": "async",
+      "label": "tras N reintentos"
+    },
+    { "id": "v-dlq-ops", "from": "dlq", "to": "ops", "kind": "async", "label": "alerta" }
+  ],
+  "steps": [
+    {
+      "title": "1. Se publica un hecho, no una orden",
+      "description": "El evento dice qué pasó (PaymentRegistered), no qué hacer. Agregar un consumidor nuevo no requiere cambiar el productor.",
+      "highlight": ["producer", "topic", "v-producer-topic"]
+    },
+    {
+      "title": "2. Cada consumidor avanza a su ritmo",
+      "description": "Si Notificaciones está caído, Saldos y Campañas siguen procesando; cuando vuelve, consume lo acumulado.",
+      "highlight": [
+        "topic",
+        "ledger",
+        "notifier",
+        "campaigns",
+        "v-topic-ledger",
+        "v-topic-notifier",
+        "v-topic-campaigns"
+      ]
+    },
+    {
+      "title": "3. Los duplicados son normales",
+      "description": "Con entrega al menos una vez, un consumidor puede recibir el mismo evento dos veces (por ejemplo, si cae después de procesar y antes de confirmar). La idempotencia es responsabilidad del consumidor.",
+      "highlight": ["ledger", "notifier"]
+    },
+    {
+      "title": "4. Los mensajes venenosos van a la DLQ",
+      "description": "Un mensaje que siempre falla no debe reintentarse para siempre: después de N intentos va a la DLQ, donde se alerta y se reprocesa tras corregir la causa.",
+      "highlight": ["notifier", "dlq", "ops", "v-notifier-dlq", "v-dlq-ops"]
+    }
+  ]
+}

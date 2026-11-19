@@ -15,6 +15,8 @@ export interface SearchIndexSources {
   readonly cheatsheets: readonly CheatsheetSummary[];
   /** Páginas de la aplicación (secciones navegables) que también deben poder encontrarse. */
   readonly pages: ReadonlyArray<{ id: string; title: string; href: string; keywords: readonly string[] }>;
+  /** Entradas ya armadas de otros módulos (patrones, challenges, simuladores). */
+  readonly extraEntries?: readonly SearchEntry[];
 }
 
 /**
@@ -93,5 +95,6 @@ export function buildSearchIndex(sources: SearchIndexSources): SearchEntry[] {
     });
   }
 
+  entries.push(...(sources.extraEntries ?? []));
   return entries;
 }

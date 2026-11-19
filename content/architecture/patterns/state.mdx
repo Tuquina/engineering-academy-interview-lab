@@ -1,0 +1,117 @@
+---
+id: pattern.state
+kind: design
+category: behavioral
+title: "State (máquina de estados)"
+summary: "Modelar explícitamente los estados de una entidad y las transiciones válidas entre ellos."
+difficulty: intermediate
+order: 50
+definition: "El patrón State hace que el comportamiento de una entidad dependa de su estado actual y que las transiciones sean explícitas. En TypeScript se expresa muy bien con uniones discriminadas y una función de transición pura que rechaza los cambios inválidos."
+problem: "El estado de una entidad se maneja con varios booleanos o strings sueltos (isPaid, isCancelled, status) que se modifican desde distintos lugares. Aparecen combinaciones imposibles (pagada y cancelada a la vez) y nadie sabe qué transiciones están permitidas."
+benefits:
+  - "Los estados imposibles no se pueden representar: el compilador ayuda."
+  - "Todas las transiciones válidas están en un solo lugar y se prueban como una tabla."
+  - "Los datos que sólo existen en un estado (la fecha de pago, el motivo de cancelación) viven sólo en ese estado."
+costs:
+  - "Más tipos y más código inicial que un campo status."
+  - "Persistir uniones discriminadas requiere mapear columnas que son nulas según el estado."
+alternatives:
+  - name: "Un campo status con validación"
+    when: "Con pocos estados y transiciones triviales, un enum y una tabla de transiciones permitidas puede alcanzar."
+  - name: "Una librería de statecharts"
+    when: "Para flujos de interfaz complejos con estados anidados y paralelos, una librería especializada da visualización y herramientas."
+commonMistakes:
+  - "Modificar el estado desde cualquier lugar en lugar de pasar por la función de transición."
+  - "Usar varios booleanos independientes que permiten combinaciones inválidas."
+  - "No persistir el historial de transiciones cuando el negocio necesita auditoría."
+avoidWhen:
+  - "La entidad no tiene ciclo de vida (datos de referencia que sólo se crean y editan)."
+interviewQuestions:
+  - question: "¿Cómo evitarías que dos procesos cambien el estado de la misma entidad a la vez?"
+    answer: "Con concurrencia optimista: una columna version y un UPDATE ... WHERE id = $1 AND version = $2. Si no actualiza filas, otro proceso cambió el estado y hay que recargar y reevaluar la transición. También se puede usar SELECT ... FOR UPDATE si la transición es corta."
+  - question: "¿Por qué una unión discriminada y no una clase con un campo status?"
+    answer: "Porque cada variante declara exactamente qué datos tiene. Una promesa 'cumplida' tiene la fecha de pago y una 'incumplida' no: con un único tipo, esos campos serían opcionales en todos los estados y habría que validarlos a mano en cada uso."
+diagrams: []
+related: ["strategy"]
+relatedLessons: ["typescript.runtime-vs-type-system"]
+tags: ["state", "máquina de estados", "uniones discriminadas"]
+---
+
+## Motivación
+
+Una promesa de pago tiene un ciclo de vida: se registra activa; puede cumplirse (llegó el pago), incumplirse (pasó
+la fecha sin pago suficiente) o cancelarse (el deudor la reemplazó). Una promesa cumplida no puede volver a estar
+activa y una cancelada no puede cumplirse.
+
+## Ejemplo incorrecto
+
+```ts
+interface PaymentPromise {
+  id: string;
+  amountCents: number;
+  dueDate: string;
+  isFulfilled: boolean;
+  isBroken: boolean;
+  isCancelled: boolean;
+  paidAt?: string;
+  cancelReason?: string;
+}
+
+// En algún job:
+promise.isBroken = new Date(promise.dueDate) < new Date();
+// En el webhook de pagos:
+promise.isFulfilled = true;
+promise.paidAt = new Date().toISOString();
+```
+
+Nada impide una promesa `isFulfilled && isBroken`, ni que el job marque como incumplida una promesa cancelada.
+
+## Implementación correcta
+
+```ts
+export type PaymentPromise =
+  | { status: "active"; id: string; amountCents: number; dueDate: string }
+  | { status: "fulfilled"; id: string; amountCents: number; dueDate: string; paidAt: string }
+  | { status: "broken"; id: string; amountCents: number; dueDate: string; detectedAt: string }
+  | { status: "cancelled"; id: string; amountCents: number; dueDate: string; reason: string };
+
+export type PromiseEvent =
+  | { type: "payment-received"; at: string }
+  | { type: "due-date-passed"; at: string }
+  | { type: "cancelled"; reason: string };
+
+export class InvalidTransition extends Error {}
+
+/** Única forma de cambiar el estado: pura, exhaustiva y fácil de probar como tabla. */
+export function transition(promise: PaymentPromise, event: PromiseEvent): PaymentPromise {
+  if (promise.status !== "active") {
+    throw new InvalidTransition(`No se puede aplicar ${event.type} a una promesa ${promise.status}`);
+  }
+  const { id, amountCents, dueDate } = promise;
+  switch (event.type) {
+    case "payment-received":
+      return { status: "fulfilled", id, amountCents, dueDate, paidAt: event.at };
+    case "due-date-passed":
+      return { status: "broken", id, amountCents, dueDate, detectedAt: event.at };
+    case "cancelled":
+      return { status: "cancelled", id, amountCents, dueDate, reason: event.reason };
+  }
+}
+```
+
+`paidAt` sólo existe en promesas cumplidas, y TypeScript obliga a verificar el estado antes de leerlo.
+
+## Ejercicio
+
+El negocio agrega un período de gracia: una promesa vencida pasa primero a `grace` durante 2 días; si llega el
+pago en ese lapso se considera cumplida, si no, incumplida. ¿Qué cambia?
+
+<Reveal>
+
+Se agrega la variante `{ status: "grace"; ...; graceUntil: string }`. La transición `due-date-passed` desde
+`active` ahora lleva a `grace`; desde `grace`, `payment-received` lleva a `fulfilled` y un nuevo evento
+`grace-expired` lleva a `broken`. La guarda inicial deja de ser "sólo desde active" y pasa a validar por estado
+(un `switch` sobre `promise.status` con otro anidado por evento). Los tests de tabla agregan las filas nuevas y
+siguen verificando que las transiciones inválidas lancen error.
+
+</Reveal>

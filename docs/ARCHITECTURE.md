@@ -31,20 +31,23 @@ Navegador ──► src/app (Server Components / Route Handlers: adaptadores del
 
 Estas reglas se verifican automáticamente en `tests/architecture/dependency-rules.test.ts`.
 
-## 3. Módulos (estado en Fase 3)
+## 3. Módulos (estado en Fase 4)
 
-| Módulo                                                                      | Estado               | Responsabilidad                                                                               |
-| --------------------------------------------------------------------------- | -------------------- | --------------------------------------------------------------------------------------------- |
-| `learning`                                                                  | Implementado         | Catálogo (áreas, cursos, módulos, lecciones, rutas), integridad, lecciones y cheatsheets MDX. |
-| `progress`                                                                  | Implementado (local) | Progreso, respuestas a quizzes, tiempo de estudio, estadísticas y recomendaciones.            |
-| `flashcards`                                                                | Implementado (local) | Mazos en `content/flashcards`, repetición espaciada (SM-2 adaptado, ADR-0005).                |
-| `notebook`                                                                  | Implementado (local) | Notas por lección, marcadores y cheatsheets favoritas.                                        |
-| `preferences`                                                               | Implementado (local) | Tamaño de lectura, ruta activa, tarjetas nuevas por día.                                      |
-| `search`                                                                    | Implementado         | Índice y búsqueda local (Ctrl/Cmd + K).                                                       |
-| `exercises`                                                                 | Implementado         | Harness de tests, ejecución de TypeScript en Web Worker, Monaco, intentos y borradores.       |
-| `challenges`                                                                | Implementado         | Desafíos de código, React (Sandpack), SQL y diseño con rúbrica; catálogo y filtros.           |
-| `sql-lab`                                                                   | Implementado         | PostgreSQL (PGlite) en Web Worker, dataset, ejercicios y corrección por resultado o estado.   |
-| `interviews`, `architecture-lab`, `agent-lab`, `content-management`, `auth` | Planificados         | Se crean cuando una fase los necesita; no existen carpetas vacías.                            |
+| Módulo                                    | Estado               | Responsabilidad                                                                               |
+| ----------------------------------------- | -------------------- | --------------------------------------------------------------------------------------------- |
+| `learning`                                | Implementado         | Catálogo (áreas, cursos, módulos, lecciones, rutas), integridad, lecciones y cheatsheets MDX. |
+| `progress`                                | Implementado (local) | Progreso, respuestas a quizzes, tiempo de estudio, estadísticas y recomendaciones.            |
+| `flashcards`                              | Implementado (local) | Mazos en `content/flashcards`, repetición espaciada (SM-2 adaptado, ADR-0005).                |
+| `notebook`                                | Implementado (local) | Notas por lección, marcadores y cheatsheets favoritas.                                        |
+| `preferences`                             | Implementado (local) | Tamaño de lectura, ruta activa, tarjetas nuevas por día.                                      |
+| `search`                                  | Implementado         | Índice y búsqueda local (Ctrl/Cmd + K).                                                       |
+| `exercises`                               | Implementado         | Harness de tests, ejecución de TypeScript en Web Worker, Monaco, intentos y borradores.       |
+| `challenges`                              | Implementado         | Desafíos de código, React (Sandpack), SQL y diseño con rúbrica; catálogo y filtros.           |
+| `sql-lab`                                 | Implementado         | PostgreSQL (PGlite) en Web Worker, dataset, ejercicios y corrección por resultado o estado.   |
+| `architecture`                            | Implementado         | Pattern Library, diagramas interactivos (React Flow) y comparador de arquitecturas.           |
+| `system-design`                           | Implementado (local) | Architecture Canvas, simuladores deterministas y desafíos de arquitectura en 8 fases.         |
+| `interviews`                              | Implementado (local) | Interview Arena: banco de preguntas, sesiones por modo, autoevaluación y puntos débiles.      |
+| `agent-lab`, `content-management`, `auth` | Planificados         | Se crean cuando una fase los necesita; no existen carpetas vacías.                            |
 
 ## 4. Modelo de contenido
 
@@ -59,11 +62,18 @@ content/
   challenges/<slug>/                 # challenge.mdx + starter/tests/hidden-tests/solution (Fase 3)
   sql/dataset.sql, sql/exercises/*.md  # dataset del Database Lab y ejercicios SQL
   playground/*.ts                    # ejemplos del Laboratorio de código
+  architecture/patterns/*.mdx        # Pattern Library (Fase 4)
+  architecture/diagrams/*.json       # diagramas interactivos
+  architecture/architectures.json    # perfiles del comparador
+  system-design/challenges/<slug>/   # desafíos de arquitectura (challenge.mdx + solution.mdx)
+  interview/questions/<área>/*.md    # banco del Interview Arena
 ```
 
 Formato de challenges y ejercicios: [guides/adding-exercises.md](guides/adding-exercises.md). La ejecución de código
 del usuario ocurre siempre en el navegador, aislada en Web Workers o iframes
-([ADR-0006](adr/0006-isolated-code-execution-in-browser.md)).
+([ADR-0006](adr/0006-isolated-code-execution-in-browser.md)). El contenido de arquitectura y entrevistas se
+describe en [guides/adding-architecture-content.md](guides/adding-architecture-content.md) y sus decisiones en
+[ADR-0007](adr/0007-architecture-studio-and-interview-arena.md).
 
 - El curso de una lección se deduce de su carpeta; el área, del curso.
 - Los IDs son estables (`typescript.runtime-vs-type-system`); el progreso se guarda por ID, no por slug.
@@ -104,11 +114,13 @@ Todo el estado de usuario usa el puerto `ExternalStore<T>` (`src/shared/kernel/e
 con Zod, migra versiones y sincroniza pestañas. La raíz de composición `src/infrastructure/composition/client-stores.ts`
 decide la implementación; en la Fase 6 se agregará una respaldada por la API autenticada sin cambiar los componentes.
 
-| Clave local       | Módulo      | Contenido                                                       |
-| ----------------- | ----------- | --------------------------------------------------------------- |
-| `eal:progress`    | progress    | Lecciones (v2), respuestas a knowledge checks, segundos por día |
-| `eal:flashcards`  | flashcards  | Planificación SM-2 por tarjeta y repasos por día                |
-| `eal:notebook`    | notebook    | Notas, marcadores y cheatsheets favoritas                       |
-| `eal:preferences` | preferences | Tamaño de lectura, ruta activa, tarjetas nuevas por día         |
-| `eal:practice`    | exercises   | Intentos, borradores, respuestas de diseño y soluciones vistas  |
-| `eal:theme`       | shared      | Tema claro/oscuro (aplicado antes del primer pintado)           |
+| Clave local       | Módulo        | Contenido                                                       |
+| ----------------- | ------------- | --------------------------------------------------------------- |
+| `eal:progress`    | progress      | Lecciones (v2), respuestas a knowledge checks, segundos por día |
+| `eal:flashcards`  | flashcards    | Planificación SM-2 por tarjeta y repasos por día                |
+| `eal:notebook`    | notebook      | Notas, marcadores y cheatsheets favoritas                       |
+| `eal:preferences` | preferences   | Tamaño de lectura, ruta activa, tarjetas nuevas por día         |
+| `eal:practice`    | exercises     | Intentos, borradores, respuestas de diseño y soluciones vistas  |
+| `eal:studio`      | system-design | Diagramas del canvas y trabajo de los desafíos de arquitectura  |
+| `eal:interviews`  | interviews    | Sesiones del Interview Arena y puntos débiles por pregunta      |
+| `eal:theme`       | shared        | Tema claro/oscuro (aplicado antes del primer pintado)           |

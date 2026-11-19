@@ -1,0 +1,140 @@
+---
+id: pattern.repository
+kind: design
+category: data-access
+title: "Repository"
+summary: "Acceder a los agregados del dominio como si fueran una colección, ocultando cómo se persisten."
+difficulty: intermediate
+order: 40
+definition: "Repository media entre el dominio y la persistencia: expone operaciones en términos del dominio (obtener un agregado, guardarlo, buscar por un criterio de negocio) y oculta SQL, ORM y mapeos. La interfaz la define quien la usa, no la base de datos."
+problem: "El SQL y los tipos del ORM aparecen dentro de los casos de uso y las reglas de negocio. Probar una regla obliga a levantar una base, y cambiar el esquema obliga a revisar lógica de negocio."
+benefits:
+  - "Los casos de uso se prueban con una implementación en memoria."
+  - "Las consultas quedan concentradas y nombradas según el negocio (findOverdueByTenant)."
+  - "El dominio no conoce el ORM ni el esquema de tablas."
+costs:
+  - "Mapeo entre filas y entidades que hay que escribir y mantener."
+  - "Riesgo de esconder consultas costosas (N+1) detrás de métodos inocentes."
+  - "Puede ser una capa vacía si el dominio es sólo CRUD."
+alternatives:
+  - name: "Query builder u ORM directo en el caso de uso"
+    when: "En aplicaciones CRUD con poca lógica, donde la indirección no aporta y el ORM ya es una abstracción suficiente."
+  - name: "Consultas específicas de lectura (CQRS ligero)"
+    when: "Para pantallas y reportes, consultas directas optimizadas que devuelven DTOs, sin pasar por agregados."
+commonMistakes:
+  - "Repositorios genéricos (getAll, getById, save para todo) que no expresan el negocio y filtran en memoria."
+  - "Devolver tipos del ORM o QueryBuilders desde el repositorio."
+  - "Un repositorio por tabla en lugar de uno por agregado."
+  - "Usar el repositorio también para reportes complejos, forzando JOINs a través del dominio."
+avoidWhen:
+  - "Pantallas de administración CRUD sin reglas de negocio."
+  - "Reportes y consultas analíticas: conviene SQL directo pensado para leer."
+interviewQuestions:
+  - question: "¿Un repositorio debería tener un método por cada consulta?"
+    answer: "Por cada consulta que el dominio necesita, sí, con nombres del negocio. No por cada pantalla: las consultas de lectura para la interfaz suelen ir por otro camino (consultas de lectura dedicadas), porque no necesitan cargar agregados completos."
+  - question: "¿Cómo manejás transacciones que abarcan varios repositorios?"
+    answer: "Con una unidad de trabajo: el caso de uso abre una transacción (o recibe un contexto transaccional) y los repositorios operan dentro de ella. Si eso ocurre seguido entre agregados distintos, conviene revisar los límites de los agregados."
+  - question: "¿Qué ventaja concreta da en los tests?"
+    answer: "Los casos de uso se prueban con un repositorio en memoria, rápido y determinista. La implementación real se prueba aparte con tests de integración contra la base, verificando el mapeo y las restricciones."
+diagrams: []
+related: ["hexagonal-architecture", "cqrs"]
+relatedLessons: []
+tags: ["repository", "persistencia", "ddd", "testing"]
+---
+
+## Motivación
+
+El caso de uso "registrar promesa de pago" necesita cargar la deuda con sus promesas activas, aplicar la regla "no
+más de una promesa activa y el monto no puede superar el saldo" y guardar. La regla es lo importante; cómo se
+guarda es un detalle.
+
+## Ejemplo incorrecto
+
+```ts
+export async function registerPromise(db: Db, debtId: string, amountCents: number, dueDate: string) {
+  const rows = await db.execute(sql`
+    SELECT d.balance_cents, p.id AS promise_id
+    FROM debts d LEFT JOIN promises p ON p.debt_id = d.id AND p.status = 'active'
+    WHERE d.id = ${debtId}`);
+  if (rows.length === 0) throw new Error("no existe");
+  if (rows.some((r) => r.promise_id !== null)) throw new Error("ya hay promesa");
+  if (amountCents > Number(rows[0].balance_cents)) throw new Error("monto inválido");
+  await db.execute(sql`INSERT INTO promises (debt_id, amount_cents, due_date, status)
+                       VALUES (${debtId}, ${amountCents}, ${dueDate}, 'active')`);
+}
+```
+
+La regla de negocio está mezclada con el SQL; probarla requiere una base con datos.
+
+## Implementación correcta
+
+```ts
+// Dominio
+export class Debt {
+  constructor(
+    readonly id: string,
+    private balanceCents: number,
+    private readonly promises: PaymentPromise[],
+  ) {}
+
+  promise(amountCents: number, dueDate: string): PaymentPromise {
+    if (this.promises.some((p) => p.status === "active")) throw new DomainError("active-promise-exists");
+    if (amountCents <= 0 || amountCents > this.balanceCents) throw new DomainError("invalid-amount");
+    const promise: PaymentPromise = { id: crypto.randomUUID(), amountCents, dueDate, status: "active" };
+    this.promises.push(promise);
+    return promise;
+  }
+
+  get pendingPromises(): readonly PaymentPromise[] {
+    return this.promises;
+  }
+}
+
+// Puerto definido por la aplicación
+export interface DebtRepository {
+  findById(id: string): Promise<Debt | null>;
+  save(debt: Debt): Promise<void>;
+}
+
+// Caso de uso: sólo orquesta
+export async function registerPromise(
+  repo: DebtRepository,
+  input: { debtId: string; amountCents: number; dueDate: string },
+) {
+  const debt = await repo.findById(input.debtId);
+  if (!debt) throw new DomainError("debt-not-found");
+  const promise = debt.promise(input.amountCents, input.dueDate);
+  await repo.save(debt);
+  return promise;
+}
+
+// Implementación para tests
+export class InMemoryDebtRepository implements DebtRepository {
+  private readonly items = new Map<string, Debt>();
+  async findById(id: string) {
+    return this.items.get(id) ?? null;
+  }
+  async save(debt: Debt) {
+    this.items.set(debt.id, debt);
+  }
+}
+```
+
+La implementación con PostgreSQL vive en infraestructura, mapea filas a `Debt` y se prueba con tests de
+integración. Además, la base mantiene su propia defensa: un índice único parcial
+(`CREATE UNIQUE INDEX ... ON promises(debt_id) WHERE status = 'active'`) evita dos promesas activas aunque dos
+requests lleguen a la vez.
+
+## Ejercicio
+
+La bandeja del operador necesita listar 50 deudores con su saldo, última gestión y promesa activa, ordenados por
+prioridad. ¿Lo agregarías al `DebtRepository` como `findAll()` y ordenarías en memoria?
+
+<Reveal>
+
+No. Cargar agregados completos para una pantalla es costoso y obliga a filtrar en memoria. Es una consulta de
+lectura: conviene una función dedicada (por ejemplo `InboxQueries.list(tenantId, page)`) que ejecute un SQL
+optimizado con paginación y devuelva un DTO plano. El repositorio queda para cargar y guardar agregados cuando hay
+reglas que aplicar.
+
+</Reveal>

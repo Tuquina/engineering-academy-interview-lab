@@ -149,26 +149,96 @@ React ejecutados de verdad en Sandpack.
 - Hay un solo challenge de React; los laboratorios con editor se usan en escritorio (en móvil son navegables pero no
   se verifican en E2E).
 
+## Fase 4 — Arquitectura y entrevistas · ✅ completada (2026-11-19)
+
+Decisiones en [ADR-0007](adr/0007-architecture-studio-and-interview-arena.md); formato del contenido en
+[guides/adding-architecture-content.md](guides/adding-architecture-content.md).
+
+### Implementado y verificado
+
+- **Pattern Library (`/patterns`, módulo `architecture`):** 10 patrones (Strategy, Adapter, Decorator, Repository,
+  State, arquitectura hexagonal, CQRS, Saga, Transactional Outbox, Circuit Breaker). Cada uno con definición,
+  problema, motivación, diagrama, ejemplo incorrecto, implementación correcta en TypeScript, ejercicio con solución
+  plegable, beneficios, costos, alternativas, errores frecuentes, cuándo no usarlo y preguntas de entrevista.
+- **Diagramas interactivos (React Flow):** 10 diagramas (hexagonal, capas y dirección de dependencias, monolito
+  modular, microservicios, orientada a eventos, CQRS, saga, outbox/inbox, circuit breaker, síncrono vs asíncrono).
+  Zoom, pan, pantalla completa, inspección de cada elemento (responsabilidad, ejemplos, conexiones), lista accesible
+  por teclado y recorrido paso a paso.
+- **Comparador de arquitecturas:** 4 estilos en 10 dimensiones, con valoraciones cualitativas relativas y la
+  explicación de cada compromiso; sin números inventados.
+- **System Design Studio (`/system-design`, módulo `system-design`):**
+  - **Architecture Canvas:** 14 tipos de componentes, agregar con clic o arrastrando, conexiones síncronas y
+    asíncronas (arrastrando o con un formulario accesible), propiedades conceptuales por tipo, varios diagramas
+    guardados, importar y exportar JSON, exportar imagen PNG y resumen en texto.
+  - **6 simuladores deterministas** con línea temporal, métricas por tick, eventos y resumen: balanceo de carga y
+    escalado horizontal, reintentos con backoff y jitter, cache hit/miss y stampede, rate limiting (ventana fija,
+    deslizante y token bucket), caída de un servicio y circuit breaker, colas (duplicados, desorden y acumulación).
+    Cada uno declara sus simplificaciones y cómo se observa en infraestructura real.
+  - **4 desafíos de arquitectura** (§15.4): cobranzas masivas, plataforma multi-tenant de agentes, webhooks
+    confiables y orquestador de campañas. Requerimientos funcionales y no funcionales, datos de escala, preguntas
+    aclaratorias, espacio de diseño en 8 fases (con el canvas en la fase de componentes), checklist, rúbrica de
+    autoevaluación y diseño de referencia.
+- **Interview Arena (`/interview`, módulo `interviews`):** 7 modos (Quick, Technical Deep Dive, Live Coding con
+  tests reales, System Design en 8 fases con reloj, AI Engineering, Mock completa con secciones configurables y
+  repaso de puntos débiles). Banco de 27 preguntas en 8 áreas, cada una con criterios esperados, respuesta sólida,
+  errores frecuentes y seguimiento. Tras cada respuesta: criterios esperados, autoevaluación, criterios faltantes
+  resaltados, respuesta de referencia y preguntas de seguimiento. Historial de sesiones y cobertura por área.
+- **Integración:** el dashboard enlaza "Practicar para entrevista" y recomienda repasar preguntas con criterios
+  faltantes; `/stats` cuenta entrevistas simuladas; el buscador incluye patrones, diagramas, challenges, desafíos de
+  arquitectura y simuladores; la navegación habilita las tres secciones.
+- **Corrección:** el botón "Ejecutar tests" de los challenges de código quedaba habilitado antes de que cargara el
+  editor y no hacía nada; ahora se habilita con el editor listo.
+- El challenge de diseño "plataforma multi-tenant de agentes" de `/challenges` se reemplazó por el desafío completo
+  del Studio (ahora hay 11 challenges en `/challenges`).
+
+### Verificación
+
+| Comando                                           | Resultado                                                                |
+| ------------------------------------------------- | ------------------------------------------------------------------------ |
+| `pnpm typecheck`                                  | ✅                                                                       |
+| `pnpm lint`                                       | ✅                                                                       |
+| `pnpm test`                                       | ✅ 172 tests en 26 archivos (incluye propiedades de los simuladores)     |
+| `pnpm build`                                      | ✅ 89 páginas estáticas                                                  |
+| E2E (`docker compose --profile e2e run --rm e2e`) | ✅ 39 tests (los de laboratorios, canvas y sesiones, sólo en escritorio) |
+
+Los tests de los simuladores verifican propiedades del modelo (por ejemplo, que least connections tiene mejor p95
+que round robin con una réplica degradada, o que la ventana fija deja pasar el doble del límite en el borde) para
+que lo que la interfaz enseña sea cierto en el modelo. Los E2E de la fase cubren el patrón con su diagrama, el
+comparador, el canvas (agregar, conectar, persistir y exportar), un simulador, un desafío de arquitectura, una
+entrevista rápida con su registro y recomendación, y el live coding con tests reales.
+
+### Limitaciones conocidas
+
+- **Sin evaluación con IA:** toda evaluación es autoevaluación contra criterios explícitos (§21). La evaluación
+  asistida queda para la Fase 5.
+- Los simuladores son **modelos simplificados** (así se indica en cada uno); no cubren todavía deadlocks,
+  consistencia eventual entre réplicas ni latencia de base de datos como simuladores propios.
+- La biblioteca tiene 10 de los ~40 patrones que lista §14; faltan, entre otros, Factory, Builder, Observer,
+  Command, Unit of Work, Bulkhead, Strangler Fig y Anti-Corruption Layer.
+- El canvas guarda en `localStorage` (hasta 40 diagramas); exportar JSON es la forma de respaldarlos.
+- El live coding parte del borrador guardado del challenge si existe (se puede reiniciar con "Reiniciar").
+- Las entrevistas no graban audio: responder en voz alta queda a cargo del usuario.
+
 ## Próximas fases
 
 | Fase                                                                          | Estado     |
 | ----------------------------------------------------------------------------- | ---------- |
 | 2 — Aprendizaje                                                               | Completada |
 | 3 — Laboratorios (editor, Sandpack, SQL Playground con PGlite, challenges)    | Completada |
-| 4 — Arquitectura y entrevistas (System Design Studio, Interview Arena)        | Pendiente  |
+| 4 — Arquitectura y entrevistas (System Design Studio, Interview Arena)        | Completada |
 | 5 — Agentes IA (configuración, tool calling, memoria, evals)                  | Pendiente  |
 | 6 — Persistencia y administración (PostgreSQL, auth, contenido personalizado) | Pendiente  |
 | 7 — Producción (CI/CD, Vercel)                                                | Pendiente  |
 
 ### Contenido pendiente respecto del objetivo inicial (§35)
 
-| Elemento                    | Actual                                          | Objetivo |
-| --------------------------- | ----------------------------------------------- | -------- |
-| Lecciones sustantivas       | 3                                               | 40       |
-| Challenges                  | 12 (+ 6 ejercicios SQL)                         | 25       |
-| Preguntas de evaluación     | 9 knowledge checks + 12 preguntas de entrevista | 60       |
-| Flashcards                  | 32                                              | 30 ✅    |
-| Diagramas                   | 3 (1 flujo + 2 Mermaid)                         | 12       |
-| Simuladores o laboratorios  | 3 (playground TS, SQL Lab, React/Sandpack)      | 5        |
-| Escenarios de System Design | 0                                               | 5        |
-| Ruta de 7 días operativa    | No                                              | 1        |
+| Elemento                    | Actual                                      | Objetivo |
+| --------------------------- | ------------------------------------------- | -------- |
+| Lecciones sustantivas       | 3                                           | 40       |
+| Challenges                  | 11 + 4 de arquitectura (+ 6 ejercicios SQL) | 25       |
+| Preguntas de evaluación     | 9 knowledge checks + 27 del Interview Arena | 60       |
+| Flashcards                  | 32                                          | 30 ✅    |
+| Diagramas                   | 13 (10 interactivos + 1 flujo + 2 Mermaid)  | 12 ✅    |
+| Simuladores o laboratorios  | 9 (3 laboratorios + 6 simuladores)          | 5 ✅     |
+| Escenarios de System Design | 5 (4 del Studio + rate limiting)            | 5 ✅     |
+| Ruta de 7 días operativa    | No                                          | 1        |

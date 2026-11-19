@@ -1,0 +1,59 @@
+## Aislamiento
+
+Base compartida con `tenant_id` en todas las tablas y **Row Level Security** de PostgreSQL: cada transacción fija
+`SET LOCAL app.tenant_id` y las políticas filtran con `tenant_id = current_setting('app.tenant_id')::uuid`. Un olvido
+en un `WHERE` no expone datos de otro tenant. Para clientes regulados, la misma aplicación puede apuntar a una
+**base dedicada** (modelo híbrido). Base por tenant para todos multiplica migraciones, conexiones y costos: no
+compensa con un equipo chico.
+
+## Modelo de configuración
+
+```sql
+agents (id, tenant_id, name)
+agent_versions (
+  id, agent_id, tenant_id, version_number,
+  prompt, model, tools jsonb, policies jsonb,
+  status text CHECK (status IN ('draft', 'published', 'archived')),
+  created_by, created_at, published_by, published_at,
+  UNIQUE (agent_id, version_number)
+)
+agent_deployments (agent_id PRIMARY KEY, active_version_id, candidate_version_id, candidate_percent, updated_by, updated_at)
+conversations (id, tenant_id, agent_version_id, debtor_id, status, started_at)
+```
+
+- Los borradores se editan; al **publicar**, la versión queda **inmutable**.
+- `agent_deployments` apunta a la versión activa: **rollback** es cambiar el puntero, instantáneo y sin redeploy.
+- **Rollout gradual:** un porcentaje de conversaciones nuevas usa la versión candidata, elegido por hash del deudor
+  para que sea estable.
+
+## Conversaciones ligadas a una versión
+
+Cada conversación guarda `agent_version_id` al empezar y lo usa hasta terminar: una publicación no altera
+conversaciones en curso, y cualquier decisión se puede reproducir con la configuración exacta.
+
+## Herramientas seguras
+
+El modelo sólo **propone** tool calls. El servidor valida los argumentos con un esquema, verifica que la tool esté
+habilitada en esa versión y la ejecuta con el `tenant_id` de la conversación (nunca con un `tenant_id` que venga en
+los argumentos). Las tools que modifican datos son idempotentes por `tool_call_id`.
+
+## Escala y resiliencia
+
+- Mensajes entrantes y contactos programados pasan por una **cola**; **workers stateless** procesan turnos de
+  conversación con **concurrencia limitada por tenant**.
+- Las versiones publicadas se cachean (son inmutables: la invalidación es trivial, basta con la clave por versión).
+- Hacia el proveedor de LLM: **rate limiting** por tenant y global, timeouts, **circuit breaker** y fallback a otro
+  modelo o a un mensaje determinista ("te contactamos en unos minutos").
+
+## Auditoría y calidad
+
+- Eventos de publicación y rollback con quién, cuándo y el diff entre versiones.
+- Trazas por conversación: mensajes, tool calls con argumentos y resultados, versión usada, tokens, costo y latencia.
+- **Quality gate:** publicar exige pasar una suite de evaluaciones de la versión candidata (cumplimiento de
+  políticas, tool calling correcto, tono) con un umbral; el rollout gradual compara métricas antes de llegar al 100%.
+
+## Compromisos
+
+- RLS agrega una capa que hay que entender y probar (tests que verifican que un tenant no ve datos de otro).
+- Fijar la versión por conversación hace que una corrección urgente no llegue a conversaciones en curso; para casos
+  críticos se puede forzar el cierre o el cambio explícito, registrado en auditoría.

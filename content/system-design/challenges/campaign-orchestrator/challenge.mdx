@@ -1,0 +1,81 @@
+---
+id: sd.campaign-orchestrator
+title: "Orquestador de campañas de contacto"
+summary: "Decidir a quién contactar, cuándo y por qué canal, respetando ventanas horarias, prioridades, frecuencia máxima, promesas de pago y políticas por tenant."
+difficulty: advanced
+durationMinutes: 45
+order: 4
+topics: ["scheduling", "políticas configurables", "colas", "zonas horarias", "concurrencia"]
+functionalRequirements:
+  - "Cada tenant define campañas con segmento de deudores, canales (WhatsApp, SMS, email, voz) y prioridad."
+  - "Los contactos sólo ocurren dentro de la ventana horaria permitida en la zona horaria del deudor."
+  - "Se respeta una frecuencia máxima de contactos por deudor (por ejemplo, 3 por semana entre todas las campañas)."
+  - "Un deudor con promesa de pago vigente no se contacta hasta que la promesa venza."
+  - "Las políticas (ventanas, frecuencia, canales permitidos) son configurables por tenant y por regulación."
+nonFunctionalRequirements:
+  - "Nunca contactar fuera de la ventana permitida ni superar la frecuencia máxima: es un requisito legal."
+  - "Nunca contactar dos veces por el mismo motivo por una condición de carrera."
+  - "Las campañas grandes no deben saturar a los proveedores de mensajería."
+  - "Cada decisión de contactar o no contactar debe poder explicarse."
+scale:
+  - "1 millón de deudores en campañas activas."
+  - "Hasta 400.000 contactos por día, concentrados en las primeras horas de cada ventana."
+  - "Proveedores con límites de envío por segundo y por número de origen."
+clarifyingQuestions:
+  - question: "¿La frecuencia máxima se cuenta por deudor entre todas las campañas o por campaña?"
+    why: "Entre todas obliga a un contador compartido y transaccional por deudor; por campaña se simplifica pero puede violar la regulación."
+  - question: "¿Qué cuenta como contacto: el intento o la entrega?"
+    why: "Cambia cuándo se incrementa el contador y qué pasa con los envíos fallidos."
+  - question: "¿Qué pasa con un deudor que paga mientras su mensaje está en cola?"
+    why: "Requiere revalidar las políticas justo antes de enviar, no sólo al planificar."
+  - question: "¿Las ventanas dependen de la zona horaria del deudor o del tenant?"
+    why: "Con deudores en varias zonas, la planificación debe hacerse en hora local de cada uno."
+  - question: "¿Los canales tienen costos distintos y preferencias del deudor?"
+    why: "Afecta la estrategia de elección de canal y el orden de fallback."
+checklist:
+  - "Separación entre planificar (quién y cuándo) y ejecutar (enviar)."
+  - "Revalidación de políticas justo antes del envío."
+  - "Contador de frecuencia por deudor con control de concurrencia (transacción o lock por deudor)."
+  - "Ventanas horarias evaluadas en la zona horaria del deudor."
+  - "Promesas vigentes excluyen al deudor."
+  - "Políticas por tenant versionadas y evaluadas como reglas componibles."
+  - "Rate limiting hacia cada proveedor y cola de envíos."
+  - "Registro de la decisión (contactar o no) con sus motivos."
+  - "Idempotencia del envío por (deudor, campaña, motivo, día)."
+rubric:
+  - id: plan-execute
+    criterion: "Planificar y ejecutar por separado"
+    description: "Un planificador genera contactos candidatos y un ejecutor los envía revalidando políticas al momento del envío."
+    weight: 3
+  - id: frequency
+    criterion: "Frecuencia sin carreras"
+    description: "Contador por deudor con transacción, lock por deudor o restricción, de modo que dos workers no superen el máximo."
+    weight: 3
+  - id: windows
+    criterion: "Ventanas horarias correctas"
+    description: "Evalúa la ventana en la zona horaria del deudor, incluidos feriados y cambios de horario."
+    weight: 2
+  - id: policies
+    criterion: "Políticas configurables y explicables"
+    description: "Reglas por tenant y regulación, versionadas, componibles, con el motivo de cada decisión registrado."
+    weight: 2
+  - id: throughput
+    criterion: "Capacidad y límites de proveedores"
+    description: "Distribuye los envíos en la ventana, cola con rate limiting por proveedor y backpressure."
+    weight: 2
+  - id: idempotency
+    criterion: "Envío idempotente"
+    description: "Clave por deudor, campaña, motivo y día para no enviar dos veces el mismo contacto."
+    weight: 1
+relatedPatterns: ["strategy", "state", "circuit-breaker"]
+relatedSimulations: ["rate-limiting", "queue-processing"]
+---
+
+Las empresas cliente lanzan campañas de contacto a sus deudores por distintos canales. Hoy un cron recorre la lista
+cada mañana y envía mensajes a todos los que cumplen el segmento.
+
+Los problemas: deudores contactados a las 7 de la mañana en su zona horaria, personas que pagaron ayer y siguen
+recibiendo mensajes, deudores contactados por dos campañas el mismo día superando el máximo legal, y el proveedor
+de WhatsApp bloqueando envíos por exceso de tráfico.
+
+Diseñá el orquestador de campañas.

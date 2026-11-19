@@ -1,0 +1,121 @@
+---
+id: pattern.strategy
+kind: design
+category: behavioral
+title: "Strategy"
+summary: "Encapsular algoritmos intercambiables detrás de una misma interfaz y elegir uno en tiempo de ejecución."
+difficulty: basic
+order: 10
+definition: "Strategy define una familia de algoritmos, encapsula cada uno detrás de una interfaz común y permite elegir cuál usar sin que el código que lo invoca cambie. En TypeScript, una estrategia suele ser simplemente una función con una firma conocida."
+problem: "Un cálculo tiene varias variantes que dependen del contexto (el tenant, el segmento, el canal) y el código se llena de condicionales que crecen con cada variante nueva. Cada cambio en una variante obliga a tocar la función que las contiene a todas."
+benefits:
+  - "Agregar una variante es agregar una implementación, sin modificar las existentes (principio abierto/cerrado)."
+  - "Cada variante se prueba de forma aislada con entradas y salidas concretas."
+  - "La elección de la variante queda en un solo lugar (configuración, tenant, feature flag)."
+costs:
+  - "Más piezas para leer: hay que ir a la implementación para saber qué hace cada caso."
+  - "Si las variantes necesitan datos muy distintos, la interfaz común se vuelve forzada."
+alternatives:
+  - name: "Un switch o un mapa de funciones"
+    when: "Con dos o tres variantes estables y simples, un switch exhaustivo sobre una unión discriminada es más directo y el compilador detecta casos faltantes."
+  - name: "Configuración declarativa"
+    when: "Si las variantes sólo difieren en parámetros (pesos, umbrales), basta con datos de configuración y una única función."
+commonMistakes:
+  - "Crear jerarquías de clases cuando una función alcanza: en TypeScript las funciones son valores de primera clase."
+  - "Dejar la selección de la estrategia repartida en varios lugares del código."
+  - "Aplicarlo a variaciones que nunca existieron: es abstracción especulativa (YAGNI)."
+avoidWhen:
+  - "Hay un único algoritmo y no hay evidencia de que vaya a variar."
+  - "Las variantes difieren sólo en valores numéricos que pueden ser configuración."
+interviewQuestions:
+  - question: "¿Qué diferencia hay entre Strategy y un simple if/else?"
+    answer: "Funcionalmente pueden hacer lo mismo. Strategy separa cada variante en su propia unidad con una interfaz común, de modo que agregar una variante no modifica el código existente y cada una se prueba aislada. Con dos variantes estables, el if/else (o un switch exhaustivo) suele ser mejor por simplicidad; Strategy paga cuando las variantes crecen o se eligen por configuración."
+  - question: "¿Cómo implementarías Strategy en TypeScript sin clases?"
+    answer: "Definiendo un tipo función, por ejemplo type PriorityStrategy = (debt: Debt) => number, y un Record que mapea un identificador (el segmento o el tenant) a la función. La selección es una búsqueda en el mapa y cada estrategia es una función pura fácil de testear."
+  - question: "¿Strategy viola YAGNI?"
+    answer: "Sólo si se introduce antes de que exista la variación. Cuando ya hay dos o más variantes reales y una tercera en camino, encapsularlas reduce el costo de cambio; antes de eso, es complejidad especulativa."
+diagrams: []
+related: ["state", "decorator"]
+relatedLessons: []
+tags: ["strategy", "polimorfismo", "open/closed", "funciones"]
+---
+
+## Motivación
+
+Una plataforma de cobranzas prioriza a quién contactar primero. Cada tenant (cada empresa cliente) tiene su
+criterio: una financiera prioriza el monto vencido, otra la antigüedad de la mora y otra la probabilidad de pago
+estimada. El criterio cambia por tenant y se agregan criterios nuevos cuando entra un cliente nuevo.
+
+## Ejemplo incorrecto
+
+```ts
+function priority(debt: Debt, tenant: Tenant): number {
+  if (tenant.plan === "financiera") {
+    return debt.overdueCents / 100;
+  } else if (tenant.plan === "retail") {
+    return debt.daysOverdue * 2 + (debt.hasPromise ? -50 : 0);
+  } else if (tenant.id === "acme") {
+    // Caso especial agregado de urgencia
+    return debt.daysOverdue > 90 ? 1000 : debt.overdueCents / 1000;
+  }
+  return 0;
+}
+```
+
+Cada tenant nuevo modifica esta función, los casos especiales se mezclan con la regla general y no hay forma de
+probar un criterio sin pasar por todos los demás.
+
+## Implementación correcta
+
+```ts
+export interface DebtSnapshot {
+  readonly overdueCents: number;
+  readonly daysOverdue: number;
+  readonly hasActivePromise: boolean;
+}
+
+/** Una estrategia es una función pura: mayor número, mayor prioridad. */
+export type PriorityStrategy = (debt: DebtSnapshot) => number;
+
+export const byAmount: PriorityStrategy = (debt) => debt.overdueCents;
+
+export const byAge: PriorityStrategy = (debt) => debt.daysOverdue * 100 - (debt.hasActivePromise ? 5_000 : 0);
+
+const STRATEGIES = { "by-amount": byAmount, "by-age": byAge } satisfies Record<string, PriorityStrategy>;
+export type StrategyId = keyof typeof STRATEGIES;
+
+/** La selección ocurre en un único lugar, a partir de la configuración del tenant. */
+export function prioritize(debts: readonly DebtSnapshot[], strategyId: StrategyId): DebtSnapshot[] {
+  const strategy = STRATEGIES[strategyId];
+  return [...debts].sort((a, b) => strategy(b) - strategy(a));
+}
+```
+
+Agregar un criterio es agregar una función y una clave. `satisfies` verifica que todas cumplan la firma y
+`StrategyId` impide configurar un criterio inexistente.
+
+## Ejercicio
+
+Un tenant pide combinar criterios: 70% monto y 30% antigüedad. ¿Cómo lo agregarías sin modificar `byAmount` ni
+`byAge`?
+
+<Reveal>
+
+Con una estrategia que compone otras. Como cada criterio tiene escalas distintas, conviene normalizarlos antes de
+combinarlos; aquí se muestra la idea:
+
+```ts
+export const weighted =
+  (parts: ReadonlyArray<{ strategy: PriorityStrategy; weight: number }>): PriorityStrategy =>
+  (debt) =>
+    parts.reduce((total, { strategy, weight }) => total + strategy(debt) * weight, 0);
+
+const mixed = weighted([
+  { strategy: byAmount, weight: 0.7 },
+  { strategy: byAge, weight: 0.3 },
+]);
+```
+
+Las estrategias existentes no cambian y la nueva se prueba con casos concretos.
+
+</Reveal>

@@ -1,0 +1,129 @@
+---
+id: pattern.adapter
+kind: design
+category: structural
+title: "Adapter"
+summary: "Traducir la interfaz de un componente externo a la interfaz que tu aplicación necesita."
+difficulty: basic
+order: 20
+definition: "Adapter convierte la interfaz de un componente existente (normalmente de terceros) en otra que el código cliente espera. Permite que el resto de la aplicación dependa de un contrato propio y no de los detalles de un proveedor."
+problem: "El código de negocio llama directamente al SDK de un proveedor: sus tipos, nombres, errores y formatos se esparcen por todo el sistema. Cambiar de proveedor, o probar sin él, obliga a tocar decenas de archivos."
+benefits:
+  - "El negocio depende de un contrato propio, pequeño y estable."
+  - "Cambiar de proveedor o agregar otro afecta a una sola implementación."
+  - "Los tests usan un adaptador falso sin red ni credenciales."
+  - "Los errores y formatos del proveedor se traducen en un único lugar."
+costs:
+  - "Una capa más que mantener cuando el proveedor cambia su API."
+  - "Si el contrato propio copia todo el SDK, no aporta aislamiento."
+alternatives:
+  - name: "Usar el SDK directamente"
+    when: "En scripts, prototipos o cuando el proveedor es parte esencial del dominio y nunca se reemplazará ni se probará sin él."
+  - name: "Facade"
+    when: "Cuando el objetivo es simplificar un subsistema complejo propio, más que traducir una interfaz ajena."
+commonMistakes:
+  - "Diseñar la interfaz del adaptador a partir del SDK en lugar de a partir de lo que el negocio necesita."
+  - "Dejar escapar tipos o excepciones del proveedor a través de la interfaz."
+  - "Poner reglas de negocio dentro del adaptador."
+avoidWhen:
+  - "El componente ya tiene la interfaz que necesitás."
+  - "Es un script de un solo uso sin tests."
+interviewQuestions:
+  - question: "¿Qué relación hay entre Adapter y la arquitectura hexagonal?"
+    answer: "En hexagonal, los adaptadores de salida son exactamente este patrón aplicado de forma sistemática: la aplicación define un puerto (interfaz) según sus necesidades y cada adaptador traduce ese puerto a una tecnología concreta (base de datos, proveedor de mensajería, LLM)."
+  - question: "¿Cómo probarías el adaptador en sí?"
+    answer: "Con tests de integración contra el proveedor real en un entorno de prueba (o contra un servidor simulado que reproduce sus respuestas, incluidos errores y timeouts), verificando el mapeo de datos y de errores. El resto del sistema se prueba con un adaptador falso."
+diagrams: []
+related: ["hexagonal-architecture", "decorator"]
+relatedLessons: []
+tags: ["adapter", "integraciones", "proveedores", "anticorruption"]
+---
+
+## Motivación
+
+La plataforma envía mensajes de cobranza por un proveedor de WhatsApp. El negocio sólo necesita "enviar este
+mensaje a este deudor y saber si se aceptó". El SDK del proveedor, en cambio, tiene su propio formato de números,
+plantillas con parámetros posicionales, códigos de error numéricos y excepciones propias.
+
+## Ejemplo incorrecto
+
+```ts
+// En el caso de uso de campañas:
+import { WaClient, WaError } from "proveedor-whatsapp-sdk";
+
+const client = new WaClient(process.env.WA_TOKEN!);
+
+export async function contactDebtor(debtor: Debtor) {
+  try {
+    await client.messages.create({
+      to: `whatsapp:+${debtor.phone.replace(/\D/g, "")}`,
+      template: { name: "recordatorio_v3", params: [debtor.name, String(debtor.amountCents / 100)] },
+    });
+  } catch (error) {
+    if (error instanceof WaError && error.code === 131047) {
+      // Ventana de 24 h cerrada: ¿qué significa para el negocio?
+    }
+    throw error;
+  }
+}
+```
+
+El caso de uso conoce el formato del número, el nombre de la plantilla del proveedor y sus códigos de error.
+
+## Implementación correcta
+
+```ts
+// Contrato definido por la aplicación (puerto):
+export type SendResult =
+  | { status: "accepted"; messageId: string }
+  | { status: "rejected"; reason: "outside-window" | "invalid-number" | "provider-error" };
+
+export interface MessageSender {
+  sendReminder(input: { phoneE164: string; debtorName: string; amountCents: number }): Promise<SendResult>;
+}
+
+// Adaptador: la única pieza que conoce el SDK.
+export class WhatsAppSender implements MessageSender {
+  constructor(private readonly client: WaClient) {}
+
+  async sendReminder(input: {
+    phoneE164: string;
+    debtorName: string;
+    amountCents: number;
+  }): Promise<SendResult> {
+    try {
+      const response = await this.client.messages.create({
+        to: `whatsapp:${input.phoneE164}`,
+        template: {
+          name: "recordatorio_v3",
+          params: [input.debtorName, (input.amountCents / 100).toFixed(2)],
+        },
+      });
+      return { status: "accepted", messageId: response.sid };
+    } catch (error) {
+      if (error instanceof WaError && error.code === 131047)
+        return { status: "rejected", reason: "outside-window" };
+      if (error instanceof WaError && error.code === 21211)
+        return { status: "rejected", reason: "invalid-number" };
+      return { status: "rejected", reason: "provider-error" };
+    }
+  }
+}
+```
+
+El caso de uso recibe un `MessageSender` y trabaja con `SendResult`, un tipo propio que expresa los resultados que
+le importan al negocio. En los tests se inyecta un `MessageSender` falso.
+
+## Ejercicio
+
+Se agrega un segundo canal (SMS) con otro proveedor. ¿Qué cambia en el caso de uso? ¿Dónde decidirías qué canal
+usar?
+
+<Reveal>
+
+El caso de uso no cambia si sigue dependiendo de `MessageSender`. Se agrega un `SmsSender` que implementa el mismo
+contrato. La decisión de canal es una regla de negocio (preferencia del deudor, ventana horaria, costo) y no debe
+vivir en ningún adaptador: puede ser una estrategia que elige el `MessageSender` adecuado, o un `MessageSender`
+compuesto que intenta WhatsApp y cae a SMS ante `outside-window`.
+
+</Reveal>

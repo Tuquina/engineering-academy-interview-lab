@@ -7,7 +7,8 @@
  * 3. Se puntúa por dónde aparece (título > palabras clave > contexto) y por tipo de entrada.
  */
 
-export type SearchEntryKind = "lesson" | "section" | "course" | "path" | "cheatsheet" | "page";
+export type SearchEntryKind =
+  "lesson" | "section" | "course" | "path" | "cheatsheet" | "page" | "pattern" | "practice";
 
 export interface SearchEntry {
   readonly id: string;
@@ -29,6 +30,8 @@ const KIND_BOOST: Readonly<Record<SearchEntryKind, number>> = {
   course: 3,
   path: 2,
   cheatsheet: 2,
+  pattern: 3,
+  practice: 2,
   section: 0,
 };
 

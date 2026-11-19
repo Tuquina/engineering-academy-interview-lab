@@ -1,0 +1,112 @@
+---
+id: pattern.cqrs
+kind: architecture
+category: distributed-data
+title: "CQRS"
+summary: "Separar el modelo que modifica datos (comandos) del modelo que los consulta (queries)."
+difficulty: advanced
+order: 110
+definition: "Command Query Responsibility Segregation separa las operaciones que cambian el estado (comandos, que validan invariantes) de las que lo leen (consultas, optimizadas para mostrar). Puede ser tan simple como dos conjuntos de funciones sobre la misma base, o tan completo como dos almacenamientos sincronizados por eventos."
+problem: "Un único modelo intenta servir a dos necesidades opuestas: las escrituras necesitan agregados normalizados con reglas, y las pantallas necesitan datos desnormalizados, filtrados y ordenados. El resultado son consultas lentas con muchos JOINs o un modelo de dominio deformado para servir a la interfaz."
+benefits:
+  - "Cada lado se optimiza para su trabajo: reglas en uno, lectura rápida en el otro."
+  - "Las lecturas escalan de forma independiente (réplicas, cachés, índices de búsqueda)."
+  - "El modelo de dominio deja de tener campos y relaciones que sólo existen para la interfaz."
+costs:
+  - "Con almacenamientos separados, la lectura es eventualmente consistente."
+  - "Más infraestructura: proyecciones, reprocesos y monitoreo del retraso."
+  - "Duplicación de datos que hay que mantener sincronizados."
+alternatives:
+  - name: "Un único modelo con consultas de lectura dedicadas"
+    when: "La versión mínima de CQRS: misma base, pero las pantallas usan consultas SQL específicas en lugar de cargar agregados. Suele ser suficiente."
+  - name: "Vistas materializadas o réplicas de lectura"
+    when: "Cuando el problema es sólo el costo de las lecturas y la base puede resolverlo sin proyecciones propias."
+commonMistakes:
+  - "Confundir CQRS con Event Sourcing: son independientes y se pueden usar por separado."
+  - "Aplicarlo a todo el sistema en lugar de sólo a las áreas con tensión real entre lectura y escritura."
+  - "Leer de la vista inmediatamente después de un comando y mostrar datos viejos sin manejarlo en la interfaz."
+avoidWhen:
+  - "Dominios CRUD sin reglas complejas ni volumen de lectura que lo justifique."
+  - "Cuando el negocio no tolera ver datos con algunos segundos de atraso y no hay forma de mitigarlo."
+interviewQuestions:
+  - question: "¿Qué diferencia hay entre CQRS y Event Sourcing?"
+    answer: "CQRS separa modelos de lectura y escritura. Event Sourcing guarda el estado como una secuencia de eventos en lugar del estado actual. Se combinan bien (los eventos alimentan las proyecciones de lectura), pero CQRS no requiere Event Sourcing y Event Sourcing no obliga a separar lectura de escritura."
+  - question: "¿Cómo manejarías la consistencia eventual en la interfaz?"
+    answer: "Devolviendo desde el comando lo necesario para actualizar la interfaz de forma optimista, leyendo del lado de escritura justo después de una modificación propia (read-your-writes) o mostrando un estado 'procesando' hasta que la proyección alcance la versión del comando."
+  - question: "¿Cómo reconstruís una proyección si tenía un bug?"
+    answer: "Se corrige el proyector y se reprocesan los eventos desde el principio (o desde un punto conocido) hacia una vista nueva; cuando alcanza al presente, se cambia la lectura a la vista nueva. Requiere conservar los eventos y que el proyector sea idempotente."
+diagrams: ["cqrs"]
+related: ["repository", "transactional-outbox", "hexagonal-architecture"]
+relatedLessons: []
+tags: ["cqrs", "lecturas", "proyecciones", "consistencia eventual"]
+---
+
+## Motivación
+
+La bandeja de los operadores muestra miles de deudores ordenados por prioridad, con saldo, última gestión, promesa
+activa y canal preferido. Calcularlo en cada carga con JOINs sobre deudas, cuotas, gestiones y promesas es lento.
+Mientras tanto, registrar una promesa requiere validar reglas sobre una sola deuda.
+
+## Ejemplo incorrecto
+
+```ts
+// Para la bandeja se cargan agregados completos y se ordena en memoria
+export async function getInbox(repo: DebtRepository, tenantId: string) {
+  const debts = await repo.findAllByTenant(tenantId); // miles de agregados con todas sus cuotas
+  return debts
+    .map((d) => ({ debtor: d.debtorName, balance: d.balance(), priority: d.computePriority() }))
+    .sort((a, b) => b.priority - a.priority)
+    .slice(0, 50);
+}
+```
+
+El modelo de escritura se usa para leer: carga todo, calcula en memoria y no escala.
+
+## Implementación correcta
+
+```ts
+// Lado de escritura: valida y guarda. Publica un evento vía outbox.
+export async function registerPromise(
+  deps: WriteDeps,
+  cmd: RegisterPromiseCommand,
+): Promise<{ promiseId: string }> {
+  return deps.unitOfWork(async (tx) => {
+    const debt = await tx.debts.findById(cmd.debtId);
+    if (!debt) throw new DomainError("debt-not-found");
+    const promise = debt.promise(cmd.amountCents, cmd.dueDate);
+    await tx.debts.save(debt);
+    await tx.outbox.add({ type: "PromiseRegistered", debtId: debt.id, promiseId: promise.id });
+    return { promiseId: promise.id };
+  });
+}
+
+// Proyector: mantiene una fila por deudor en la vista de la bandeja (idempotente por versión).
+export async function onPromiseRegistered(db: Db, event: PromiseRegisteredEvent) {
+  await db.execute(sql`
+    UPDATE debtor_inbox
+    SET has_active_promise = true, priority = priority - 500, version = ${event.version}
+    WHERE debt_id = ${event.debtId} AND version < ${event.version}`);
+}
+
+// Lado de lectura: una consulta simple sobre la vista.
+export async function getInbox(db: Db, tenantId: string, page: number) {
+  return db.execute(sql`
+    SELECT debtor_name, balance_cents, last_contact_at, has_active_promise
+    FROM debtor_inbox WHERE tenant_id = ${tenantId}
+    ORDER BY priority DESC LIMIT 50 OFFSET ${page * 50}`);
+}
+```
+
+## Ejercicio
+
+Un operador registra una promesa y vuelve a la bandeja: el deudor sigue apareciendo sin promesa durante dos
+segundos y el operador lo registra de nuevo. ¿Qué cambiarías?
+
+<Reveal>
+
+Primero, la defensa en el lado de escritura: la regla "una sola promesa activa" (y un índice único parcial)
+rechaza el duplicado aunque la vista esté atrasada. Segundo, la interfaz: tras el comando, actualizar la fila de
+forma optimista con lo que devolvió el comando, o marcarla como "actualizando" hasta que la vista alcance la
+versión. La consistencia eventual se diseña, no se ignora.
+
+</Reveal>

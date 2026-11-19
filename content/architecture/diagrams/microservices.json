@@ -1,0 +1,134 @@
+{
+  "id": "microservices",
+  "title": "Microservicios",
+  "description": "Servicios desplegados por separado, cada uno con su base de datos, detrás de un API Gateway. Se comunican por HTTP cuando necesitan una respuesta y por un broker cuando publican hechos.",
+  "kind": "architecture",
+  "tags": ["microservicios", "api gateway", "base por servicio"],
+  "nodes": [
+    {
+      "id": "client",
+      "label": "Clientes",
+      "kind": "actor",
+      "column": 0,
+      "row": 1,
+      "responsibility": "Panel web, app móvil o integraciones de tenants.",
+      "examples": ["Panel de operadores", "API de un tenant"]
+    },
+    {
+      "id": "gateway",
+      "label": "API Gateway",
+      "kind": "service",
+      "column": 1,
+      "row": 1,
+      "responsibility": "Punto de entrada único: autenticación, rate limiting, enrutamiento y, a veces, agregación de respuestas.",
+      "examples": ["Gateway gestionado", "Backend for Frontend del panel"]
+    },
+    {
+      "id": "debts-svc",
+      "label": "Servicio de deudas",
+      "kind": "service",
+      "column": 2,
+      "row": 0,
+      "responsibility": "Dueño del ciclo de vida de las deudas. Se despliega y escala de forma independiente.",
+      "examples": ["Node.js con su propio pipeline"]
+    },
+    {
+      "id": "payments-svc",
+      "label": "Servicio de pagos",
+      "kind": "service",
+      "column": 2,
+      "row": 1,
+      "responsibility": "Registra pagos y publica eventos. Suele tener requisitos de consistencia y auditoría más estrictos.",
+      "examples": ["Servicio con alta disponibilidad y auditoría"]
+    },
+    {
+      "id": "contact-svc",
+      "label": "Servicio de contactos",
+      "kind": "service",
+      "column": 2,
+      "row": 2,
+      "responsibility": "Envía mensajes por canal y respeta ventanas horarias. Escala con el volumen de campañas.",
+      "examples": ["Workers que consumen una cola de envíos"]
+    },
+    {
+      "id": "debts-db",
+      "label": "DB deudas",
+      "kind": "database",
+      "column": 3,
+      "row": 0,
+      "responsibility": "Base exclusiva del servicio de deudas: nadie más la consulta directamente.",
+      "examples": ["PostgreSQL"]
+    },
+    {
+      "id": "payments-db",
+      "label": "DB pagos",
+      "kind": "database",
+      "column": 3,
+      "row": 1,
+      "responsibility": "Base exclusiva de pagos.",
+      "examples": ["PostgreSQL con restricciones de unicidad por id externo"]
+    },
+    {
+      "id": "broker",
+      "label": "Broker de eventos",
+      "kind": "queue",
+      "column": 4,
+      "row": 1,
+      "responsibility": "Distribuye eventos entre servicios sin acoplarlos en el tiempo: el consumidor puede estar caído y procesar después.",
+      "examples": ["Kafka", "SQS + SNS", "RabbitMQ"]
+    },
+    {
+      "id": "observability",
+      "label": "Observabilidad",
+      "kind": "external",
+      "column": 4,
+      "row": 2,
+      "responsibility": "Imprescindible con muchos servicios: trazas distribuidas, logs correlacionados y métricas por servicio.",
+      "examples": ["OpenTelemetry", "Trace ID propagado en headers y mensajes"]
+    }
+  ],
+  "edges": [
+    { "id": "s-client-gateway", "from": "client", "to": "gateway", "kind": "sync" },
+    { "id": "s-gateway-debts", "from": "gateway", "to": "debts-svc", "kind": "sync" },
+    { "id": "s-gateway-payments", "from": "gateway", "to": "payments-svc", "kind": "sync" },
+    { "id": "s-debts-db", "from": "debts-svc", "to": "debts-db", "kind": "sync" },
+    { "id": "s-payments-db", "from": "payments-svc", "to": "payments-db", "kind": "sync" },
+    {
+      "id": "s-payments-broker",
+      "from": "payments-svc",
+      "to": "broker",
+      "kind": "async",
+      "label": "PaymentRegistered"
+    },
+    { "id": "s-broker-contact", "from": "broker", "to": "contact-svc", "kind": "async" },
+    {
+      "id": "s-contact-obs",
+      "from": "contact-svc",
+      "to": "observability",
+      "kind": "async",
+      "label": "trazas"
+    }
+  ],
+  "steps": [
+    {
+      "title": "1. El gateway centraliza lo transversal",
+      "description": "Autenticación y límites se aplican una vez. El riesgo es convertirlo en un lugar donde se acumula lógica de negocio.",
+      "highlight": ["client", "gateway", "s-client-gateway"]
+    },
+    {
+      "title": "2. Cada servicio es dueño de su base",
+      "description": "Permite desplegar y cambiar el esquema sin coordinar con otros equipos. A cambio, no hay JOINs ni transacciones entre servicios.",
+      "highlight": ["debts-svc", "debts-db", "payments-svc", "payments-db", "s-debts-db", "s-payments-db"]
+    },
+    {
+      "title": "3. Los hechos viajan por el broker",
+      "description": "El servicio de contactos se entera del pago por un evento. La consistencia entre servicios es eventual: durante un momento puede enviarse un mensaje a alguien que ya pagó, y el diseño debe tolerarlo.",
+      "highlight": ["payments-svc", "broker", "contact-svc", "s-payments-broker", "s-broker-contact"]
+    },
+    {
+      "title": "4. La operación se vuelve distribuida",
+      "description": "Fallas parciales, timeouts y versiones de contratos aparecen en cada llamada. Sin trazas distribuidas, diagnosticar un error es muy costoso.",
+      "highlight": ["observability", "s-contact-obs"]
+    }
+  ]
+}

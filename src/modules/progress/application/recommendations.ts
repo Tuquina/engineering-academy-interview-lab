@@ -2,7 +2,7 @@ import type { LessonIndex } from "@/shared/kernel/lesson-link";
 import { findNextLesson, type ProgressState } from "../domain/progress";
 
 export type RecommendationKind =
-  "flashcards" | "review-lesson" | "continue-lesson" | "prerequisite" | "next-lesson";
+  "flashcards" | "interview-review" | "review-lesson" | "continue-lesson" | "prerequisite" | "next-lesson";
 
 export interface Recommendation {
   readonly id: string;
@@ -23,6 +23,8 @@ export interface RecommendationInputs {
   readonly dueFlashcards: number;
   /** Lecciones asociadas a flashcards con fallos repetidos (2 o más lapsos). */
   readonly strugglingLessonIds: readonly string[];
+  /** Preguntas de entrevista con criterios faltantes en la última respuesta (Interview Arena). */
+  readonly weakInterviewQuestions?: number;
   readonly limit?: number;
 }
 
@@ -30,11 +32,12 @@ export interface RecommendationInputs {
  * Recomienda qué practicar con reglas explícitas y priorizadas (MASTER_PROMPT §22), sin IA:
  *
  * 1. **Repasos vencidos de flashcards:** posponerlos hace que se acumulen y se olviden.
- * 2. **Errores recientes:** lecciones con preguntas cuya última respuesta fue incorrecta.
- * 3. **Conceptos débiles:** lecciones ligadas a flashcards que se fallaron repetidamente.
- * 4. **Prerrequisitos faltantes** de la próxima lección de la ruta.
- * 5. **Lecciones empezadas** y no terminadas.
- * 6. **Próxima lección** de la ruta activa.
+ * 2. **Puntos débiles de entrevista:** preguntas en las que faltaron criterios en la última respuesta.
+ * 3. **Errores recientes:** lecciones con preguntas cuya última respuesta fue incorrecta.
+ * 4. **Conceptos débiles:** lecciones ligadas a flashcards que se fallaron repetidamente.
+ * 5. **Prerrequisitos faltantes** de la próxima lección de la ruta.
+ * 6. **Lecciones empezadas** y no terminadas.
+ * 7. **Próxima lección** de la ruta activa.
  *
  * Nunca repite la misma lección en dos recomendaciones.
  */
@@ -57,6 +60,17 @@ export function buildRecommendations(inputs: RecommendationInputs): Recommendati
       title: `Repasar ${inputs.dueFlashcards} ${inputs.dueFlashcards === 1 ? "flashcard vencida" : "flashcards vencidas"}`,
       href: "/flashcards",
       reason: "Repasar en el momento indicado fija la memoria; si se posterga, los repasos se acumulan.",
+    });
+  }
+
+  const weak = inputs.weakInterviewQuestions ?? 0;
+  if (weak > 0) {
+    result.push({
+      id: "interview-review",
+      kind: "interview-review",
+      title: `Repasar ${weak} ${weak === 1 ? "pregunta de entrevista" : "preguntas de entrevista"}`,
+      href: "/interview/review",
+      reason: "En tu última respuesta faltaron criterios esperados; repasarlas cierra esas brechas.",
     });
   }
 

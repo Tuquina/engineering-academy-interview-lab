@@ -1,0 +1,146 @@
+{
+  "id": "layers-and-dependencies",
+  "title": "Capas y dirección de dependencias",
+  "description": "La misma aplicación en dos estilos: arquitectura en capas clásica (el negocio depende del acceso a datos) y Clean Architecture (el acceso a datos depende de interfaces definidas por los casos de uso).",
+  "kind": "dependency",
+  "tags": ["clean architecture", "capas", "inversión de dependencias"],
+  "nodes": [
+    {
+      "id": "clean",
+      "label": "Clean Architecture",
+      "kind": "boundary",
+      "column": 0,
+      "row": 0,
+      "responsibility": "Círculos concéntricos aplanados: de izquierda (más concreto) a derecha (más estable).",
+      "examples": ["Regla de dependencia: el código fuente sólo apunta hacia el centro"]
+    },
+    {
+      "id": "frameworks",
+      "label": "Frameworks y drivers",
+      "kind": "ui",
+      "column": 0,
+      "row": 0,
+      "parent": "clean",
+      "responsibility": "Next.js, el driver de PostgreSQL, el SDK del proveedor de LLM. Se cambian sin tocar reglas de negocio.",
+      "examples": ["app/ de Next.js", "Cliente de Drizzle", "SDK de un proveedor externo"]
+    },
+    {
+      "id": "adapters",
+      "label": "Adaptadores de interfaz",
+      "kind": "adapter",
+      "column": 1,
+      "row": 0,
+      "parent": "clean",
+      "responsibility": "Controllers, presenters y gateways: convierten entre el formato de los frameworks y el de los casos de uso.",
+      "examples": ["Route Handler delgado", "DrizzleDebtRepository", "Presenter que arma el DTO de respuesta"]
+    },
+    {
+      "id": "usecases",
+      "label": "Casos de uso",
+      "kind": "port",
+      "column": 2,
+      "row": 0,
+      "parent": "clean",
+      "responsibility": "Reglas de la aplicación: orquestan entidades y declaran las interfaces (puertos) que necesitan.",
+      "examples": ["AssignDebtsToCampaign", "interface DebtRepository"]
+    },
+    {
+      "id": "entities",
+      "label": "Entidades",
+      "kind": "domain",
+      "column": 3,
+      "row": 0,
+      "parent": "clean",
+      "responsibility": "Reglas de negocio de la empresa, las más estables. No dependen de nada.",
+      "examples": ["Debt, Installment, PaymentPromise", "Value objects Money y DateRange"]
+    },
+    {
+      "id": "layered",
+      "label": "Arquitectura en capas clásica",
+      "kind": "boundary",
+      "column": 1,
+      "row": 2,
+      "responsibility": "Cada capa depende de la de abajo. Simple y conocida, pero el negocio queda acoplado a la persistencia.",
+      "examples": ["Controller → Service → DAO"]
+    },
+    {
+      "id": "presentation",
+      "label": "Presentación",
+      "kind": "ui",
+      "column": 1,
+      "row": 2,
+      "parent": "layered",
+      "responsibility": "Controllers y vistas.",
+      "examples": ["DebtController"]
+    },
+    {
+      "id": "business",
+      "label": "Negocio",
+      "kind": "service",
+      "column": 2,
+      "row": 2,
+      "parent": "layered",
+      "responsibility": "Servicios con reglas de negocio que importan directamente el acceso a datos.",
+      "examples": ["DebtService importa DebtDao"]
+    },
+    {
+      "id": "data",
+      "label": "Acceso a datos",
+      "kind": "database",
+      "column": 3,
+      "row": 2,
+      "parent": "layered",
+      "responsibility": "DAOs u ORM. Al estar 'abajo', sus tipos y excepciones se filtran hacia el negocio.",
+      "examples": ["DebtDao con el ORM", "Entidades del ORM usadas como modelo de negocio"]
+    }
+  ],
+  "edges": [
+    { "id": "d-frameworks-adapters", "from": "frameworks", "to": "adapters", "kind": "dependency" },
+    {
+      "id": "d-adapters-usecases",
+      "from": "adapters",
+      "to": "usecases",
+      "kind": "dependency",
+      "label": "implementa puertos"
+    },
+    { "id": "d-usecases-entities", "from": "usecases", "to": "entities", "kind": "dependency" },
+    { "id": "d-presentation-business", "from": "presentation", "to": "business", "kind": "dependency" },
+    {
+      "id": "d-business-data",
+      "from": "business",
+      "to": "data",
+      "kind": "dependency",
+      "label": "importa el DAO"
+    }
+  ],
+  "steps": [
+    {
+      "title": "1. Capas clásicas: todo apunta hacia los datos",
+      "description": "El servicio de negocio importa el DAO. Cambiar el ORM, o testear el negocio sin base de datos, obliga a tocar o simular la capa de datos.",
+      "highlight": ["presentation", "business", "data", "d-presentation-business", "d-business-data"]
+    },
+    {
+      "title": "2. Clean: las dependencias apuntan hacia el centro",
+      "description": "Frameworks dependen de adaptadores, adaptadores de casos de uso, casos de uso de entidades. Nada en el centro conoce lo de afuera.",
+      "highlight": [
+        "frameworks",
+        "adapters",
+        "usecases",
+        "entities",
+        "d-frameworks-adapters",
+        "d-adapters-usecases",
+        "d-usecases-entities"
+      ]
+    },
+    {
+      "title": "3. La inversión está en el repositorio",
+      "description": "El caso de uso declara la interfaz DebtRepository; el adaptador la implementa. La flecha de dependencia va del adaptador al caso de uso, al revés que en capas.",
+      "highlight": ["adapters", "usecases", "d-adapters-usecases", "d-business-data"]
+    },
+    {
+      "title": "4. El costo",
+      "description": "Más tipos e indirección. Para un CRUD sin reglas, la arquitectura en capas suele ser suficiente; la inversión paga cuando hay lógica de negocio que proteger y probar.",
+      "highlight": ["business", "usecases"]
+    }
+  ]
+}

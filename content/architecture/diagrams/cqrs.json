@@ -1,0 +1,146 @@
+{
+  "id": "cqrs",
+  "title": "CQRS: comandos y consultas separados",
+  "description": "El modelo de escritura protege invariantes y el modelo de lectura está optimizado para consultas. Una proyección mantiene la vista de lectura a partir de los eventos del lado de escritura.",
+  "kind": "architecture",
+  "tags": ["cqrs", "proyecciones", "consistencia eventual"],
+  "nodes": [
+    {
+      "id": "ui",
+      "label": "Panel de operadores",
+      "kind": "ui",
+      "column": 0,
+      "row": 1,
+      "responsibility": "Envía comandos (registrar promesa de pago) y hace consultas (bandeja priorizada de deudores).",
+      "examples": ["Formulario de promesa", "Tabla paginada con filtros"]
+    },
+    {
+      "id": "write-side",
+      "label": "Lado de escritura",
+      "kind": "boundary",
+      "column": 1,
+      "row": 0,
+      "responsibility": "Optimizado para validar y mantener invariantes, no para listar.",
+      "examples": ["Agregados con reglas de negocio"]
+    },
+    {
+      "id": "command",
+      "label": "Command handler",
+      "kind": "service",
+      "column": 1,
+      "row": 0,
+      "parent": "write-side",
+      "responsibility": "Recibe RegisterPromise, carga el agregado, aplica la regla y guarda. Devuelve éxito o error, no datos para pantalla.",
+      "examples": ["registerPromise(command)"]
+    },
+    {
+      "id": "aggregate",
+      "label": "Agregado Debt",
+      "kind": "domain",
+      "column": 2,
+      "row": 0,
+      "parent": "write-side",
+      "responsibility": "Invariantes: no más de una promesa activa, monto no mayor al saldo.",
+      "examples": ["debt.promise(amount, dueDate)"]
+    },
+    {
+      "id": "write-db",
+      "label": "Base de escritura",
+      "kind": "database",
+      "column": 3,
+      "row": 0,
+      "parent": "write-side",
+      "responsibility": "Modelo normalizado con restricciones. En la misma transacción se registra el evento a publicar.",
+      "examples": ["Tablas debts, promises + outbox"]
+    },
+    {
+      "id": "projector",
+      "label": "Proyector",
+      "kind": "worker",
+      "column": 4,
+      "row": 1,
+      "responsibility": "Consume eventos y actualiza la vista de lectura. Debe ser idempotente y tolerar eventos repetidos.",
+      "examples": ["Worker que actualiza debtor_inbox"]
+    },
+    {
+      "id": "read-side",
+      "label": "Lado de lectura",
+      "kind": "boundary",
+      "column": 1,
+      "row": 2,
+      "responsibility": "Optimizado para consultas: datos desnormalizados, ya ordenados por prioridad.",
+      "examples": ["Vista materializada o tabla denormalizada"]
+    },
+    {
+      "id": "query",
+      "label": "Query handler",
+      "kind": "service",
+      "column": 1,
+      "row": 2,
+      "parent": "read-side",
+      "responsibility": "Lee la vista y devuelve DTOs. No aplica reglas de negocio.",
+      "examples": ["getInbox(filters)"]
+    },
+    {
+      "id": "read-db",
+      "label": "Vista de lectura",
+      "kind": "database",
+      "column": 3,
+      "row": 2,
+      "parent": "read-side",
+      "responsibility": "Una fila por deudor con todo lo que muestra la bandeja. Puede vivir en la misma base o en otra tecnología.",
+      "examples": ["Tabla debtor_inbox", "Índice de búsqueda"]
+    }
+  ],
+  "edges": [
+    { "id": "q-ui-command", "from": "ui", "to": "command", "kind": "sync", "label": "comando" },
+    { "id": "q-command-aggregate", "from": "command", "to": "aggregate", "kind": "sync" },
+    {
+      "id": "q-aggregate-db",
+      "from": "aggregate",
+      "to": "write-db",
+      "kind": "sync",
+      "label": "guarda + evento"
+    },
+    {
+      "id": "q-db-projector",
+      "from": "write-db",
+      "to": "projector",
+      "kind": "async",
+      "label": "PromiseRegistered"
+    },
+    { "id": "q-projector-read", "from": "projector", "to": "read-db", "kind": "sync", "label": "actualiza" },
+    { "id": "q-ui-query", "from": "ui", "to": "query", "kind": "sync", "label": "consulta" },
+    { "id": "q-query-read", "from": "query", "to": "read-db", "kind": "sync" }
+  ],
+  "steps": [
+    {
+      "title": "1. El comando valida y guarda",
+      "description": "El lado de escritura sólo responde si la operación fue válida. Su modelo está pensado para reglas, no para pantallas.",
+      "highlight": [
+        "ui",
+        "command",
+        "aggregate",
+        "write-db",
+        "q-ui-command",
+        "q-command-aggregate",
+        "q-aggregate-db"
+      ]
+    },
+    {
+      "title": "2. El proyector actualiza la vista",
+      "description": "A partir del evento se recalcula la fila de la bandeja. Esta actualización es asíncrona.",
+      "highlight": ["projector", "read-db", "q-db-projector", "q-projector-read"]
+    },
+    {
+      "title": "3. Las consultas leen la vista",
+      "description": "La bandeja priorizada se resuelve con una lectura simple, sin JOINs costosos sobre el modelo de escritura.",
+      "highlight": ["ui", "query", "read-db", "q-ui-query", "q-query-read"]
+    },
+    {
+      "title": "4. El costo: consistencia eventual",
+      "description": "Durante unos instantes la vista puede no reflejar la promesa recién registrada. La interfaz debe manejarlo (por ejemplo, mostrando el resultado del comando sin esperar a la vista).",
+      "highlight": ["projector", "q-db-projector"]
+    }
+  ]
+}

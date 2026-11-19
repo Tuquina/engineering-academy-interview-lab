@@ -1,0 +1,82 @@
+---
+id: sd.reliable-webhooks
+title: "Sistema de webhooks confiable"
+summary: "Enviar eventos a los sistemas de los clientes con entrega al menos una vez, reintentos, orden, DLQ y firma verificable."
+difficulty: intermediate
+durationMinutes: 40
+order: 3
+topics: ["webhooks", "entrega al menos una vez", "reintentos", "firma HMAC", "DLQ"]
+functionalRequirements:
+  - "Los tenants registran URLs de webhook y eligen qué eventos reciben (pago registrado, promesa incumplida, etc.)."
+  - "Cada evento se entrega a todas las suscripciones correspondientes."
+  - "Los envíos fallidos se reintentan; los que agotan reintentos quedan disponibles para reenvío manual."
+  - "Los tenants pueden verificar que el webhook viene de la plataforma y no fue modificado."
+  - "Los tenants pueden consultar el historial de entregas y reenviar un evento."
+nonFunctionalRequirements:
+  - "Ningún evento se pierde aunque el endpoint del cliente esté caído horas."
+  - "Un endpoint lento de un cliente no afecta las entregas a otros clientes."
+  - "Para eventos de una misma entidad, el cliente debe poder reconstruir el orden."
+  - "Las firmas no deben poder reutilizarse para un ataque de repetición."
+scale:
+  - "2 millones de eventos por día, con picos de 200 por segundo."
+  - "1.500 endpoints registrados; algunos responden en más de 10 segundos o están caídos días."
+clarifyingQuestions:
+  - question: "¿Los clientes necesitan orden estricto o les alcanza con poder ordenar?"
+    why: "El orden estricto por entidad obliga a serializar entregas y frena todo detrás de un fallo; incluir una secuencia o timestamp permite ordenar del lado del cliente."
+  - question: "¿Cuánto tiempo deben conservarse los eventos para reenvío?"
+    why: "Define retención del almacenamiento de entregas y el tamaño de la DLQ."
+  - question: "¿Qué cuenta como entrega exitosa: cualquier 2xx?"
+    why: "Define cuándo se deja de reintentar, y si un 4xx (error del cliente) se reintenta o no."
+  - question: "¿Hay límite de tráfico que el cliente puede recibir?"
+    why: "Si un cliente se recupera de una caída, una avalancha de reintentos puede volver a tumbarlo: hace falta limitar por endpoint."
+checklist:
+  - "Evento persistido (outbox) antes de cualquier intento de envío."
+  - "Una entrega por suscripción con estado, intentos y próximo intento."
+  - "Reintentos con backoff exponencial y jitter, con un máximo de tiempo."
+  - "DLQ o estado 'fallido' con reenvío manual y alerta al tenant."
+  - "Firma HMAC sobre timestamp + cuerpo, con tolerancia de tiempo y rotación de secretos."
+  - "ID de evento estable para que el cliente deduplique."
+  - "Aislamiento por endpoint: concurrencia y rate limit por destino."
+  - "Timeouts cortos al llamar al cliente."
+  - "Secuencia o timestamp por entidad para ordenar."
+rubric:
+  - id: durability
+    criterion: "Ningún evento se pierde"
+    description: "Outbox o persistencia previa al envío; entregas con estado durable y reintentos programados."
+    weight: 3
+  - id: retries
+    criterion: "Reintentos sensatos"
+    description: "Backoff exponencial con jitter, distinción entre errores reintentables y no reintentables, límite de tiempo y DLQ."
+    weight: 2
+  - id: idempotency
+    criterion: "Duplicados manejables"
+    description: "ID de evento estable y documentado para que el cliente deduplique; se asume entrega al menos una vez."
+    weight: 2
+  - id: security
+    criterion: "Firma y autenticidad"
+    description: "HMAC con secreto por tenant sobre timestamp y cuerpo, ventana de tolerancia contra replay y rotación de secretos."
+    weight: 2
+  - id: isolation
+    criterion: "Aislamiento entre endpoints"
+    description: "Colas o concurrencia por endpoint, timeouts cortos y circuit breaker para que un endpoint lento no afecte a otros."
+    weight: 2
+  - id: ordering
+    criterion: "Orden explicado"
+    description: "Explica que el orden estricto no está garantizado y cómo el cliente puede reconstruirlo (secuencia por entidad)."
+    weight: 1
+  - id: operability
+    criterion: "Operación y visibilidad"
+    description: "Historial de entregas para el tenant, reenvío manual, métricas de éxito por endpoint y alertas."
+    weight: 1
+relatedPatterns: ["transactional-outbox", "circuit-breaker", "decorator"]
+relatedSimulations: ["retry-backoff", "circuit-breaker", "queue-processing"]
+---
+
+La plataforma notifica a los sistemas de sus clientes cuando ocurre algo relevante: un pago registrado, una promesa
+incumplida, una conversación que requiere atención humana. Los clientes integran esos webhooks con sus ERPs.
+
+Hoy el envío es un `fetch` dentro de la request que generó el evento: si el endpoint del cliente está caído, el
+evento se pierde; si es lento, la request original se vuelve lenta; y un cliente reportó haber recibido un
+"pago registrado" falso de un atacante que conocía su URL.
+
+Diseñá un sistema de webhooks confiable.

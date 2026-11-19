@@ -46,4 +46,10 @@ describe("buildRecommendations", () => {
     expect(recs.filter((r) => r.href === "/l/a")).toHaveLength(1);
     expect(buildRecommendations({ ...base, dueFlashcards: 1, limit: 1 })).toHaveLength(1);
   });
+
+  it("recomienda repasar preguntas de entrevista con criterios faltantes, después de las flashcards", () => {
+    const recs = buildRecommendations({ ...base, dueFlashcards: 2, weakInterviewQuestions: 3 });
+    expect(recs.map((r) => r.id).slice(0, 2)).toEqual(["flashcards", "interview-review"]);
+    expect(recs[1]).toMatchObject({ href: "/interview/review", title: "Repasar 3 preguntas de entrevista" });
+  });
 });

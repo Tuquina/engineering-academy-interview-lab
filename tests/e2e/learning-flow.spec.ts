@@ -10,8 +10,10 @@ test.describe("flujo de aprendizaje (modo invitado)", () => {
       "href",
       LESSON_URL,
     );
-    // Las acciones de fases futuras no deben aparentar funcionar.
-    await expect(page.getByRole("button", { name: /Practicar para entrevista/ })).toBeDisabled();
+    await expect(page.getByRole("link", { name: /Practicar para entrevista/ })).toHaveAttribute(
+      "href",
+      "/interview/quick",
+    );
     await expect(page.getByRole("link", { name: /Resolver un desafío/ })).toHaveAttribute(
       "href",
       "/challenges/debounce",
@@ -80,7 +82,8 @@ test.describe("flujo de aprendizaje (modo invitado)", () => {
     }
     const nav = page.getByRole("navigation", { name: "Navegación principal" }).last();
     await expect(nav.getByRole("link", { name: "Biblioteca" })).toBeVisible();
-    await expect(nav.getByRole("link", { name: /Interview Arena/ })).toHaveCount(0);
-    await expect(nav.getByText("Interview Arena")).toBeVisible();
+    // AI Agents Lab llega en la Fase 5: se ve, pero no es un enlace.
+    await expect(nav.getByRole("link", { name: /AI Agents Lab/ })).toHaveCount(0);
+    await expect(nav.getByText("AI Agents Lab")).toBeVisible();
   });
 });

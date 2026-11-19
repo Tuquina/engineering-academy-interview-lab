@@ -1,0 +1,62 @@
+## Modelo de datos
+
+```sql
+webhook_endpoints (id, tenant_id, url, secret_current, secret_previous, event_types text[], status)
+events (id uuid PRIMARY KEY, tenant_id, type, entity_id, entity_sequence, payload jsonb, created_at)
+deliveries (
+  id, event_id, endpoint_id, status,       -- pending | succeeded | failed
+  attempts, next_attempt_at, last_status_code, last_error, updated_at,
+  UNIQUE (event_id, endpoint_id)
+)
+```
+
+## Flujo
+
+1. El evento se inserta en `events` dentro de la **misma transacción** que el cambio de negocio (outbox).
+2. Un **fan-out** crea una fila en `deliveries` por cada endpoint suscripto (`UNIQUE` evita duplicarlas).
+3. Workers toman entregas con `next_attempt_at <= now()` usando `FOR UPDATE SKIP LOCKED` y llaman al endpoint con
+   **timeout de 5 s**.
+4. **2xx** → `succeeded`. **5xx, 429 o timeout** → reintento con **backoff exponencial y jitter** (1 min, 2, 4… hasta
+   24 h). **4xx** (salvo 408/429) → no se reintenta: el cliente rechazó el contenido; queda `failed` con alerta.
+5. Agotados los reintentos, la entrega queda `failed` (la "DLQ"): visible en el panel con **reenvío manual** y aviso
+   por email al tenant.
+
+## Firma y autenticidad
+
+Headers:
+
+```text
+Webhook-Id: <event id>
+Webhook-Timestamp: 1763200000
+Webhook-Signature: v1=<HMAC-SHA256(secret, id + "." + timestamp + "." + body)>
+```
+
+El cliente recalcula el HMAC con comparación de tiempo constante y **rechaza timestamps de más de 5 minutos**
+(protección contra replay). La **rotación** se hace con dos secretos válidos a la vez (`secret_previous`) durante
+una ventana: se firma con ambos hasta que el cliente migra.
+
+## Duplicados y orden
+
+- La entrega es **al menos una vez**: un timeout puede ocurrir después de que el cliente procesó. El `Webhook-Id`
+  es estable entre reintentos y la documentación pide deduplicar por él.
+- **No se garantiza orden estricto** (un reintento puede llegar después de un evento más nuevo). Cada evento
+  incluye `entity_id` y `entity_sequence`, y el cliente descarta los que tengan una secuencia menor a la ya
+  aplicada. Serializar entregas por entidad haría que un fallo bloquee todos los eventos posteriores.
+
+## Aislamiento entre endpoints
+
+- **Concurrencia máxima por endpoint** y rate limit: cuando un cliente vuelve de una caída, sus miles de reintentos
+  pendientes no lo vuelven a tumbar ni ocupan todos los workers.
+- **Circuit breaker por endpoint:** tras varios fallos seguidos, se pausan los intentos y se reprograma, en lugar de
+  esperar timeouts en cada entrega.
+
+## Operación
+
+Métricas por endpoint (tasa de éxito, latencia, entregas pendientes), alerta al tenant cuando su endpoint falla de
+forma sostenida y desactivación automática tras días de fallos, con aviso.
+
+## Compromisos
+
+- Reintentar hasta 24 h da tiempo al cliente a recuperarse, pero mantiene muchas entregas pendientes: se limita
+  por endpoint.
+- No garantizar orden simplifica y desacopla; el costo se traslada al cliente, que debe usar la secuencia.

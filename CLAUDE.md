@@ -12,6 +12,8 @@ Documentos de trabajo:
 - [docs/guides/adding-a-course.md](docs/guides/adding-a-course.md): cómo agregar contenido.
 - [docs/guides/adding-exercises.md](docs/guides/adding-exercises.md): cómo agregar challenges, ejercicios SQL y
   ejemplos del playground.
+- [docs/guides/adding-architecture-content.md](docs/guides/adding-architecture-content.md): cómo agregar patrones, diagramas,
+  desafíos de arquitectura y preguntas del Interview Arena.
 
 ## Entorno: sólo Docker
 
@@ -42,4 +44,5 @@ No correr `pnpm build` en el contenedor mientras `app` está levantado: comparte
 - Fase 1 — Fundaciones: **completada**.
 - Fase 2 — Aprendizaje: **completada** (ver docs/STATUS.md).
 - Fase 3 — Laboratorios: **completada** (ver docs/STATUS.md y docs/adr/0006).
-- Siguiente: **Fase 4 — Arquitectura y entrevistas**.
+- Fase 4 — Arquitectura y entrevistas: **completada** (ver docs/STATUS.md y docs/adr/0007).
+- Siguiente: **Fase 5 — Agentes IA**.

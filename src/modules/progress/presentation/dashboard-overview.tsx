@@ -98,8 +98,10 @@ export function DashboardOverview({ data }: { data: LearnerData }) {
               <PlayCircle /> Continuar estudiando
             </Button>
           )}
-          <Button size="lg" variant="secondary" disabled title="Interview Arena llega en la Fase 4">
-            <MessagesSquare /> Practicar para entrevista
+          <Button asChild size="lg" variant="secondary">
+            <Link href="/interview/quick">
+              <MessagesSquare /> Practicar para entrevista
+            </Link>
           </Button>
           <Button asChild size="lg" variant="secondary">
             <Link href={nextChallenge?.href ?? "/challenges"} title={nextChallenge?.title}>
@@ -107,12 +109,12 @@ export function DashboardOverview({ data }: { data: LearnerData }) {
             </Link>
           </Button>
         </div>
-        <p className="text-muted text-xs">
-          «Practicar para entrevista» se habilita con Interview Arena (Fase 4).
-          {snapshot.ready && data.challenges.length > 0
-            ? ` Challenges resueltos: ${solvedChallenges}/${data.challenges.length}${nextChallenge ? ` · siguiente: ${nextChallenge.title}` : ""}.`
-            : ""}
-        </p>
+        {snapshot.ready && data.challenges.length > 0 && (
+          <p className="text-muted text-xs">
+            Challenges resueltos: {solvedChallenges}/{data.challenges.length}
+            {nextChallenge ? ` · siguiente: ${nextChallenge.title}` : ""}.
+          </p>
+        )}
       </Card>
 
       <dl className="grid grid-cols-2 gap-3 lg:grid-cols-4">

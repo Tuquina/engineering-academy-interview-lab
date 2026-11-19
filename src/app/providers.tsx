@@ -6,6 +6,8 @@ import { WorkerCodeRunner } from "@/modules/exercises/infrastructure/worker-code
 import { CodeRunnerProvider } from "@/modules/exercises/presentation/code-runner-context";
 import { WorkerSqlEngine } from "@/modules/sql-lab/infrastructure/worker-sql-engine";
 import { SqlEngineProvider } from "@/modules/sql-lab/presentation/sql-engine-context";
+import { StudioProvider } from "@/modules/system-design/presentation/studio-context";
+import { InterviewsProvider } from "@/modules/interviews/presentation/interviews-context";
 import { PracticeProvider } from "@/modules/exercises/presentation/practice-context";
 import { FlashcardsProvider } from "@/modules/flashcards/presentation/flashcards-context";
 import { NotebookProvider } from "@/modules/notebook/presentation/notebook-context";
@@ -29,8 +31,12 @@ export function Providers({ children }: { children: ReactNode }) {
             <PracticeProvider store={stores.practice}>
               <CodeRunnerProvider runner={runner}>
                 <SqlEngineProvider factory={createSqlEngine}>
-                  <ReadingFontSizeSync />
-                  {children}
+                  <StudioProvider store={stores.studio}>
+                    <InterviewsProvider store={stores.interviews}>
+                      <ReadingFontSizeSync />
+                      {children}
+                    </InterviewsProvider>
+                  </StudioProvider>
                 </SqlEngineProvider>
               </CodeRunnerProvider>
             </PracticeProvider>

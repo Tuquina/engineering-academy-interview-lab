@@ -1,0 +1,137 @@
+{
+  "id": "sync-vs-async",
+  "title": "Comunicación síncrona y asíncrona",
+  "description": "El mismo caso (procesar un archivo de deudas de un tenant) resuelto con una llamada síncrona que espera el resultado y con una cola que responde de inmediato y procesa en segundo plano.",
+  "kind": "sequence-flow",
+  "tags": ["síncrono", "asíncrono", "colas", "202 accepted"],
+  "nodes": [
+    {
+      "id": "sync",
+      "label": "Síncrono",
+      "kind": "boundary",
+      "column": 0,
+      "row": 0,
+      "responsibility": "El cliente espera mientras se procesa todo. Simple, pero la latencia y la disponibilidad se encadenan.",
+      "examples": ["POST /imports responde 200 al terminar"]
+    },
+    {
+      "id": "client-a",
+      "label": "Tenant",
+      "kind": "actor",
+      "column": 0,
+      "row": 0,
+      "parent": "sync",
+      "responsibility": "Sube el archivo y espera la respuesta.",
+      "examples": ["Integración por API"]
+    },
+    {
+      "id": "api-a",
+      "label": "API",
+      "kind": "service",
+      "column": 1,
+      "row": 0,
+      "parent": "sync",
+      "responsibility": "Valida, procesa todas las filas y responde. Si el archivo es grande, puede superar el timeout de la función.",
+      "examples": ["Route Handler con límite de duración"]
+    },
+    {
+      "id": "db-a",
+      "label": "Base de datos",
+      "kind": "database",
+      "column": 2,
+      "row": 0,
+      "parent": "sync",
+      "responsibility": "Recibe todas las escrituras mientras el cliente espera.",
+      "examples": ["INSERT masivo"]
+    },
+    {
+      "id": "async",
+      "label": "Asíncrono",
+      "kind": "boundary",
+      "column": 0,
+      "row": 2,
+      "responsibility": "La API acepta el trabajo, responde 202 y un worker lo procesa. El cliente consulta el estado o recibe un webhook.",
+      "examples": ["POST /imports → 202 + Location: /imports/123"]
+    },
+    {
+      "id": "client-b",
+      "label": "Tenant",
+      "kind": "actor",
+      "column": 0,
+      "row": 2,
+      "parent": "async",
+      "responsibility": "Recibe 202 al instante y luego consulta el estado o espera un webhook.",
+      "examples": ["GET /imports/123", "Webhook import.completed"]
+    },
+    {
+      "id": "api-b",
+      "label": "API",
+      "kind": "service",
+      "column": 1,
+      "row": 2,
+      "parent": "async",
+      "responsibility": "Guarda el archivo y el trabajo pendiente, encola y responde. Hace poco trabajo por request.",
+      "examples": ["Guardar en object storage + encolar jobId"]
+    },
+    {
+      "id": "queue-b",
+      "label": "Cola",
+      "kind": "queue",
+      "column": 2,
+      "row": 2,
+      "parent": "async",
+      "responsibility": "Absorbe picos: si llegan cien archivos a la vez, se procesan al ritmo de los workers.",
+      "examples": ["SQS", "Cola en Redis"]
+    },
+    {
+      "id": "worker-b",
+      "label": "Worker",
+      "kind": "worker",
+      "column": 3,
+      "row": 2,
+      "parent": "async",
+      "responsibility": "Procesa en lotes, con reintentos e idempotencia por jobId, y actualiza el estado del trabajo.",
+      "examples": ["Procesa de a 500 filas", "Marca el job como completed"]
+    },
+    {
+      "id": "db-b",
+      "label": "Base de datos",
+      "kind": "database",
+      "column": 4,
+      "row": 2,
+      "parent": "async",
+      "responsibility": "Recibe escrituras a un ritmo controlado.",
+      "examples": ["Estado del job y filas importadas"]
+    }
+  ],
+  "edges": [
+    { "id": "a-client-api", "from": "client-a", "to": "api-a", "kind": "sync", "label": "espera" },
+    { "id": "a-api-db", "from": "api-a", "to": "db-a", "kind": "sync" },
+    { "id": "b-client-api", "from": "client-b", "to": "api-b", "kind": "sync", "label": "202" },
+    { "id": "b-api-queue", "from": "api-b", "to": "queue-b", "kind": "async", "label": "encola" },
+    { "id": "b-queue-worker", "from": "queue-b", "to": "worker-b", "kind": "async" },
+    { "id": "b-worker-db", "from": "worker-b", "to": "db-b", "kind": "sync" }
+  ],
+  "steps": [
+    {
+      "title": "1. Síncrono: simple y encadenado",
+      "description": "Un único flujo, fácil de razonar y depurar. Pero el cliente espera, el timeout de la función limita el tamaño del trabajo y una base lenta se traduce en una API lenta.",
+      "highlight": ["client-a", "api-a", "db-a", "a-client-api", "a-api-db"]
+    },
+    {
+      "title": "2. Asíncrono: aceptar y responder",
+      "description": "La API sólo valida, guarda y encola. Responde 202 con un recurso para consultar el estado.",
+      "highlight": ["client-b", "api-b", "queue-b", "b-client-api", "b-api-queue"]
+    },
+    {
+      "title": "3. El worker procesa a su ritmo",
+      "description": "La cola desacopla la velocidad de llegada de la de procesamiento: se puede escalar workers o limitar la presión sobre la base.",
+      "highlight": ["queue-b", "worker-b", "db-b", "b-queue-worker", "b-worker-db"]
+    },
+    {
+      "title": "4. Lo que se gana y lo que se paga",
+      "description": "Se gana resiliencia y control de carga; se paga con estados intermedios visibles, reintentos, idempotencia, monitoreo de la cola y una experiencia de usuario de 'en proceso'.",
+      "highlight": ["queue-b", "worker-b", "api-a"]
+    }
+  ]
+}

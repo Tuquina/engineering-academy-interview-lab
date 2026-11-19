@@ -36,6 +36,8 @@ export interface CodeChallengeWorkspaceProps {
   acceptanceCriteria: readonly string[];
   hints: readonly string[];
   followUpQuestions: readonly string[];
+  /** Se invoca después de cada ejecución de tests (p. ej. para registrar el resultado de una entrevista). */
+  onRunComplete?: (outcome: { passed: number; total: number; solved: boolean }) => void;
 }
 
 /**
@@ -90,20 +92,10 @@ export function CodeChallengeWorkspace(props: CodeChallengeWorkspaceProps) {
       hiddenTests: { path: paths.hidden, content: props.hiddenTests },
     });
     // Un intento con errores de tipos no cuenta como resuelto aunque los tests pasen (isSolved lo contempla).
-    actions.recordAttempt(id, isSolved(result));
-  }, [
-    actions,
-    currentCode,
-    execute,
-    id,
-    monaco,
-    paths.hidden,
-    paths.solution,
-    paths.tests,
-    props.hiddenTests,
-    props.tests,
-    running,
-  ]);
+    const outcome = isSolved(result);
+    actions.recordAttempt(id, outcome);
+    props.onRunComplete?.(outcome);
+  }, [actions, currentCode, execute, id, monaco, paths.hidden, paths.solution, paths.tests, props, running]);
 
   // Ctrl/Cmd + Enter ejecuta los tests.
   useEffect(() => {
@@ -176,7 +168,12 @@ export function CodeChallengeWorkspace(props: CodeChallengeWorkspaceProps) {
           >
             {fullscreen ? <Minimize2 /> : <Maximize2 />}
           </Button>
-          <Button size="sm" onClick={() => void runTests()} disabled={running} title="Ctrl + Enter">
+          <Button
+            size="sm"
+            onClick={() => void runTests()}
+            disabled={running || !monaco}
+            title="Ctrl + Enter"
+          >
             <Play /> {running ? "Ejecutando…" : "Ejecutar tests"}
           </Button>
         </div>

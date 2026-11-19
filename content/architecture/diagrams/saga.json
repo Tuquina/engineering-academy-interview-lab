@@ -1,0 +1,117 @@
+{
+  "id": "saga",
+  "title": "Saga orquestada con compensaciones",
+  "description": "Acordar un plan de pagos involucra tres servicios. No hay transacción distribuida: un orquestador ejecuta los pasos y, si uno falla, ejecuta las compensaciones de los anteriores.",
+  "kind": "sequence-flow",
+  "tags": ["saga", "compensación", "transacciones distribuidas"],
+  "nodes": [
+    {
+      "id": "client",
+      "label": "Agente o panel",
+      "kind": "actor",
+      "column": 0,
+      "row": 1,
+      "responsibility": "Solicita crear un plan de pagos para una deuda.",
+      "examples": ["Agente de IA que negoció el plan", "Operador desde el panel"]
+    },
+    {
+      "id": "orchestrator",
+      "label": "Orquestador de la saga",
+      "kind": "service",
+      "column": 1,
+      "row": 1,
+      "responsibility": "Persiste el estado de la saga (qué pasos se completaron) y decide el siguiente paso o las compensaciones. Debe sobrevivir a reinicios.",
+      "examples": ["Tabla sagas con estado y paso actual", "Motor de workflows durable"]
+    },
+    {
+      "id": "plans",
+      "label": "Servicio de planes",
+      "kind": "service",
+      "column": 2,
+      "row": 0,
+      "responsibility": "Paso 1: crea el plan en estado pendiente. Compensación: cancelar el plan.",
+      "examples": ["createPlan / cancelPlan"]
+    },
+    {
+      "id": "payments",
+      "label": "Servicio de pagos",
+      "kind": "service",
+      "column": 2,
+      "row": 1,
+      "responsibility": "Paso 2: cobra la primera cuota. Compensación: reembolsar. Debe ser idempotente por sagaId.",
+      "examples": ["chargeFirstInstallment(idempotencyKey)", "refund(chargeId)"]
+    },
+    {
+      "id": "notify",
+      "label": "Servicio de notificaciones",
+      "kind": "service",
+      "column": 2,
+      "row": 2,
+      "responsibility": "Paso 3: envía la confirmación. Al ser el último paso y no compensable, se ejecuta cuando todo lo anterior salió bien.",
+      "examples": ["sendPlanConfirmation"]
+    },
+    {
+      "id": "saga-log",
+      "label": "Estado de la saga",
+      "kind": "database",
+      "column": 1,
+      "row": 2,
+      "responsibility": "Registro durable de cada paso y compensación: permite reanudar tras una caída y auditar qué pasó.",
+      "examples": ["sagas(id, status, step, updated_at)", "saga_steps(saga_id, step, result)"]
+    }
+  ],
+  "edges": [
+    { "id": "g-client-orch", "from": "client", "to": "orchestrator", "kind": "sync", "label": "crear plan" },
+    { "id": "g-orch-plans", "from": "orchestrator", "to": "plans", "kind": "sync", "label": "1. crear" },
+    {
+      "id": "g-orch-payments",
+      "from": "orchestrator",
+      "to": "payments",
+      "kind": "sync",
+      "label": "2. cobrar"
+    },
+    {
+      "id": "g-orch-notify",
+      "from": "orchestrator",
+      "to": "notify",
+      "kind": "async",
+      "label": "3. confirmar"
+    },
+    {
+      "id": "g-orch-log",
+      "from": "orchestrator",
+      "to": "saga-log",
+      "kind": "sync",
+      "label": "persiste estado"
+    },
+    {
+      "id": "g-compensate",
+      "from": "orchestrator",
+      "to": "plans",
+      "kind": "async",
+      "label": "compensar: cancelar"
+    }
+  ],
+  "steps": [
+    {
+      "title": "1. Se registra la saga",
+      "description": "Antes de llamar a nadie, el orquestador guarda que la saga empezó. Si el proceso cae, otro puede retomarla.",
+      "highlight": ["client", "orchestrator", "saga-log", "g-client-orch", "g-orch-log"]
+    },
+    {
+      "title": "2. Paso 1: crear el plan",
+      "description": "El plan queda pendiente (no activo) hasta que la saga termine: los estados intermedios son visibles y deben tener sentido para el negocio.",
+      "highlight": ["plans", "g-orch-plans"]
+    },
+    {
+      "title": "3. Paso 2: el cobro falla",
+      "description": "La tarjeta es rechazada. No hay rollback automático: el plan ya existe en otro servicio.",
+      "highlight": ["payments", "g-orch-payments"]
+    },
+    {
+      "title": "4. Compensación",
+      "description": "El orquestador ejecuta la acción semántica inversa de los pasos completados: cancela el plan. Las compensaciones también deben ser idempotentes y reintentarse hasta completarse.",
+      "highlight": ["orchestrator", "plans", "g-compensate", "saga-log"]
+    }
+  ]
+}

@@ -1747,13 +1747,13 @@ La aplicación es amplia. Organizar el desarrollo en fases ejecutables, con entr
 
 ### Fase 4 — Arquitectura y entrevistas
 
-- [ ] System Design Studio.
-- [ ] React Flow.
-- [ ] Pattern Library.
-- [ ] Architecture Challenges.
-- [ ] Interview Arena.
-- [ ] Simulaciones.
-- [ ] Rúbricas.
+- [x] System Design Studio.
+- [x] React Flow.
+- [x] Pattern Library.
+- [x] Architecture Challenges.
+- [x] Interview Arena.
+- [x] Simulaciones.
+- [x] Rúbricas.
 
 **Resultado:** preparación avanzada.
 

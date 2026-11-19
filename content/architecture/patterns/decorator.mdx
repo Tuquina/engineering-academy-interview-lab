@@ -1,0 +1,160 @@
+---
+id: pattern.decorator
+kind: design
+category: structural
+title: "Decorator"
+summary: "Agregar comportamiento (reintentos, caché, métricas) envolviendo un objeto con la misma interfaz."
+difficulty: intermediate
+order: 30
+definition: "Decorator envuelve un componente con otro que implementa la misma interfaz, delega en él y agrega comportamiento antes o después. Como la interfaz no cambia, los decoradores se pueden apilar y el código cliente no nota la diferencia."
+problem: "Preocupaciones transversales como reintentos, caché, logging, métricas o timeouts terminan mezcladas dentro de cada implementación, duplicadas y difíciles de activar o desactivar por separado."
+benefits:
+  - "Cada preocupación transversal vive en una pieza pequeña y reutilizable."
+  - "Se combinan por composición, en el orden necesario, sin modificar la implementación original."
+  - "Se pueden activar por entorno (por ejemplo, caché sólo en producción)."
+costs:
+  - "El orden de los decoradores importa y no siempre es obvio (¿la caché va antes o después de los reintentos?)."
+  - "Las pilas largas dificultan el debugging: un stack trace atraviesa varias capas."
+alternatives:
+  - name: "Middleware"
+    when: "Para requests HTTP, el middleware del framework cumple el mismo rol con convenciones conocidas."
+  - name: "Funciones de orden superior"
+    when: "Cuando la interfaz es una sola función, una función que recibe y devuelve otra función (withRetry(fn)) es más simple que una clase."
+commonMistakes:
+  - "Cambiar la semántica de la operación dentro del decorador (por ejemplo, tragar errores sin decirlo)."
+  - "Reintentar operaciones que no son idempotentes."
+  - "Apilar decoradores en un orden que anula su efecto, como cachear errores."
+avoidWhen:
+  - "El comportamiento extra es específico de una única implementación: va dentro de ella."
+  - "Un middleware del framework ya resuelve lo mismo."
+interviewQuestions:
+  - question: "¿En qué orden pondrías un decorador de caché y uno de reintentos?"
+    answer: "Normalmente la caché por fuera: si hay un acierto, no hace falta llamar ni reintentar. Los reintentos quedan por dentro, envolviendo la llamada real. Además, la caché no debería guardar errores, o los guardaría por poco tiempo y de forma explícita."
+  - question: "¿Qué diferencia hay entre Decorator y herencia para agregar comportamiento?"
+    answer: "La herencia fija la combinación en tiempo de compilación y produce una explosión de subclases (CachedRetryingClient, RetryingLoggingClient...). Decorator compone en tiempo de ejecución: cada preocupación es una pieza y se combinan como se necesite."
+diagrams: []
+related: ["adapter", "circuit-breaker"]
+relatedLessons: ["typescript.promises-task-completablefuture"]
+tags: ["decorator", "composición", "reintentos", "caché"]
+---
+
+## Motivación
+
+El cliente que consulta el puntaje de riesgo de un deudor a un servicio externo necesita reintentos ante errores
+transitorios, una caché de cinco minutos (el puntaje no cambia tan rápido) y métricas de latencia. Son tres
+preocupaciones independientes y no todas aplican en todos los entornos.
+
+## Ejemplo incorrecto
+
+```ts
+class RiskClient {
+  private cache = new Map<string, { score: number; at: number }>();
+
+  async score(debtorId: string): Promise<number> {
+    const cached = this.cache.get(debtorId);
+    if (cached && Date.now() - cached.at < 300_000) return cached.score;
+    const started = performance.now();
+    for (let attempt = 1; ; attempt++) {
+      try {
+        const res = await fetch(`https://risk.example/score/${debtorId}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const { score } = (await res.json()) as { score: number };
+        this.cache.set(debtorId, { score, at: Date.now() });
+        metrics.observe("risk_latency_ms", performance.now() - started);
+        return score;
+      } catch (error) {
+        if (attempt === 3) throw error;
+        await new Promise((r) => setTimeout(r, 200 * attempt));
+      }
+    }
+  }
+}
+```
+
+La llamada HTTP, la caché, los reintentos y las métricas están entrelazados. No se puede probar uno sin los otros
+ni desactivar la caché en tests.
+
+## Implementación correcta
+
+```ts
+export interface RiskScores {
+  score(debtorId: string): Promise<number>;
+}
+
+export class HttpRiskScores implements RiskScores {
+  async score(debtorId: string): Promise<number> {
+    const res = await fetch(`https://risk.example/score/${debtorId}`);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return ((await res.json()) as { score: number }).score;
+  }
+}
+
+export class RetryingRiskScores implements RiskScores {
+  constructor(
+    private readonly inner: RiskScores,
+    private readonly attempts = 3,
+  ) {}
+  async score(debtorId: string): Promise<number> {
+    for (let attempt = 1; ; attempt++) {
+      try {
+        return await this.inner.score(debtorId);
+      } catch (error) {
+        if (attempt >= this.attempts) throw error;
+        await new Promise((resolve) => setTimeout(resolve, 200 * 2 ** (attempt - 1)));
+      }
+    }
+  }
+}
+
+export class CachedRiskScores implements RiskScores {
+  private readonly cache = new Map<string, { score: number; expiresAt: number }>();
+  constructor(
+    private readonly inner: RiskScores,
+    private readonly ttlMs: number,
+    private readonly now = Date.now,
+  ) {}
+  async score(debtorId: string): Promise<number> {
+    const hit = this.cache.get(debtorId);
+    if (hit && hit.expiresAt > this.now()) return hit.score;
+    const score = await this.inner.score(debtorId); // los errores no se cachean
+    this.cache.set(debtorId, { score, expiresAt: this.now() + this.ttlMs });
+    return score;
+  }
+}
+
+// Composición: la caché por fuera, los reintentos envolviendo la llamada real.
+export const riskScores: RiskScores = new CachedRiskScores(
+  new RetryingRiskScores(new HttpRiskScores()),
+  300_000,
+);
+```
+
+## Ejercicio
+
+Agregá un decorador que registre la latencia de cada llamada. ¿Dónde lo ubicarías en la pila si querés medir la
+latencia que percibe el usuario, incluidos los aciertos de caché?
+
+<Reveal>
+
+```ts
+export class TimedRiskScores implements RiskScores {
+  constructor(
+    private readonly inner: RiskScores,
+    private readonly observe: (ms: number) => void,
+  ) {}
+  async score(debtorId: string): Promise<number> {
+    const started = performance.now();
+    try {
+      return await this.inner.score(debtorId);
+    } finally {
+      this.observe(performance.now() - started);
+    }
+  }
+}
+```
+
+Para medir lo que percibe el usuario va por fuera de todo: `new TimedRiskScores(new CachedRiskScores(...))`. Si en
+cambio querés medir sólo la latencia del proveedor, va justo alrededor de `HttpRiskScores`. Ambas métricas son
+útiles y pueden coexistir.
+
+</Reveal>

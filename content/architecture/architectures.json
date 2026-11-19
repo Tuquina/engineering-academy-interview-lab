@@ -1,0 +1,210 @@
+[
+  {
+    "id": "layered-monolith",
+    "title": "Monolito en capas",
+    "summary": "Una aplicación desplegada como una unidad, organizada en capas técnicas (presentación, negocio, datos) sin límites fuertes por dominio.",
+    "fitsWhen": [
+      "El dominio es pequeño o mayormente CRUD.",
+      "Un equipo chico necesita entregar rápido y validar el producto.",
+      "No hay requisitos de escalado muy distintos entre partes del sistema."
+    ],
+    "assessments": {
+      "complexity": {
+        "level": "low",
+        "explanation": "Pocas piezas móviles: un proceso, una base y llamadas a funciones. Es la opción más fácil de entender al principio; la complejidad crece después, cuando todo puede importar todo."
+      },
+      "scalability": {
+        "level": "medium",
+        "explanation": "Escala horizontalmente si es stateless (varias réplicas detrás de un balanceador), pero todo escala junto: no se puede dar más recursos sólo a la parte que lo necesita."
+      },
+      "maintainability": {
+        "level": "low",
+        "explanation": "Sin límites por dominio, el acoplamiento crece con el tiempo y los cambios empiezan a tocar muchas capas y archivos. Depende mucho de la disciplina del equipo."
+      },
+      "latency": {
+        "level": "low",
+        "explanation": "Las llamadas internas son en memoria; no hay saltos de red entre componentes. La latencia la dominan la base y las dependencias externas."
+      },
+      "consistency": {
+        "level": "high",
+        "explanation": "Transacciones ACID locales en una sola base: es la forma más simple de garantizar consistencia fuerte."
+      },
+      "operationalCost": {
+        "level": "low",
+        "explanation": "Un pipeline, un servicio para monitorear, una base. Requiere poca infraestructura y poco conocimiento operativo especializado."
+      },
+      "deployability": {
+        "level": "medium",
+        "explanation": "Desplegar es simple (un artefacto), pero cualquier cambio redespliega todo y un error en una parte puede afectar al conjunto."
+      },
+      "testing": {
+        "level": "medium",
+        "explanation": "Los tests de integración son fáciles (todo en un proceso), pero si el negocio depende directamente de la capa de datos, los tests unitarios necesitan base o mocks extensos."
+      },
+      "observability": {
+        "level": "high",
+        "explanation": "Un solo proceso: stack traces completos, logs en un lugar y perfiles de rendimiento directos."
+      },
+      "coupling": {
+        "level": "high",
+        "explanation": "Nada impide que cualquier parte use cualquier otra o comparta tablas. El acoplamiento no se ve hasta que duele."
+      }
+    }
+  },
+  {
+    "id": "modular-monolith",
+    "title": "Monolito modular",
+    "summary": "Un único despliegue dividido en módulos por dominio, con APIs públicas, datos propios por módulo y reglas que impiden saltarse los límites.",
+    "fitsWhen": [
+      "El dominio tiene varias áreas con lenguaje propio, pero un solo equipo o pocos equipos.",
+      "Se quiere la simplicidad operativa de un monolito sin perder la posibilidad de extraer servicios más adelante.",
+      "Las transacciones entre áreas siguen siendo frecuentes."
+    ],
+    "assessments": {
+      "complexity": {
+        "level": "medium",
+        "explanation": "Agrega disciplina de diseño (límites, APIs públicas, eventos internos), pero no la complejidad de un sistema distribuido."
+      },
+      "scalability": {
+        "level": "medium",
+        "explanation": "Igual que un monolito: réplicas completas. Si un módulo necesita escalar distinto, se puede extraer, porque ya tiene límites claros."
+      },
+      "maintainability": {
+        "level": "high",
+        "explanation": "Los cambios quedan contenidos en un módulo y los contratos entre módulos son explícitos. Es su principal ventaja frente al monolito en capas."
+      },
+      "latency": {
+        "level": "low",
+        "explanation": "Las llamadas entre módulos siguen siendo en proceso."
+      },
+      "consistency": {
+        "level": "high",
+        "explanation": "Puede usar transacciones locales incluso entre módulos si comparten base, aunque conviene limitarlas para no acoplar sus datos."
+      },
+      "operationalCost": {
+        "level": "low",
+        "explanation": "La operación es la de un monolito: un artefacto, un pipeline, una base."
+      },
+      "deployability": {
+        "level": "medium",
+        "explanation": "Un solo despliegue para todos los módulos: simple, pero los equipos comparten el ritmo de entrega."
+      },
+      "testing": {
+        "level": "high",
+        "explanation": "Cada módulo se prueba por su API pública con dependencias sustituibles; los tests de integración siguen siendo locales."
+      },
+      "observability": {
+        "level": "high",
+        "explanation": "Un proceso; además, los límites de módulo permiten etiquetar métricas y logs por dominio."
+      },
+      "coupling": {
+        "level": "low",
+        "explanation": "Los módulos sólo se conocen por sus APIs públicas y eventos, y la regla se verifica automáticamente (lint o tests de arquitectura)."
+      }
+    }
+  },
+  {
+    "id": "microservices",
+    "title": "Microservicios",
+    "summary": "Servicios desplegados de forma independiente, cada uno dueño de sus datos, que se comunican por red (HTTP, gRPC o mensajes).",
+    "fitsWhen": [
+      "Varios equipos necesitan desplegar de forma independiente sin coordinarse.",
+      "Partes del sistema tienen requisitos de escala, disponibilidad o tecnología muy distintos.",
+      "La organización puede sostener la operación de un sistema distribuido (observabilidad, automatización, on-call)."
+    ],
+    "assessments": {
+      "complexity": {
+        "level": "high",
+        "explanation": "Cada llamada entre servicios puede fallar, tardar o llegar duplicada. Aparecen versionado de contratos, descubrimiento de servicios y consistencia eventual."
+      },
+      "scalability": {
+        "level": "high",
+        "explanation": "Cada servicio escala según su carga y con la tecnología más adecuada. Es la ventaja más citada, aunque muchos sistemas no la necesitan."
+      },
+      "maintainability": {
+        "level": "medium",
+        "explanation": "Cada servicio es pequeño y comprensible, pero los cambios que cruzan servicios requieren coordinar contratos y despliegues."
+      },
+      "latency": {
+        "level": "high",
+        "explanation": "Cada salto de red agrega latencia y variabilidad; una request que atraviesa cinco servicios acumula sus percentiles altos."
+      },
+      "consistency": {
+        "level": "low",
+        "explanation": "Sin transacciones entre servicios: se usan sagas, outbox y consistencia eventual, que el negocio y la interfaz deben tolerar."
+      },
+      "operationalCost": {
+        "level": "high",
+        "explanation": "Muchos pipelines, bases, dashboards y alertas. Requiere automatización y conocimiento de plataforma."
+      },
+      "deployability": {
+        "level": "high",
+        "explanation": "Cada servicio se despliega solo y con menor radio de impacto, siempre que se respete la compatibilidad de contratos."
+      },
+      "testing": {
+        "level": "low",
+        "explanation": "Probar flujos completos requiere entornos con varios servicios o tests de contrato; los errores de integración aparecen tarde."
+      },
+      "observability": {
+        "level": "low",
+        "explanation": "Sin trazas distribuidas y correlación de logs, entender un error que cruza servicios es muy difícil. Es alcanzable, pero cuesta."
+      },
+      "coupling": {
+        "level": "medium",
+        "explanation": "El acoplamiento de código es bajo, pero puede aparecer acoplamiento temporal (llamadas síncronas en cadena) o un 'monolito distribuido' si los límites están mal elegidos."
+      }
+    }
+  },
+  {
+    "id": "event-driven",
+    "title": "Arquitectura orientada a eventos",
+    "summary": "Componentes que publican hechos en un broker y otros que reaccionan de forma asíncrona, sin conocerse entre sí.",
+    "fitsWhen": [
+      "Muchos componentes necesitan reaccionar a los mismos hechos (pagos, cambios de estado).",
+      "Se necesita absorber picos y tolerar que un consumidor esté caído un tiempo.",
+      "El negocio acepta que algunas vistas se actualicen con unos segundos de demora."
+    ],
+    "assessments": {
+      "complexity": {
+        "level": "high",
+        "explanation": "El flujo no se lee de arriba a abajo en el código: está repartido entre productores y consumidores. Hay que diseñar duplicados, orden, reintentos y DLQ."
+      },
+      "scalability": {
+        "level": "high",
+        "explanation": "Los consumidores escalan de forma independiente y la cola absorbe picos. Particionar por clave permite paralelismo manteniendo el orden por entidad."
+      },
+      "maintainability": {
+        "level": "medium",
+        "explanation": "Agregar un consumidor no toca al productor, pero cambiar el esquema de un evento afecta a todos sus consumidores y requiere versionado."
+      },
+      "latency": {
+        "level": "medium",
+        "explanation": "La respuesta al usuario es rápida porque el trabajo se hace después, pero el tiempo hasta que todos los efectos ocurren es mayor y variable."
+      },
+      "consistency": {
+        "level": "low",
+        "explanation": "Consistencia eventual entre productores y consumidores; la consistencia fuerte sólo existe dentro de cada consumidor."
+      },
+      "operationalCost": {
+        "level": "high",
+        "explanation": "Hay que operar el broker, monitorear el lag de las colas, las DLQ y los reprocesos."
+      },
+      "deployability": {
+        "level": "high",
+        "explanation": "Productores y consumidores se despliegan por separado; un consumidor nuevo puede empezar a leer sin coordinar con nadie."
+      },
+      "testing": {
+        "level": "medium",
+        "explanation": "Cada consumidor se prueba bien de forma aislada; los flujos completos y el comportamiento ante duplicados o desorden requieren tests específicos."
+      },
+      "observability": {
+        "level": "medium",
+        "explanation": "Necesita propagar IDs de correlación en los mensajes y métricas de lag; con eso es posible seguir un evento de punta a punta."
+      },
+      "coupling": {
+        "level": "low",
+        "explanation": "Productores y consumidores no se conocen: el acoplamiento queda en el esquema del evento, que es un contrato a cuidar."
+      }
+    }
+  }
+]

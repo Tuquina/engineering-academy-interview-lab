@@ -7,6 +7,7 @@ import { Callout } from "./callout";
 import { FlowDiagram } from "./flow-diagram";
 import { KnowledgeCheck } from "./knowledge-check";
 import { MermaidDiagram } from "./mermaid-diagram";
+import { Reveal } from "./reveal";
 
 /**
  * Conjunto cerrado de componentes disponibles en las lecciones. Agregar un componente aquí lo habilita para
@@ -17,6 +18,7 @@ export const lessonComponents = {
   FlowDiagram,
   KnowledgeCheck,
   MermaidDiagram,
+  Reveal,
 };
 
 const SUPPORTED_LANGUAGES = ["ts", "tsx", "js", "json", "csharp", "java", "bash", "sql", "text"] as const;

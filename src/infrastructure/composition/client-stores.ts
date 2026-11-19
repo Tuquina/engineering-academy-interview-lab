@@ -1,5 +1,7 @@
 import { EMPTY_PRACTICE, type PracticeState } from "@/modules/exercises/domain/practice";
 import { createLocalPracticeStore } from "@/modules/exercises/infrastructure/local-storage-practice-store";
+import { EMPTY_INTERVIEWS, type InterviewsState } from "@/modules/interviews/domain/history";
+import { createLocalInterviewsStore } from "@/modules/interviews/infrastructure/local-storage-interviews-store";
 import { createLocalFlashcardsStore } from "@/modules/flashcards/infrastructure/local-storage-flashcards-store";
 import { EMPTY_FLASHCARDS, type FlashcardsState } from "@/modules/flashcards/domain/spaced-repetition";
 import { EMPTY_NOTEBOOK, type NotebookState } from "@/modules/notebook/domain/notebook";
@@ -8,6 +10,8 @@ import { DEFAULT_PREFERENCES, type PreferencesState } from "@/modules/preference
 import { createLocalPreferencesStore } from "@/modules/preferences/infrastructure/local-storage-preferences-store";
 import { EMPTY_PROGRESS, type ProgressState } from "@/modules/progress/domain/progress";
 import { createLocalProgressStore } from "@/modules/progress/infrastructure/local-storage-progress-store";
+import { EMPTY_STUDIO, type StudioState } from "@/modules/system-design/domain/studio";
+import { createLocalStudioStore } from "@/modules/system-design/infrastructure/local-storage-studio-store";
 import type { ExternalStore } from "@/shared/kernel/external-store";
 import { createServerSnapshotStore } from "../browser/local-storage-store";
 
@@ -18,6 +22,8 @@ export interface ClientStores {
   readonly flashcards: ExternalStore<FlashcardsState>;
   readonly preferences: ExternalStore<PreferencesState>;
   readonly practice: ExternalStore<PracticeState>;
+  readonly studio: ExternalStore<StudioState>;
+  readonly interviews: ExternalStore<InterviewsState>;
 }
 
 let browserStores: ClientStores | null = null;
@@ -37,6 +43,8 @@ export function getClientStores(): ClientStores {
       flashcards: createServerSnapshotStore(EMPTY_FLASHCARDS),
       preferences: createServerSnapshotStore(DEFAULT_PREFERENCES),
       practice: createServerSnapshotStore(EMPTY_PRACTICE),
+      studio: createServerSnapshotStore(EMPTY_STUDIO),
+      interviews: createServerSnapshotStore(EMPTY_INTERVIEWS),
     };
   }
   if (!browserStores) {
@@ -47,6 +55,8 @@ export function getClientStores(): ClientStores {
       flashcards: createLocalFlashcardsStore(storage, window),
       preferences: createLocalPreferencesStore(storage, window),
       practice: createLocalPracticeStore(storage, window),
+      studio: createLocalStudioStore(storage, window),
+      interviews: createLocalInterviewsStore(storage, window),
     };
   }
   return browserStores;

@@ -1,0 +1,75 @@
+## Separar planificar de ejecutar
+
+- **Planificador** (cada 15 minutos): para cada campaña activa, selecciona deudores del segmento que **podrían**
+  contactarse en la próxima franja, calcula prioridad y canal, y crea `scheduled_contacts` con
+  `UNIQUE (debtor_id, campaign_id, reason, contact_date)`: aunque el planificador corra dos veces, no duplica.
+- **Ejecutor:** workers toman contactos cuyo `not_before` llegó y **revalidan todas las políticas en el momento del
+  envío**: entre planificar y enviar, el deudor pudo pagar, prometer o recibir otro contacto.
+
+## Políticas como reglas componibles
+
+```ts
+type Decision = { allowed: true } | { allowed: false; reason: string };
+type Policy = (ctx: ContactContext) => Decision;
+
+const policies: Policy[] = [
+  withinLocalWindow,
+  noActivePromise,
+  underFrequencyCap,
+  channelAllowed,
+  notOptedOut,
+];
+
+function evaluate(ctx: ContactContext): Decision {
+  for (const policy of policies) {
+    const decision = policy(ctx);
+    if (!decision.allowed) return decision;
+  }
+  return { allowed: true };
+}
+```
+
+Las reglas y sus parámetros (ventanas, máximos, canales) son **configuración versionada por tenant**, combinada
+con un piso regulatorio que el tenant no puede relajar. Cada decisión se registra con su motivo
+(`contact_decisions`): explicable ante un reclamo.
+
+## Ventanas horarias
+
+Cada deudor tiene una zona horaria IANA (por ejemplo, `America/Argentina/Buenos_Aires`). La ventana se evalúa
+convirtiendo `now()` a la hora local del deudor, con un calendario de feriados por país. Nunca con offsets fijos:
+los cambios de horario rompen los cálculos.
+
+## Frecuencia sin condiciones de carrera
+
+Dos workers pueden intentar contactar al mismo deudor desde campañas distintas al mismo tiempo. El chequeo y el
+registro deben ser atómicos:
+
+```sql
+BEGIN;
+SELECT 1 FROM debtors WHERE id = $1 FOR UPDATE;              -- serializa por deudor
+SELECT count(*) FROM contacts WHERE debtor_id = $1 AND sent_at > now() - interval '7 days';
+-- si está por debajo del máximo:
+INSERT INTO contacts (debtor_id, campaign_id, channel, status) VALUES (...);
+COMMIT;
+```
+
+El lock es corto y por deudor, así que no limita el paralelismo global.
+
+## Capacidad y proveedores
+
+- Los envíos permitidos van a una **cola por proveedor** con **rate limiting** (token bucket) según su cuota.
+- El planificador **distribuye** `not_before` a lo largo de la ventana en lugar de concentrar todo a las 9:00.
+- Si un proveedor falla, un **circuit breaker** pausa ese canal y el contacto se reprograma o pasa al canal
+  alternativo si la política lo permite.
+
+## Estados de un contacto
+
+`scheduled → validating → sent | skipped(reason) | failed → retry_scheduled`. Las transiciones se modelan
+explícitamente (patrón State) y el envío es idempotente por la clave del contacto.
+
+## Compromisos
+
+- Revalidar antes de enviar cuesta una consulta extra por contacto, pero es la única forma de respetar promesas y
+  pagos recientes.
+- El lock por deudor serializa sólo a ese deudor; a esta escala es más simple y seguro que contadores en Redis, que
+  agregarían un segundo sistema a mantener consistente con el registro legal de contactos.

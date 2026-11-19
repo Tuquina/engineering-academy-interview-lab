@@ -1,0 +1,121 @@
+---
+id: pattern.hexagonal-architecture
+kind: architecture
+category: application-architecture
+title: "Arquitectura hexagonal"
+summary: "Aislar el núcleo de la aplicación de la infraestructura con puertos definidos por la aplicación y adaptadores intercambiables."
+difficulty: intermediate
+order: 100
+definition: "La arquitectura hexagonal (puertos y adaptadores) organiza la aplicación alrededor de un núcleo con el dominio y los casos de uso. El núcleo define puertos: interfaces de entrada (cómo se lo invoca) y de salida (qué necesita del exterior). Los adaptadores implementan esos puertos para tecnologías concretas, y todas las dependencias de código apuntan hacia el núcleo."
+problem: "La lógica de negocio queda acoplada al framework web, al ORM y a los SDKs de proveedores. No se puede probar sin levantar infraestructura, cambiar una tecnología es una reescritura y la misma lógica no se puede invocar desde otro punto de entrada (una cola, un job, un CLI)."
+benefits:
+  - "El dominio y los casos de uso se prueban sin red, base de datos ni framework."
+  - "Las tecnologías se cambian reemplazando adaptadores, sin tocar el núcleo."
+  - "El mismo caso de uso se expone por HTTP, colas o jobs con adaptadores distintos."
+  - "Las fronteras explícitas facilitan extraer un módulo a un servicio separado."
+costs:
+  - "Más archivos e indirección: interfaces, mapeos y composición explícita."
+  - "Para un CRUD sin reglas, la ceremonia no se paga."
+  - "Requiere disciplina (y verificación automática) para que nadie salte los límites."
+alternatives:
+  - name: "Arquitectura en capas"
+    when: "Aplicaciones con poca lógica de negocio, donde depender directamente del ORM es aceptable y la simplicidad pesa más."
+  - name: "Vertical slices"
+    when: "Cuando cada caso de uso es independiente y se prefiere organizar por funcionalidad de punta a punta, con abstracciones sólo donde hacen falta."
+commonMistakes:
+  - "Definir los puertos a partir de la tecnología (un puerto con métodos del ORM) en lugar de las necesidades del caso de uso."
+  - "Crear una interfaz para todo, incluso para lo que nunca tendrá otra implementación ni se sustituye en tests."
+  - "Poner lógica de negocio en los adaptadores (validaciones de dominio en el controller)."
+  - "No verificar automáticamente la dirección de las dependencias, que se degrada con el tiempo."
+avoidWhen:
+  - "Prototipos o herramientas internas de vida corta."
+  - "Servicios que sólo transforman y reenvían datos sin reglas propias."
+interviewQuestions:
+  - question: "¿Qué diferencia hay entre hexagonal, onion y clean architecture?"
+    answer: "Comparten la idea central: el dominio en el centro y las dependencias apuntando hacia adentro. Hexagonal pone el foco en los puertos y adaptadores como frontera con el exterior; onion y clean detallan capas concéntricas (entidades, casos de uso, adaptadores, frameworks). En la práctica las diferencias son de énfasis y vocabulario."
+  - question: "¿Cómo se verifica que las dependencias apuntan hacia adentro?"
+    answer: "Con reglas automáticas: un test que analiza los imports de cada capa, reglas de lint (por ejemplo, restricciones de imports por carpeta) o herramientas de análisis de dependencias. Sin verificación automática, la regla se rompe en el primer apuro."
+  - question: "¿Dónde viven las transacciones en una arquitectura hexagonal?"
+    answer: "El caso de uso define el límite transaccional (qué debe ser atómico), pero la implementación pertenece a infraestructura: se inyecta una unidad de trabajo o un ejecutor transaccional como puerto, y el adaptador lo implementa con la base concreta."
+diagrams: ["hexagonal", "layers-and-dependencies"]
+related: ["adapter", "repository", "cqrs"]
+relatedLessons: []
+tags: ["hexagonal", "puertos y adaptadores", "clean architecture", "testing"]
+---
+
+## Motivación
+
+La plataforma registra pagos que llegan por tres caminos: el panel de operadores (HTTP), el webhook de la pasarela
+(HTTP con firma) y un archivo de conciliación diario (job). Las reglas de imputación son las mismas en los tres
+casos y son críticas: un error impacta en el saldo real de una persona.
+
+## Ejemplo incorrecto
+
+```ts
+// app/api/payments/route.ts
+import { db } from "@/lib/db";
+import { payments, installments } from "@/lib/schema";
+
+export async function POST(request: Request) {
+  const body = await request.json();
+  const pending = await db.select().from(installments).where(/* ... */);
+  let remaining = body.amountCents;
+  for (const installment of pending) {
+    // reglas de imputación mezcladas con el ORM y con HTTP
+  }
+  await db.insert(payments).values({ ...body });
+  await fetch("https://whatsapp.example/send", { method: "POST", body: "..." });
+  return Response.json({ ok: true });
+}
+```
+
+Para reutilizar la imputación en el webhook y en el job habría que copiarla, y probarla requiere base de datos y
+un proveedor de mensajería.
+
+## Implementación correcta
+
+```ts
+// application/register-payment.ts — núcleo: sin imports de Next.js, ORM ni SDKs
+export interface PaymentRegistrationDeps {
+  readonly debts: DebtRepository; // puerto de salida
+  readonly notifier: Notifier; // puerto de salida
+  readonly clock: () => Date;
+}
+
+export async function registerPayment(
+  deps: PaymentRegistrationDeps,
+  command: { debtId: string; amountCents: number; externalId: string },
+): Promise<{ appliedToInstallments: number }> {
+  const debt = await deps.debts.findById(command.debtId);
+  if (!debt) throw new DomainError("debt-not-found");
+  const result = debt.applyPayment(command.amountCents, command.externalId, deps.clock()); // regla de dominio
+  await deps.debts.save(debt);
+  await deps.notifier.paymentConfirmed(debt.debtorId, command.amountCents);
+  return { appliedToInstallments: result.installmentsTouched };
+}
+
+// app/api/payments/route.ts — adaptador de entrada delgado
+export async function POST(request: Request) {
+  const parsed = paymentSchema.safeParse(await request.json());
+  if (!parsed.success) return Response.json({ error: "invalid" }, { status: 422 });
+  const result = await registerPayment(getPaymentDeps(), parsed.data); // composición en infraestructura
+  return Response.json(result, { status: 201 });
+}
+```
+
+El webhook y el job son otros adaptadores que invocan `registerPayment`. En los tests, `deps` se arma con un
+repositorio en memoria, un `Notifier` falso y un reloj fijo.
+
+## Ejercicio
+
+Este proyecto usa la misma idea en `src/modules`. ¿Qué regla automática impide que un caso de uso importe un
+adaptador? ¿Qué pasaría si no existiera?
+
+<Reveal>
+
+Un test de arquitectura (`tests/architecture/dependency-rules.test.ts`) analiza los imports de cada capa y falla
+si `domain` o `application` importan `infrastructure`, `presentation`, React o Next.js. Sin esa verificación, el
+primer atajo (importar el cliente de base desde un caso de uso "sólo esta vez") se copia y en pocos meses el núcleo
+vuelve a estar acoplado a la infraestructura.
+
+</Reveal>

@@ -1,0 +1,132 @@
+{
+  "id": "modular-monolith",
+  "title": "Monolito modular",
+  "description": "Un único despliegue dividido en módulos con límites explícitos: cada módulo expone una API pública, es dueño de su esquema y se comunica con los demás por llamadas en proceso o eventos internos.",
+  "kind": "architecture",
+  "tags": ["monolito modular", "módulos", "límites"],
+  "nodes": [
+    {
+      "id": "deploy",
+      "label": "Un único despliegue",
+      "kind": "boundary",
+      "column": 1,
+      "row": 0,
+      "responsibility": "Un artefacto, un pipeline, un proceso (o varias réplicas idénticas). Las llamadas entre módulos son llamadas a funciones.",
+      "examples": ["Una app Next.js en Vercel", "Un servicio Node.js en un contenedor"]
+    },
+    {
+      "id": "client",
+      "label": "Panel y APIs públicas",
+      "kind": "actor",
+      "column": 0,
+      "row": 1,
+      "responsibility": "Consumidores externos: no saben que internamente hay módulos.",
+      "examples": ["Panel de operadores", "API para tenants"]
+    },
+    {
+      "id": "http",
+      "label": "Route Handlers",
+      "kind": "adapter",
+      "column": 1,
+      "row": 1,
+      "parent": "deploy",
+      "responsibility": "Adaptadores HTTP delgados que delegan en la API pública de cada módulo.",
+      "examples": ["app/api/debts/route.ts"]
+    },
+    {
+      "id": "collections",
+      "label": "Módulo Cobranzas",
+      "kind": "service",
+      "column": 2,
+      "row": 0,
+      "parent": "deploy",
+      "responsibility": "Deudas, priorización y estrategia de contacto. Expone funciones públicas; sus tablas y clases internas son privadas.",
+      "examples": [
+        "collections/index.ts exporta getDebtSummary()",
+        "Regla de lint que prohíbe importar collections/internal"
+      ]
+    },
+    {
+      "id": "payments",
+      "label": "Módulo Pagos",
+      "kind": "service",
+      "column": 2,
+      "row": 2,
+      "parent": "deploy",
+      "responsibility": "Registro e imputación de pagos. Publica un evento cuando se registra un pago.",
+      "examples": ["payments.registerPayment()", "Evento PaymentRegistered"]
+    },
+    {
+      "id": "bus",
+      "label": "Eventos internos",
+      "kind": "queue",
+      "column": 3,
+      "row": 1,
+      "parent": "deploy",
+      "responsibility": "Desacopla módulos que reaccionan a hechos de otros. Si los eventos deben sobrevivir a un reinicio, se persisten con un outbox.",
+      "examples": ["EventEmitter tipado en proceso", "Tabla outbox + worker"]
+    },
+    {
+      "id": "campaigns",
+      "label": "Módulo Campañas",
+      "kind": "service",
+      "column": 4,
+      "row": 1,
+      "parent": "deploy",
+      "responsibility": "Decide a quién contactar y cuándo. Reacciona a pagos para no contactar a quien ya pagó.",
+      "examples": ["onPaymentRegistered → cancelar contactos pendientes"]
+    },
+    {
+      "id": "db",
+      "label": "PostgreSQL (un esquema por módulo)",
+      "kind": "database",
+      "column": 5,
+      "row": 1,
+      "responsibility": "Una base, pero cada módulo es dueño de sus tablas. Ningún módulo hace JOIN sobre tablas de otro.",
+      "examples": ["Esquemas collections.*, payments.*, campaigns.*"]
+    }
+  ],
+  "edges": [
+    { "id": "m-client-http", "from": "client", "to": "http", "kind": "sync" },
+    { "id": "m-http-collections", "from": "http", "to": "collections", "kind": "sync" },
+    { "id": "m-http-payments", "from": "http", "to": "payments", "kind": "sync" },
+    {
+      "id": "m-collections-payments",
+      "from": "collections",
+      "to": "payments",
+      "kind": "sync",
+      "label": "API pública"
+    },
+    {
+      "id": "m-payments-bus",
+      "from": "payments",
+      "to": "bus",
+      "kind": "async",
+      "label": "PaymentRegistered"
+    },
+    { "id": "m-bus-campaigns", "from": "bus", "to": "campaigns", "kind": "async" },
+    { "id": "m-campaigns-db", "from": "campaigns", "to": "db", "kind": "sync", "label": "campaigns.*" }
+  ],
+  "steps": [
+    {
+      "title": "1. Un despliegue, varios módulos",
+      "description": "Operar un solo artefacto es barato: un pipeline, un log, transacciones locales. La modularidad está en el código, no en la red.",
+      "highlight": ["http", "collections", "payments", "campaigns", "bus"]
+    },
+    {
+      "title": "2. Los módulos se llaman por su API pública",
+      "description": "Cobranzas consulta a Pagos a través de funciones exportadas, nunca leyendo sus tablas. Ese contrato es lo que permitiría extraer el módulo después.",
+      "highlight": ["collections", "payments", "m-collections-payments"]
+    },
+    {
+      "title": "3. Los hechos se comunican con eventos",
+      "description": "Pagos no conoce a Campañas: publica un evento y quien le interese reacciona. Así se evita el acoplamiento circular entre módulos.",
+      "highlight": ["payments", "bus", "campaigns", "m-payments-bus", "m-bus-campaigns"]
+    },
+    {
+      "title": "4. Cada módulo es dueño de sus datos",
+      "description": "Un esquema por módulo hace visible el acoplamiento. Si un módulo necesita datos de otro, los pide por su API o mantiene una copia a partir de eventos.",
+      "highlight": ["db", "campaigns", "m-campaigns-db"]
+    }
+  ]
+}
