@@ -1,9 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { getClientStores } from "@/infrastructure/composition/client-stores";
-import { createAgentRuntime } from "@/infrastructure/composition/agent-runtime";
-import { AgentLabProvider, AgentRuntimeProvider } from "@/modules/agent-lab/presentation/agent-lab-context";
+import { AgentLabProvider } from "@/modules/agent-lab/presentation/agent-lab-context";
 import { WorkerCodeRunner } from "@/modules/exercises/infrastructure/worker-code-runner";
 import { CodeRunnerProvider } from "@/modules/exercises/presentation/code-runner-context";
 import { WorkerSqlEngine } from "@/modules/sql-lab/infrastructure/worker-sql-engine";
@@ -47,7 +46,6 @@ export function Providers({ children }: { children: ReactNode }) {
       active = false;
     };
   }, []);
-  const agentRuntime = useMemo(() => createAgentRuntime(ai), [ai]);
   return (
     <SessionProvider>
       <PreferencesProvider store={stores.preferences}>
@@ -60,16 +58,14 @@ export function Providers({ children }: { children: ReactNode }) {
                     <StudioProvider store={stores.studio}>
                       <InterviewsProvider store={stores.interviews}>
                         <AgentLabProvider store={stores.agentLab}>
-                          <AgentRuntimeProvider runtime={agentRuntime}>
-                            <AiStatusProvider status={ai}>
-                              <SyncProvider controller={stores.sync}>
-                                <BackupProvider port={stores.backup}>
-                                  <ReadingFontSizeSync />
-                                  {children}
-                                </BackupProvider>
-                              </SyncProvider>
-                            </AiStatusProvider>
-                          </AgentRuntimeProvider>
+                          <AiStatusProvider status={ai}>
+                            <SyncProvider controller={stores.sync}>
+                              <BackupProvider port={stores.backup}>
+                                <ReadingFontSizeSync />
+                                {children}
+                              </BackupProvider>
+                            </SyncProvider>
+                          </AiStatusProvider>
                         </AgentLabProvider>
                       </InterviewsProvider>
                     </StudioProvider>

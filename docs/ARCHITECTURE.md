@@ -95,9 +95,10 @@ bloques estructurados y se renderiza con componentes controlados en `/c/[curso]/
 Todo el toolchain corre en Docker (ver [ADR-0001](adr/0001-docker-only-local-toolchain.md)):
 
 ```bash
-docker compose up app                        # http://localhost:3000
+docker compose up web                        # build de producción en http://localhost:3000 (para usarla)
+docker compose up app                        # servidor de desarrollo en http://localhost:3001 (para programar)
 docker compose run --rm app pnpm check       # typecheck + lint + tests + build
-docker compose --profile e2e run --rm e2e    # Playwright contra el contenedor app
+docker compose --profile e2e run --rm e2e    # Playwright contra un build de producción
 ```
 
 ## 6. Riesgos técnicos identificados

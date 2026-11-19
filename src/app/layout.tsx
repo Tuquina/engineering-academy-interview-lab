@@ -2,7 +2,6 @@ import type { Metadata, Viewport } from "next";
 import { Inter, JetBrains_Mono } from "next/font/google";
 import Script from "next/script";
 import type { ReactNode } from "react";
-import { getSearchIndex } from "@/infrastructure/composition/content-extras";
 import { getCatalog } from "@/infrastructure/composition/learning";
 import { AccountButton } from "@/modules/auth/presentation/account-button";
 import { CommandPalette } from "@/modules/search/presentation/command-palette";
@@ -32,7 +31,7 @@ export const viewport: Viewport = {
 };
 
 export default async function RootLayout({ children }: { children: ReactNode }) {
-  const [catalog, searchIndex] = await Promise.all([getCatalog(), getSearchIndex()]);
+  const catalog = await getCatalog();
   const courses = catalog.courses.map((course) => ({
     href: `/courses/${course.slug}`,
     title: course.title,
@@ -53,7 +52,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
         <Providers>
           <AppShell
             courses={courses}
-            search={<CommandPalette entries={searchIndex} />}
+            search={<CommandPalette indexUrl="/api/search-index" />}
             account={<AccountButton />}
           >
             {children}

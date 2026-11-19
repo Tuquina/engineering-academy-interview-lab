@@ -435,6 +435,22 @@ Decisiones en [ADR-0010](adr/0010-persistence-auth-sync-and-admin.md). Módulos 
 - No hay todavía una Content-Security-Policy estricta (Monaco, Sandpack y los workers necesitan excepciones).
 - La sincronización sube el documento completo del store; los contadores en conflicto toman el máximo.
 
+## Performance (2026-11-19, antes de la Fase 7)
+
+Medido contra el build de producción, no contra el servidor de desarrollo:
+
+- La lentitud percibida venía de usar `next dev` en Docker: compila cada ruta al visitarla y vigila archivos por
+  polling (0,8–4,8 s por página ya compilada). El build de producción responde en 10–50 ms. Nuevo servicio
+  `docker compose up web` (puerto 3000, volumen `next_prod`) que compila sólo si hubo cambios; el dev server pasó al
+  puerto 3001.
+- El índice del buscador (~340 KB) viajaba serializado en el HTML de cada página: ahora es un JSON estático
+  (`/api/search-index`, `force-static`) que el buscador descarga al acercarse el puntero, recibir foco o abrirse.
+  HTML por página: ~400 KB → 80–100 KB (lección: 600 → 260 KB).
+- El proveedor LLM local del AI Agents Lab ya no está en los proveedores globales: vive en `src/app/agents/layout.tsx`
+  y se descarga sólo en `/agents`.
+- Pendiente: Zod (~110 KB sin comprimir) sigue en el bundle común porque los stores validan `localStorage`; migrar a
+  `zod/mini` lo reduciría, a costa de tocar todos los esquemas.
+
 ## Próximas fases
 
 | Fase                                                                          | Estado     |

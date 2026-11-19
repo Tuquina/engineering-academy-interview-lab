@@ -27,26 +27,50 @@ const KIND_META: Readonly<Record<SearchEntryKind, { label: string; icon: LucideI
   practice: { label: "Práctica", icon: Dumbbell },
 };
 
+const NO_ENTRIES: readonly SearchEntry[] = [];
+
 /**
  * Buscador global (Ctrl/Cmd + K). Accesible como combobox: el foco queda en el campo y la opción activa se
  * comunica con `aria-activedescendant`. Flechas para moverse, Enter para abrir, Escape para cerrar.
+ *
+ * El índice es un JSON estático (`indexUrl`) que se descarga la primera vez que el usuario se acerca al buscador
+ * (foco, hover o atajo), no en cada página: así el HTML inicial no carga cientos de KB que casi nunca se usan.
  */
-export function CommandPalette({ entries }: { entries: readonly SearchEntry[] }) {
+export function CommandPalette({ indexUrl }: { indexUrl: string }) {
   const router = useRouter();
   const listId = useId();
   const dialogRef = useRef<HTMLDialogElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const loadingRef = useRef(false);
+  const [entries, setEntries] = useState<readonly SearchEntry[] | null>(null);
+  const [failed, setFailed] = useState(false);
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
-  const results = useMemo(() => searchEntries(entries, query, 12), [entries, query]);
+  const results = useMemo(() => searchEntries(entries ?? NO_ENTRIES, query, 12), [entries, query]);
+
+  const loadIndex = useCallback(() => {
+    if (loadingRef.current) return;
+    loadingRef.current = true;
+    setFailed(false);
+    fetch(indexUrl)
+      .then((r) =>
+        r.ok ? (r.json() as Promise<SearchEntry[]>) : Promise.reject(new Error(String(r.status))),
+      )
+      .then(setEntries)
+      .catch(() => {
+        loadingRef.current = false;
+        setFailed(true);
+      });
+  }, [indexUrl]);
 
   const open = useCallback(() => {
     if (dialogRef.current?.open) return;
+    loadIndex();
     setQuery("");
     setActive(0);
     dialogRef.current?.showModal();
     inputRef.current?.focus();
-  }, []);
+  }, [loadIndex]);
   const close = () => dialogRef.current?.close();
 
   useEffect(() => {
@@ -84,6 +108,8 @@ export function CommandPalette({ entries }: { entries: readonly SearchEntry[] })
       <button
         type="button"
         onClick={open}
+        onPointerEnter={loadIndex}
+        onFocus={loadIndex}
         className="border-border bg-surface text-muted hover:text-foreground flex h-9 w-full max-w-xs items-center gap-2 rounded-md border px-3 text-sm transition-colors"
         aria-label="Buscar (Ctrl+K)"
       >
@@ -125,7 +151,21 @@ export function CommandPalette({ entries }: { entries: readonly SearchEntry[] })
         </div>
 
         <ul id={listId} role="listbox" aria-label="Resultados" className="max-h-[50vh] overflow-y-auto p-2">
-          {query.trim() !== "" && results.length === 0 && (
+          {query.trim() !== "" && entries === null && (
+            <li className="text-muted px-3 py-6 text-center text-sm" role="status">
+              {failed ? (
+                <>
+                  No se pudo cargar el índice.{" "}
+                  <button type="button" className="text-accent underline" onClick={loadIndex}>
+                    Reintentar
+                  </button>
+                </>
+              ) : (
+                "Cargando índice…"
+              )}
+            </li>
+          )}
+          {query.trim() !== "" && entries !== null && results.length === 0 && (
             <li className="text-muted px-3 py-6 text-center text-sm">Sin resultados para «{query}».</li>
           )}
           {query.trim() === "" && (

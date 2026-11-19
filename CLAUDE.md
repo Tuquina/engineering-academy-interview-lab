@@ -20,12 +20,13 @@ Documentos de trabajo:
 No hay Node.js en el host y no se debe instalar nada en la PC. Todo comando corre en el contenedor:
 
 ```bash
-docker compose up app                          # PostgreSQL + migraciones + dev server en http://localhost:3000
+docker compose up web                          # PostgreSQL + migraciones + build de producción en http://localhost:3000 (uso diario)
+docker compose up app                          # PostgreSQL + migraciones + dev server en http://localhost:3001 (lento: compila al visitar)
 docker compose run --rm app pnpm check         # typecheck + lint + test + build
 docker compose --profile e2e run --rm e2e      # Playwright contra build de producción
 ```
 
-No correr `pnpm build` en el contenedor mientras `app` está levantado: comparten el volumen `.next`.
+No correr `pnpm build` en el contenedor mientras `app` está levantado: comparten el volumen `.next` (`web` usa su propio volumen `next_prod`). Medir performance siempre contra `web`, nunca contra el dev server.
 
 ## Reglas clave (resumen; el detalle está en el master prompt)
 

@@ -1,5 +1,6 @@
 # Entorno local completo en contenedores (no requiere Node.js ni PostgreSQL en el host). Uso:
-#   docker compose up app                        -> PostgreSQL + migraciones + servidor de desarrollo en http://localhost:3000
+#   docker compose up web                        -> PostgreSQL + migraciones + build de producción en http://localhost:3000 (para usarla)
+#   docker compose up app                        -> PostgreSQL + migraciones + servidor de desarrollo en http://localhost:3001 (para programar)
 #   docker compose run --rm app pnpm <script>    -> typecheck, lint, test, build, etc.
 #   docker compose --profile e2e run --rm e2e    -> E2E con Playwright contra un build de producción y una base efímera
 name: engineering-academy
@@ -49,6 +50,25 @@ services:
       timeout: 3s
       retries: 30
 
+  # Para USAR la app: build de producción (páginas prerenderizadas, JS minificado). Recompila sólo si hubo cambios.
+  web:
+    <<: *app-base
+    environment:
+      <<: *app-env
+      DATABASE_URL: ${DATABASE_URL:-postgres://eal:eal@db:5432/eal}
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - .:/app
+      - node_modules:/app/node_modules
+      - next_prod:/app/.next
+    command: sh scripts/serve-production.sh
+    ports:
+      - "3000:3000"
+
+  # Para PROGRAMAR: servidor de desarrollo con recarga en caliente. Compila cada página al visitarla, por eso es
+  # mucho más lento que `web`; no es representativo de la performance real.
   app:
     <<: *app-base
     environment:
@@ -65,7 +85,7 @@ services:
       - next_cache:/app/.next
     command: sh -c "pnpm install --frozen-lockfile && pnpm db:migrate && pnpm dev:docker"
     ports:
-      - "3000:3000"
+      - "3001:3000"
 
   # Base efímera para E2E (en memoria): cada `docker compose --profile e2e down` la descarta.
   db-e2e:
@@ -137,4 +157,5 @@ volumes:
   node_modules:
   next_cache:
   next_e2e:
+  next_prod:
   pgdata:

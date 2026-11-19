@@ -2,10 +2,16 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "app (docker)",
+      "name": "web (docker, producción)",
+      "runtimeExecutable": "docker",
+      "runtimeArgs": ["compose", "up", "web"],
+      "port": 3000
+    },
+    {
+      "name": "app (docker, desarrollo)",
       "runtimeExecutable": "docker",
       "runtimeArgs": ["compose", "up", "app"],
-      "port": 3000
+      "port": 3001
     },
     {
       "name": "app (ya levantada)",

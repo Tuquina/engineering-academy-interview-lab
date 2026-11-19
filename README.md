@@ -13,7 +13,7 @@ Engineering**: TypeScript, Node.js, React, Next.js, arquitectura, System Design,
 Sólo **Docker** (con Docker Compose). No hace falta instalar Node.js ni pnpm en el equipo: todo el toolchain corre en
 contenedores ([ADR-0001](docs/adr/0001-docker-only-local-toolchain.md)).
 
-No hay variables de entorno obligatorias. `docker compose up app` levanta también **PostgreSQL 17** local (volumen
+No hay variables de entorno obligatorias. `docker compose up web` (o `app`) levanta también **PostgreSQL 17** local (volumen
 `pgdata`, expuesto en `127.0.0.1:55432`, usuario y base `eal`) y aplica las migraciones. Sin `DATABASE_URL` (por
 ejemplo, en un despliegue sin base) todo sigue funcionando en modo invitado con progreso en `localStorage`. El AI
 Agents Lab usa un proveedor local determinista que no necesita API key.
@@ -43,11 +43,16 @@ validación de tamaño. Sin key, esas funciones se muestran deshabilitadas y exp
 ## Uso local
 
 ```bash
-docker compose up app
+docker compose up web
 ```
 
-Abre el servidor de desarrollo en <http://localhost:3000>. La primera vez instala dependencias en un volumen Docker.
-Los cambios en `src/` y `content/` se reflejan solos (con polling, unos segundos de demora).
+Abre la app en <http://localhost:3000> con el **build de producción**: páginas prerenderizadas que responden en
+decenas de milisegundos. La primera vez instala dependencias y compila (alrededor de un minuto); los arranques
+siguientes reutilizan el build salvo que haya cambios en el código o el contenido.
+
+Para programar, `docker compose up app` levanta el servidor de desarrollo en <http://localhost:3001>: refleja los
+cambios de `src/` y `content/` solos, pero compila cada página al visitarla y es mucho más lento. No sirve para
+juzgar la performance.
 
 Comandos del proyecto (siempre dentro del contenedor):
 
