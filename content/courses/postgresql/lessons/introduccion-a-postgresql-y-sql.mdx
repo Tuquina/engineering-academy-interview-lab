@@ -1,0 +1,316 @@
+---
+id: postgresql.introduction
+moduleId: postgresql.intro
+title: "Introducción a PostgreSQL y SQL esencial"
+description: "Qué es PostgreSQL y por qué es la base relacional por defecto de los backends modernos, cómo se ejecuta en Docker y se usa con psql, sus tipos de datos esenciales y la sintaxis SQL que vas a usar todos los días: crear tablas, insertar, consultar, filtrar, agrupar, modificar, manejar NULL y llamar a la base desde Node.js de forma segura."
+difficulty: basic
+order: 1
+objectives:
+  - "Explicar qué es PostgreSQL y qué lo diferencia de otras bases relacionales."
+  - "Levantar PostgreSQL en Docker y trabajar con psql."
+  - "Elegir tipos de datos adecuados para dinero, fechas, texto e identificadores."
+  - "Escribir sentencias DDL y DML básicas: CREATE TABLE, INSERT, UPDATE, DELETE y SELECT."
+  - "Agregar datos con GROUP BY y HAVING y razonar sobre NULL."
+  - "Consultar PostgreSQL desde Node.js con consultas parametrizadas."
+prerequisites: []
+estimatedMinutes: 40
+tags: ["postgresql", "sql", "introducción", "psql", "docker", "tipos de datos", "c#", "java"]
+version: "1.0.0"
+comparesWith: ["csharp", "java"]
+references:
+  - title: "PostgreSQL — Tutorial"
+    url: "https://www.postgresql.org/docs/current/tutorial.html"
+  - title: "PostgreSQL — Data Types"
+    url: "https://www.postgresql.org/docs/current/datatype.html"
+  - title: "PostgreSQL — psql"
+    url: "https://www.postgresql.org/docs/current/app-psql.html"
+  - title: "Docker Hub — postgres (imagen oficial)"
+    url: "https://hub.docker.com/_/postgres"
+  - title: "node-postgres — Queries"
+    url: "https://node-postgres.com/features/queries"
+interviewQuestions:
+  - question: "¿Por qué PostgreSQL es tan usado como base por defecto en backends nuevos?"
+    keyPoints:
+      - "Base relacional open source madura, con transacciones ACID y fuerte cumplimiento del estándar SQL."
+      - "Tipos ricos (JSONB, arrays, rangos, UUID) e índices avanzados (GIN, GiST, parciales)."
+      - "Extensible: extensiones como pgvector, PostGIS o pg_trgm."
+      - "Disponible gestionada en todos los proveedores de nube."
+  - question: "¿Qué tipo usarías para guardar montos de dinero y por qué?"
+    keyPoints:
+      - "Enteros en la unidad mínima (bigint en centavos) o numeric con escala fija."
+      - "Nunca float o double: los errores de representación binaria acumulan diferencias."
+      - "El tipo money depende de la configuración regional y se desaconseja."
+  - question: "¿Por qué WHERE column = NULL no devuelve filas?"
+    keyPoints:
+      - "NULL significa valor desconocido y cualquier comparación con NULL da NULL (lógica de tres valores), no true."
+      - "Se usa IS NULL o IS NOT NULL, o IS DISTINCT FROM para comparaciones que tratan NULL como valor."
+      - "Afecta también a NOT IN con subconsultas que contienen NULL y a los agregados."
+summary:
+  - "PostgreSQL es una base relacional open source, transaccional y extensible."
+  - "En local se ejecuta con la imagen oficial de Docker; psql es el cliente de línea de comandos."
+  - "Dinero en bigint (centavos) o numeric; fechas con date o timestamptz; texto con text; IDs con bigint o uuid."
+  - "DDL define la estructura (CREATE, ALTER); DML manipula datos (INSERT, UPDATE, DELETE, SELECT)."
+  - "El orden lógico de un SELECT es FROM → WHERE → GROUP BY → HAVING → SELECT → ORDER BY → LIMIT."
+  - "NULL es 'desconocido': se compara con IS NULL; NOT IN con NULL produce resultados inesperados."
+  - "Desde Node.js siempre con consultas parametrizadas ($1, $2), nunca concatenando strings."
+---
+
+## Qué vas a aprender en este curso
+
+En una plataforma de cobranzas, la base de datos es la **fuente de verdad**: deudas, pagos, promesas, campañas y
+eventos. Casi todos los bugs graves (pagos duplicados, saldos incorrectos, datos de un cliente visibles para otro)
+terminan en decisiones de modelado, consultas o transacciones. Este curso cubre lo que se espera de un backend senior.
+
+| Módulo                       | Qué vas a poder hacer                                                                |
+| ---------------------------- | ------------------------------------------------------------------------------------ |
+| Introducción                 | Ejecutar PostgreSQL, escribir SQL básico y usarlo desde Node.js de forma segura.     |
+| Modelado relacional          | Diseñar tablas, claves y constraints; usar JSONB con criterio; versionar el esquema. |
+| Consultas e índices          | Escribir joins, CTEs y window functions; crear índices y leer planes de ejecución.   |
+| Transacciones y concurrencia | Evitar carreras con aislamiento, locks, upserts y el patrón outbox.                  |
+| Operación y seguridad        | Pooling, particionado, inyección SQL, Row Level Security y mantenimiento.            |
+
+La plataforma tiene un **Database Lab** (`/database-lab`) con PostgreSQL real ejecutándose en el navegador (PGlite) y
+un dataset de cobranzas: todo lo de este curso se puede probar ahí.
+
+## Qué es PostgreSQL
+
+**PostgreSQL** es una base de datos relacional open source con más de 30 años de desarrollo. Sus puntos fuertes:
+
+- **Transacciones ACID** y control de concurrencia por versiones (MVCC), que se ven en detalle más adelante.
+- **Fuerte adhesión al estándar SQL** y funciones avanzadas: CTEs, window functions, `UPSERT`, `RETURNING`.
+- **Tipos ricos:** `jsonb`, arrays, rangos, `uuid`, `timestamptz`, enums.
+- **Extensible:** `pgvector` (búsqueda vectorial para RAG), `pg_trgm` (búsqueda por similitud de texto), PostGIS.
+- **Disponible gestionada** en AWS (RDS, Aurora), Google Cloud, Azure, Neon, Supabase y otros.
+
+Si venís de SQL Server u Oracle, el SQL es muy parecido; cambian detalles de tipos, funciones y herramientas.
+
+## Ejecutarlo en Docker y usar psql
+
+```bash
+docker run --name collections-db -e POSTGRES_PASSWORD=dev -e POSTGRES_DB=collections -p 5432:5432 -d postgres:17
+
+# Abrir psql dentro del contenedor
+docker exec -it collections-db psql -U postgres -d collections
+```
+
+Comandos de `psql` que conviene conocer (empiezan con barra invertida y no son SQL):
+
+| Comando    | Qué hace                                           |
+| ---------- | -------------------------------------------------- |
+| `\dt`      | Lista las tablas                                   |
+| `\d debts` | Describe una tabla: columnas, índices, constraints |
+| `\x`       | Alterna la vista expandida (una columna por línea) |
+| `\timing`  | Muestra el tiempo de cada consulta                 |
+| `\q`       | Sale                                               |
+
+## Tipos de datos esenciales
+
+| Necesidad               | Tipo recomendado                               | Evitar                                                        |
+| ----------------------- | ---------------------------------------------- | ------------------------------------------------------------- |
+| Identificadores         | `bigint generated always as identity`, `uuid`  | `serial` en código nuevo (funciona, pero es la forma antigua) |
+| Dinero                  | `bigint` en centavos o `numeric(14,2)`         | `real`, `double precision`, `money`                           |
+| Texto                   | `text` (con `CHECK` de longitud si hace falta) | `varchar(n)` arbitrarios "por costumbre"                      |
+| Fecha sin hora          | `date`                                         | Strings                                                       |
+| Momento en el tiempo    | `timestamptz`                                  | `timestamp` sin zona horaria                                  |
+| Sí / no                 | `boolean`                                      | `char(1)` con `'S'`/`'N'`                                     |
+| Conjunto cerrado        | `text` + `CHECK (status IN (...))` o un `enum` | Números mágicos                                               |
+| Datos semiestructurados | `jsonb`                                        | `json` (se guarda como texto, sin indexar bien)               |
+
+`timestamptz` guarda un **instante** (internamente en UTC) y lo muestra en la zona horaria de la sesión. Para
+eventos (cuándo se registró un pago) es casi siempre lo correcto.
+
+## Crear tablas y modificar datos
+
+```sql
+CREATE TABLE customers (
+  id          bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  tenant_id   bigint NOT NULL,
+  full_name   text   NOT NULL,
+  email       text,
+  created_at  timestamptz NOT NULL DEFAULT now()
+);
+
+CREATE TABLE debts (
+  id             bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  customer_id    bigint NOT NULL REFERENCES customers (id),
+  balance_cents  bigint NOT NULL CHECK (balance_cents >= 0),
+  due_date       date   NOT NULL,
+  status         text   NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'promised', 'paid'))
+);
+
+INSERT INTO customers (tenant_id, full_name, email)
+VALUES (1, 'Ana Pérez', 'ana@example.com')
+RETURNING id;                                   -- devuelve el ID generado
+
+UPDATE debts SET status = 'paid', balance_cents = 0 WHERE id = 42;
+
+DELETE FROM debts WHERE id = 42;                -- sin WHERE borra TODO: cuidado
+```
+
+`RETURNING` (devolver las filas afectadas) es una de las comodidades más útiles de PostgreSQL: evita una segunda
+consulta después de un `INSERT` o `UPDATE`.
+
+## Consultar: SELECT
+
+```sql
+SELECT c.full_name, d.balance_cents, d.due_date
+  FROM debts d
+  JOIN customers c ON c.id = d.customer_id
+ WHERE d.status = 'pending'
+   AND d.due_date < CURRENT_DATE
+ ORDER BY d.balance_cents DESC
+ LIMIT 20;
+```
+
+Un `SELECT` se **escribe** en un orden pero se **evalúa** en otro. Entender el orden lógico explica muchos errores
+("¿por qué no puedo usar el alias de la columna en el WHERE?"):
+
+<MermaidDiagram
+  caption="Orden lógico de evaluación de un SELECT: el WHERE se aplica antes de calcular las columnas del SELECT."
+  chart={`
+flowchart LR
+  F["FROM y JOIN<br/>qué filas"] --> W["WHERE<br/>filtra filas"]
+  W --> G["GROUP BY<br/>agrupa"]
+  G --> H["HAVING<br/>filtra grupos"]
+  H --> S["SELECT<br/>calcula columnas"]
+  S --> O["ORDER BY<br/>ordena"]
+  O --> L["LIMIT y OFFSET"]
+`}
+/>
+
+## Agregaciones: GROUP BY y HAVING
+
+```sql
+-- Deuda vencida por cliente, sólo clientes con más de $100.000 vencidos
+SELECT c.id, c.full_name, count(*) AS overdue_debts, sum(d.balance_cents) AS overdue_cents
+  FROM debts d
+  JOIN customers c ON c.id = d.customer_id
+ WHERE d.due_date < CURRENT_DATE AND d.status <> 'paid'
+ GROUP BY c.id, c.full_name
+HAVING sum(d.balance_cents) > 10000000
+ ORDER BY overdue_cents DESC;
+```
+
+- `WHERE` filtra **filas** antes de agrupar; `HAVING` filtra **grupos** después.
+- Toda columna del `SELECT` que no esté dentro de un agregado debe estar en el `GROUP BY` (o depender
+  funcionalmente de la clave primaria agrupada).
+- Agregados habituales: `count`, `sum`, `avg`, `min`, `max`; y `count(*) FILTER (WHERE ...)` para contar
+  condicionalmente en una sola pasada.
+
+## NULL y la lógica de tres valores
+
+`NULL` significa **desconocido**. Cualquier comparación con `NULL` da `NULL` (ni verdadero ni falso), y `WHERE` sólo
+conserva las filas donde la condición es verdadera.
+
+```sql
+SELECT * FROM customers WHERE email = NULL;      -- ❌ nunca devuelve filas
+SELECT * FROM customers WHERE email IS NULL;     -- ✅
+
+SELECT coalesce(email, 'sin email') FROM customers;   -- valor por defecto
+
+-- Trampa clásica: si la subconsulta devuelve algún NULL, NOT IN no devuelve nada
+SELECT * FROM customers WHERE id NOT IN (SELECT customer_id FROM opt_outs);
+-- Más seguro:
+SELECT * FROM customers c WHERE NOT EXISTS (SELECT 1 FROM opt_outs o WHERE o.customer_id = c.id);
+```
+
+## Usar PostgreSQL desde Node.js
+
+Con el driver `pg` (node-postgres), siempre con **consultas parametrizadas**:
+
+```ts
+import { Pool } from "pg";
+
+const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+
+export async function findOverdueDebts(tenantId: number, limit: number) {
+  const { rows } = await pool.query<{ id: string; balance_cents: string; due_date: Date }>(
+    `SELECT d.id, d.balance_cents, d.due_date
+       FROM debts d JOIN customers c ON c.id = d.customer_id
+      WHERE c.tenant_id = $1 AND d.due_date < CURRENT_DATE
+      ORDER BY d.due_date
+      LIMIT $2`,
+    [tenantId, limit], // los valores viajan separados del SQL: no hay inyección posible
+  );
+  return rows;
+}
+```
+
+<Callout type="warning" title="bigint llega como string">
+  El driver `pg` devuelve las columnas `bigint` como **string**, porque un `bigint` puede superar el rango
+  exacto de `number` en JavaScript. Hay que convertirlas conscientemente (a `number` si se sabe que el rango
+  es seguro, o a `bigint`). Es otro ejemplo de dato externo que se parsea en el límite.
+</Callout>
+
+En proyectos reales se suele usar un **query builder** o un **ORM** con tipos (Drizzle, Kysely, Prisma). Esta
+plataforma va a usar Drizzle en la fase de persistencia. Aun así, entender el SQL que generan es indispensable para
+diagnosticar problemas de performance y concurrencia.
+
+## Comparación con C# y Java
+
+| Concepto                  | .NET                         | Java                        | Node.js + PostgreSQL                  |
+| ------------------------- | ---------------------------- | --------------------------- | ------------------------------------- |
+| Driver                    | Npgsql                       | JDBC (pgjdbc)               | `pg` (node-postgres), `postgres.js`   |
+| Parámetros                | `@param` con `NpgsqlCommand` | `?` con `PreparedStatement` | `$1`, `$2`                            |
+| ORM típico                | Entity Framework Core        | Hibernate / JPA             | Drizzle, Prisma, TypeORM              |
+| Micro-ORM / query builder | Dapper                       | jOOQ, JdbcTemplate          | Kysely, Drizzle (modo SQL)            |
+| Dinero                    | `decimal`                    | `BigDecimal`                | `bigint` en centavos o string decimal |
+
+## Errores frecuentes
+
+- **Guardar dinero en `double precision`** o fechas como strings.
+- **`timestamp` sin zona horaria** para instantes.
+- **`UPDATE` o `DELETE` sin `WHERE`.** En psql, conviene trabajar dentro de `BEGIN` para poder hacer `ROLLBACK`.
+- **Comparar con `= NULL`** o usar `NOT IN` con subconsultas que pueden tener `NULL`.
+- **Concatenar valores en el SQL.**
+- **Usar alias del `SELECT` en el `WHERE`**, sin entender el orden lógico.
+
+## Ejercicio interactivo
+
+<KnowledgeCheck
+  id="postgresql.introduction.q1"
+  question="¿Qué tipo es el más adecuado para el saldo de una deuda?"
+  options={[
+    {
+      text: "`double precision`",
+      explanation: "Los flotantes binarios acumulan errores de representación: inaceptable para dinero.",
+    },
+    {
+      text: "`bigint` en centavos (o `numeric` con escala fija)",
+      correct: true,
+      explanation: "Correcto. Enteros en la unidad mínima son exactos y simples de operar.",
+    },
+    { text: "`money`", explanation: "Depende de la configuración regional (lc_monetary) y se desaconseja." },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="postgresql.introduction.q2"
+  question="¿Por qué `SELECT * FROM customers WHERE email = NULL` no devuelve filas aunque haya clientes sin email?"
+  options={[
+    {
+      text: "Porque NULL no se puede guardar en columnas text.",
+      explanation: "Sí se puede; el problema es la comparación.",
+    },
+    {
+      text: "Porque cualquier comparación con NULL da NULL, y WHERE sólo conserva filas donde la condición es verdadera.",
+      correct: true,
+      explanation: "Correcto. Se usa `email IS NULL`.",
+    },
+    { text: "Porque falta un índice.", explanation: "Los índices afectan la velocidad, no el resultado." },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="postgresql.introduction.q3"
+  question="Querés los clientes cuya deuda vencida total supera $100.000. ¿Dónde va la condición sobre la suma?"
+  options={[
+    { text: "En el WHERE.", explanation: "WHERE se evalúa antes de agrupar: la suma todavía no existe." },
+    {
+      text: "En el HAVING, después del GROUP BY.",
+      correct: true,
+      explanation: "Correcto. HAVING filtra grupos usando agregados.",
+    },
+    { text: "En el ORDER BY.", explanation: "ORDER BY ordena, no filtra." },
+  ]}
+/>

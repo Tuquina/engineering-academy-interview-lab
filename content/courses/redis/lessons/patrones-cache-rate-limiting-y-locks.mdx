@@ -1,0 +1,354 @@
+---
+id: redis.patterns
+moduleId: redis.patterns
+title: "Patrones con Redis: cache aside, invalidación, stampede, rate limiting, idempotencia, locks y mensajería"
+description: "Los usos de Redis que aparecen en todo backend y en toda entrevista: cache aside y sus estrategias de invalidación, cómo evitar el cache stampede, rate limiting con ventana fija, deslizante y token bucket, deduplicación e idempotencia, locks distribuidos (y por qué no garantizan exclusión absoluta) y mensajería con Pub/Sub y Streams."
+difficulty: advanced
+order: 1
+objectives:
+  - "Implementar cache aside con TTL, invalidación y protección contra stampede."
+  - "Implementar rate limiting atómico con Redis y elegir el algoritmo adecuado."
+  - "Usar Redis para deduplicación e idempotencia, conociendo sus límites frente a constraints de la base."
+  - "Implementar un lock distribuido con expiración y explicar sus limitaciones (fencing tokens)."
+  - "Distinguir Pub/Sub de Streams y elegir según las garantías necesarias."
+prerequisites: ["redis.data-types"]
+estimatedMinutes: 50
+tags:
+  [
+    "cache aside",
+    "cache stampede",
+    "rate limiting",
+    "idempotencia",
+    "locks distribuidos",
+    "pub/sub",
+    "streams",
+  ]
+version: "1.0.0"
+comparesWith: ["csharp", "java"]
+references:
+  - title: "Redis — Rate limiting (tutorial)"
+    url: "https://redis.io/learn/howtos/ratelimiting"
+  - title: "Redis — Distributed locks with Redis"
+    url: "https://redis.io/docs/latest/develop/use/patterns/distributed-locks/"
+  - title: "Martin Kleppmann — How to do distributed locking"
+    url: "https://martin.kleppmann.com/2016/02/08/how-to-do-distributed-locking.html"
+  - title: "Redis — Pub/Sub"
+    url: "https://redis.io/docs/latest/develop/interact/pubsub/"
+  - title: "Redis — Scripting with Lua"
+    url: "https://redis.io/docs/latest/develop/interact/programmability/eval-intro/"
+interviewQuestions:
+  - question: "¿Qué es el cache stampede y cómo lo evitás?"
+    keyPoints:
+      - "Cuando una clave muy pedida expira, muchas requests no la encuentran a la vez y todas van a la fuente."
+      - "Puede saturar la base justo en el momento de mayor carga."
+      - "Mitigaciones: un solo recálculo con lock o single-flight, refresco anticipado antes del vencimiento, TTL con jitter."
+      - "Servir el valor viejo mientras se recalcula (stale-while-revalidate) cuando es aceptable."
+  - question: "¿Cómo implementarías un rate limiter distribuido?"
+    keyPoints:
+      - "Estado compartido en Redis para que todas las réplicas vean el mismo contador."
+      - "Ventana fija con INCR + EXPIRE: simple, con ráfaga en el borde."
+      - "Ventana deslizante con sorted set de timestamps, o token bucket con un script Lua atómico."
+      - "Responder 429 con Retry-After; elegir la clave (usuario, tenant, IP, endpoint)."
+  - question: "¿Un lock en Redis garantiza exclusión mutua?"
+    keyPoints:
+      - "SET clave token NX PX ttl adquiere; se libera con un script que borra sólo si el token coincide."
+      - "Si el proceso se pausa más que el TTL (GC, red), el lock expira y otro lo toma: dos creen tenerlo."
+      - "Para correctitud se usa un fencing token que el recurso protegido verifica, o constraints en la base."
+      - "Sirve bien para eficiencia (evitar trabajo duplicado), no como única garantía de corrección."
+summary:
+  - "Cache aside: leer de la caché, si falta leer de la fuente y guardar con TTL; invalidar al escribir."
+  - "La invalidación es el problema difícil: TTL, borrado al escribir o eventos; siempre con claves que incluyen el tenant."
+  - "Stampede: una sola request recalcula (lock o single-flight), refresco anticipado y TTL con jitter."
+  - "Rate limiting: ventana fija (INCR + EXPIRE), deslizante (sorted set) o token bucket (Lua), con estado en Redis."
+  - "SET NX EX deduplica rápido, pero la garantía fuerte de idempotencia está en la constraint de la base."
+  - "Un lock con TTL no garantiza exclusión ante pausas: fencing tokens o constraints para la corrección."
+  - "Pub/Sub entrega a quienes están conectados, sin persistencia; Streams persiste y permite confirmación."
+---
+
+## ¿Qué problema resuelve?
+
+Casi todo backend termina usando Redis para los mismos problemas: aliviar a la base con una caché, limitar cuántos
+mensajes se envían, no procesar dos veces el mismo evento, evitar que dos workers trabajen sobre la misma conversación
+y comunicar procesos. Cada uno tiene una implementación correcta y varias trampas que aparecen bajo carga. Esta
+lección cubre los patrones y, sobre todo, **sus límites**.
+
+## Cache aside
+
+El patrón más común: la aplicación consulta la caché; si no está, va a la fuente y la guarda.
+
+```ts
+export async function getAgentConfig(tenantId: string, agentId: string): Promise<AgentConfig> {
+  const key = `tenant:${tenantId}:agent:${agentId}:config:v3`; // tenant y versión del formato en la clave
+  const cached = await redis.get(key);
+  if (cached) return AgentConfigSchema.parse(JSON.parse(cached)); // validar también lo que viene de la caché
+
+  const config = await agentConfigRepository.getPublished(tenantId, agentId); // fuente de verdad
+  await redis.set(key, JSON.stringify(config), { EX: 300 + Math.floor(Math.random() * 60) }); // TTL con jitter
+  return config;
+}
+
+export async function publishAgentConfig(tenantId: string, agentId: string, config: AgentConfig) {
+  await agentConfigRepository.publish(tenantId, agentId, config);
+  await redis.del(`tenant:${tenantId}:agent:${agentId}:config:v3`); // invalidar después de escribir
+}
+```
+
+<MermaidDiagram
+  caption="Cache aside: la caché no sabe nada de la fuente; la aplicación decide cuándo leer, guardar e invalidar."
+  chart={`
+sequenceDiagram
+  participant A as Aplicación
+  participant R as Redis
+  participant DB as PostgreSQL
+  A->>R: GET config
+  alt hit
+    R-->>A: valor
+  else miss
+    R-->>A: nil
+    A->>DB: SELECT config
+    DB-->>A: valor
+    A->>R: SET config EX 300
+  end
+  Note over A,DB: al escribir: actualizar DB y después DEL de la clave
+`}
+/>
+
+### Invalidación
+
+| Estrategia         | Cómo                                               | Riesgo                                                   |
+| ------------------ | -------------------------------------------------- | -------------------------------------------------------- |
+| Sólo TTL           | La entrada vence sola                              | Datos viejos hasta el vencimiento                        |
+| Borrar al escribir | `DEL` después de actualizar la fuente              | Carrera: un lector lento puede reescribir el valor viejo |
+| Eventos            | Un evento de cambio invalida en todas las réplicas | Más infraestructura                                      |
+| Versionar la clave | `config:v{versión}` y se lee la versión vigente    | Requiere conocer la versión                              |
+
+Se combina casi siempre **borrar al escribir + TTL** como red de seguridad. Se **borra** en lugar de escribir el
+valor nuevo para reducir carreras entre escrituras concurrentes. Y se decide **qué tan viejo puede estar** cada dato:
+la configuración de un agente puede tolerar minutos; el saldo de una deuda, nada (no se cachea, o se cachea con
+invalidación precisa).
+
+## Cache stampede
+
+Cuando una clave **muy pedida** expira, cientos de requests no la encuentran a la vez y **todas van a la base** con la
+misma consulta costosa, justo en el pico de carga. El simulador [Cache stampede](/system-design/simulators/cache-stampede)
+lo muestra con números.
+
+Mitigaciones:
+
+1. **Un solo recálculo:** la primera request toma un lock corto (`SET lock:key token NX PX 5000`) y recalcula; las
+   demás esperan brevemente y reintentan la lectura, o sirven el valor anterior.
+2. **Single-flight en el proceso:** dentro de una réplica, las requests concurrentes por la misma clave comparten la
+   misma Promise (no se repite la consulta).
+3. **Refresco anticipado:** recalcular antes del vencimiento (por ejemplo, cuando queda el 10 % del TTL), con cierta
+   probabilidad que aumenta al acercarse al final.
+4. **TTL con jitter:** que no venzan miles de claves en el mismo segundo.
+5. **Stale-while-revalidate:** servir el valor viejo mientras uno solo lo refresca, si el dominio lo tolera.
+
+```ts
+/** Single-flight: requests concurrentes por la misma clave comparten la misma carga. */
+const inFlight = new Map<string, Promise<unknown>>();
+
+export function singleFlight<T>(key: string, load: () => Promise<T>): Promise<T> {
+  const existing = inFlight.get(key);
+  if (existing) return existing as Promise<T>;
+  const promise = load().finally(() => inFlight.delete(key));
+  inFlight.set(key, promise);
+  return promise;
+}
+```
+
+## Rate limiting
+
+Con varias réplicas, el contador debe estar en un **almacén compartido**. Redis es la elección habitual porque sus
+operaciones son atómicas y rápidas.
+
+```ts
+// Ventana fija: máximo `limit` envíos por deudor por hora
+export async function allowFixedWindow(key: string, limit: number, windowSeconds: number): Promise<boolean> {
+  const windowKey = `${key}:${Math.floor(Date.now() / 1000 / windowSeconds)}`;
+  const [count] = await redis.multi().incr(windowKey).expire(windowKey, windowSeconds).exec();
+  return Number(count) <= limit;
+}
+```
+
+La ventana fija permite **hasta el doble del límite** en el borde entre dos ventanas. La **ventana deslizante** con un
+sorted set guarda el timestamp de cada request y cuenta sólo las de los últimos N segundos:
+
+```lua
+-- KEYS[1] = clave; ARGV = ahora (ms), ventana (ms), límite, id único de la request
+redis.call('ZREMRANGEBYSCORE', KEYS[1], 0, ARGV[1] - ARGV[2])
+local count = redis.call('ZCARD', KEYS[1])
+if count < tonumber(ARGV[3]) then
+  redis.call('ZADD', KEYS[1], ARGV[1], ARGV[4])
+  redis.call('PEXPIRE', KEYS[1], ARGV[2])
+  return 1
+end
+return 0
+```
+
+El script Lua se ejecuta **atómicamente**: nadie se intercala entre contar y agregar. El **token bucket** (fichas que se
+recargan a tasa constante hasta una capacidad) se implementa igual, con un hash que guarda las fichas y el último
+recargo; permite ráfagas controladas. El simulador [Rate limiting](/system-design/simulators/rate-limiting) compara
+los algoritmos.
+
+## Deduplicación e idempotencia
+
+`SET clave valor NX EX ttl` detecta duplicados de forma atómica y muy rápida:
+
+```ts
+const firstTime = await redis.set(`webhook:seen:${provider}:${eventId}`, "1", { NX: true, EX: 86_400 });
+if (!firstTime) return; // duplicado reciente: ignorar
+```
+
+Es útil como **primera barrera** (evita trabajo repetido), pero tiene límites:
+
+- Si el proceso marca el evento como visto y **se cae antes de procesarlo**, el reintento se ignora y el evento se
+  pierde. Por eso se marca después de procesar, o se guarda un estado (`processing`, `done`).
+- Si Redis pierde datos (reinicio sin persistencia, eviction), la deduplicación se olvida.
+
+La **garantía fuerte** de idempotencia para efectos de negocio (aplicar un pago) está en la **constraint única de la
+base** dentro de la misma transacción (curso de PostgreSQL). Redis complementa; no reemplaza.
+
+## Locks distribuidos
+
+Un lock evita que dos procesos hagan la misma tarea a la vez (procesar la misma conversación, correr el mismo job):
+
+```ts
+import { randomUUID } from "node:crypto";
+
+const RELEASE_SCRIPT = `
+if redis.call("get", KEYS[1]) == ARGV[1] then
+  return redis.call("del", KEYS[1])
+end
+return 0`;
+
+export async function withLock<T>(
+  resource: string,
+  ttlMs: number,
+  work: () => Promise<T>,
+): Promise<T | null> {
+  const token = randomUUID();
+  const acquired = await redis.set(`lock:${resource}`, token, { NX: true, PX: ttlMs });
+  if (!acquired) return null; // otro proceso lo tiene
+  try {
+    return await work();
+  } finally {
+    await redis.eval(RELEASE_SCRIPT, { keys: [`lock:${resource}`], arguments: [token] }); // sólo libera el dueño
+  }
+}
+```
+
+- El **TTL** evita que un proceso caído deje el lock tomado para siempre.
+- El **token** evita liberar un lock que ya expiró y tomó otro proceso.
+
+<Callout type="danger" title="Un lock con TTL no garantiza exclusión mutua">
+  Si el proceso que tiene el lock se pausa más que el TTL (una pausa larga del garbage collector, una red
+  lenta, una máquina virtual suspendida), el lock expira, otro proceso lo toma y **los dos creen tenerlo**.
+  Para operaciones donde la corrección importa, el recurso protegido debe verificar un **fencing token** (un
+  número creciente que rechaza escrituras con tokens viejos) o apoyarse en las **constraints y transacciones
+  de la base**. Los locks en Redis son excelentes para **eficiencia** (no hacer trabajo duplicado), no como
+  única garantía de **corrección**.
+</Callout>
+
+## Mensajería: Pub/Sub y Streams
+
+<FlowDiagram
+  steps={[
+    {
+      title: "Pub/Sub",
+      detail: "Entrega en vivo a los suscriptores conectados. Sin persistencia: si nadie escucha, se pierde.",
+    },
+    {
+      title: "Streams",
+      detail: "Log persistente con consumer groups, confirmación y reintento de pendientes.",
+      tone: "runtime",
+    },
+  ]}
+  caption="Pub/Sub para notificaciones efímeras; Streams cuando el mensaje no se puede perder."
+/>
+
+| Necesidad                                                      | Herramienta                                   |
+| -------------------------------------------------------------- | --------------------------------------------- |
+| Avisar a las réplicas conectadas que invaliden una caché local | Pub/Sub                                       |
+| Notificaciones en tiempo real a pantallas abiertas             | Pub/Sub                                       |
+| Procesar cada evento de pago al menos una vez                  | Streams con consumer groups                   |
+| Cola de trabajos con reintentos, prioridades y retrasos        | Una librería sobre Redis (BullMQ) o un broker |
+
+## Comparación con C# y Java
+
+| Patrón             | .NET                                                          | Java                                | Node.js                                |
+| ------------------ | ------------------------------------------------------------- | ----------------------------------- | -------------------------------------- |
+| Caché distribuida  | `IDistributedCache`, HybridCache (con protección de stampede) | Spring Cache, Caffeine + Redis      | Cache aside propio, librerías de caché |
+| Rate limiting      | `RateLimiter` de ASP.NET Core (local) + Redis                 | Bucket4j con Redis                  | Lua en Redis, plugins de Fastify       |
+| Locks distribuidos | RedLock.net, DistributedLock                                  | Redisson, ShedLock                  | Redlock, implementación con SET NX     |
+| Colas sobre Redis  | Hangfire (con Redis), MassTransit                             | Redisson, Spring Data Redis Streams | BullMQ                                 |
+
+## Errores frecuentes
+
+- **Cachear sin estrategia de invalidación** ni límite de "vejez" aceptable por dato.
+- **Claves de caché sin tenant.**
+- **TTL idénticos** para muchas claves populares.
+- **Rate limiting en memoria** con varias réplicas, o contar y escribir en dos comandos no atómicos.
+- **Confiar la idempotencia de un pago sólo a Redis.**
+- **Locks sin TTL o sin token** de dueño, o usarlos como única garantía de corrección.
+- **Pub/Sub para mensajes que no se pueden perder.**
+
+## Ejercicio interactivo
+
+<KnowledgeCheck
+  id="redis.patterns.q1"
+  question="La configuración de agentes se cachea con TTL de 300 s exactos. Cada 5 minutos la base recibe un pico de cientos de consultas iguales. ¿Qué pasa y qué hacés?"
+  options={[
+    {
+      text: "Es normal: subir el tamaño de la base.",
+      explanation: "Es un cache stampede, con soluciones más baratas.",
+    },
+    {
+      text: "Cache stampede: un solo recálculo (lock o single-flight), TTL con jitter y refresco anticipado.",
+      correct: true,
+      explanation: "Correcto. Muchas requests encuentran la clave vencida a la vez y todas van a la fuente.",
+    },
+    { text: "Quitar el TTL.", explanation: "La caché nunca se actualizaría ni liberaría memoria." },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="redis.patterns.q2"
+  question="Un worker toma un lock con TTL de 30 s, sufre una pausa de 45 s y después escribe. ¿Qué puede pasar?"
+  options={[
+    {
+      text: "Nada: el lock lo protege.",
+      explanation: "El lock expiró a los 30 s y otro worker pudo tomarlo.",
+    },
+    {
+      text: "Dos workers pueden escribir creyendo tener el lock; hace falta un fencing token o una garantía en la base.",
+      correct: true,
+      explanation: "Correcto. Los locks con TTL dan eficiencia, no exclusión mutua absoluta.",
+    },
+    {
+      text: "Redis cancela la escritura del primer worker.",
+      explanation: "Redis no conoce las escrituras que el worker hace en otros sistemas.",
+    },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="redis.patterns.q3"
+  question="¿Por qué el rate limiter de ventana deslizante se implementa con un script Lua?"
+  options={[
+    {
+      text: "Porque Lua es más rápido que JavaScript.",
+      explanation: "La razón es la atomicidad, no la velocidad del lenguaje.",
+    },
+    {
+      text: "Para que limpiar, contar y agregar se ejecuten atómicamente, sin otro cliente intercalado.",
+      correct: true,
+      explanation:
+        "Correcto. Con comandos sueltos, dos requests podrían contar a la vez y superar el límite.",
+    },
+    {
+      text: "Porque Redis no tiene sorted sets en sus comandos normales.",
+      explanation: "Los tiene; el script los combina atómicamente.",
+    },
+  ]}
+/>

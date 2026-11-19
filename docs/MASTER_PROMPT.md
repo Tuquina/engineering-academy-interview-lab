@@ -1768,8 +1768,8 @@ completa para aprender desde cero (para alguien que ya programa) antes de practi
 - [x] React.
 - [x] Next.js.
 - [x] LLMs y agentes de IA.
-- [ ] PostgreSQL.
-- [ ] Redis.
+- [x] PostgreSQL.
+- [x] Redis.
 - [ ] Arquitectura de software.
 - [ ] System Design.
 - [x] Verificación automática de diagramas y del mínimo de calidad de cada lección.
@@ -1793,7 +1793,7 @@ errores frecuentes, knowledge checks y preguntas de entrevista.
 
 ### Fase 6 — Persistencia y administración
 
-- [ ] PostgreSQL.
+- [x] PostgreSQL.
 - [ ] Autenticación.
 - [ ] Sincronización.
 - [ ] Contenido personalizado.

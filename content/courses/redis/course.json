@@ -10,6 +10,21 @@
   "tags": ["redis", "caching", "rate limiting"],
   "modules": [
     {
+      "id": "redis.intro",
+      "slug": "introduccion",
+      "title": "Introducción",
+      "description": "Qué es Redis, para qué se usa en un backend, cómo se ejecuta y los comandos básicos con redis-cli y desde Node.js.",
+      "order": 0,
+      "topics": [
+        "Qué es Redis: un almacén clave-valor en memoria con estructuras de datos",
+        "Casos de uso habituales en un backend",
+        "Ejecutar Redis en Docker y usar redis-cli",
+        "Comandos básicos: SET, GET, DEL, EXPIRE, INCR",
+        "Modelo de ejecución: un hilo y comandos atómicos",
+        "Usar Redis desde Node.js"
+      ]
+    },
+    {
       "id": "redis.data-types",
       "slug": "tipos-de-datos",
       "title": "Tipos de datos y expiración",

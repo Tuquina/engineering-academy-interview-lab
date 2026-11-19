@@ -1,0 +1,223 @@
+---
+id: redis.tradeoffs
+moduleId: redis.tradeoffs
+title: "Compromisos: Redis frente a PostgreSQL y frente a un message broker"
+description: "Cómo decidir dónde vive cada dato y cada mensaje: qué garantías da Redis y cuáles no, cuándo PostgreSQL alcanza (incluso para colas, caché o búsqueda), cuándo hace falta un broker como RabbitMQ, Kafka o SQS, y cómo defender la decisión en una entrevista con criterios de consistencia, durabilidad, latencia y operación."
+difficulty: intermediate
+order: 1
+objectives:
+  - "Comparar Redis y PostgreSQL en garantías, modelo de datos y costo operativo."
+  - "Reconocer cuándo PostgreSQL alcanza para colas, caché o coordinación."
+  - "Comparar Redis Streams con brokers de mensajería y saber cuándo conviene cada uno."
+  - "Tomar decisiones de arquitectura justificadas con criterios explícitos."
+prerequisites: ["redis.patterns", "postgresql.transactions"]
+estimatedMinutes: 30
+tags: ["redis", "postgresql", "message broker", "kafka", "rabbitmq", "sqs", "compromisos", "arquitectura"]
+version: "1.0.0"
+comparesWith: ["csharp", "java"]
+references:
+  - title: "Redis — Persistence"
+    url: "https://redis.io/docs/latest/operate/oss_and_stack/management/persistence/"
+  - title: "PostgreSQL — SKIP LOCKED (SELECT)"
+    url: "https://www.postgresql.org/docs/current/sql-select.html#SQL-FOR-UPDATE-SHARE"
+  - title: "RabbitMQ — Reliability Guide"
+    url: "https://www.rabbitmq.com/docs/reliability"
+  - title: "Apache Kafka — Introduction"
+    url: "https://kafka.apache.org/intro"
+  - title: "AWS — Amazon SQS features"
+    url: "https://aws.amazon.com/sqs/features/"
+interviewQuestions:
+  - question: "¿Cuándo usarías Redis y cuándo PostgreSQL?"
+    keyPoints:
+      - "PostgreSQL para la fuente de verdad: transacciones, constraints, relaciones, consultas ad hoc y durabilidad."
+      - "Redis para datos efímeros o derivados con latencia muy baja: caché, sesiones, rate limits, contadores, locks de eficiencia."
+      - "Si se pierde lo que hay en Redis, el sistema debe poder reconstruirlo o degradarse sin perder datos de negocio."
+      - "Agregar Redis tiene costo operativo; si PostgreSQL alcanza, menos piezas es mejor."
+  - question: "¿Redis Streams, RabbitMQ o Kafka?"
+    keyPoints:
+      - "Redis Streams: simple si ya hay Redis, volúmenes moderados, retención limitada por memoria."
+      - "RabbitMQ: colas de trabajo con ruteo flexible, confirmaciones, reintentos y dead letters."
+      - "Kafka: log distribuido durable de alto volumen, retención larga, reprocesamiento y muchos consumidores independientes."
+      - "Colas gestionadas (SQS) cuando se prefiere no operar infraestructura."
+summary:
+  - "PostgreSQL es la fuente de verdad: ACID, constraints, relaciones y consultas flexibles."
+  - "Redis es memoria compartida rápida: caché, contadores, rate limits, sesiones y coordinación de eficiencia."
+  - "Pregunta clave: si se pierde este dato, ¿se puede reconstruir? Si no, no va sólo en Redis."
+  - "PostgreSQL alcanza para colas moderadas (SKIP LOCKED), outbox y hasta caché de consultas en muchos sistemas."
+  - "Redis Streams sirve para mensajería moderada; RabbitMQ para colas de trabajo con ruteo; Kafka para logs de eventos de alto volumen."
+  - "Menos piezas es una virtud: cada tecnología nueva suma operación, monitoreo y modos de falla."
+---
+
+## ¿Qué problema resuelve?
+
+En una entrevista de diseño, "uso Redis para la caché" no alcanza: el entrevistador pregunta **por qué** y **qué pasa
+si se cae**. Y en un equipo real, cada tecnología agregada suma monitoreo, backups, actualizaciones y nuevos modos de
+falla. Esta lección da criterios para decidir **dónde vive cada dato y cada mensaje** y para justificarlo.
+
+## Redis frente a PostgreSQL
+
+| Criterio         | PostgreSQL                               | Redis                                              |
+| ---------------- | ---------------------------------------- | -------------------------------------------------- |
+| Rol natural      | Fuente de verdad                         | Datos efímeros, derivados o de coordinación        |
+| Durabilidad      | Fuerte (WAL, réplicas, PITR)             | Opcional (RDB/AOF); puede perder la última ventana |
+| Transacciones    | ACID completas con rollback              | `MULTI/EXEC` y Lua: atómicos, sin rollback         |
+| Integridad       | Constraints, foreign keys, tipos         | No hay esquema                                     |
+| Consultas        | SQL ad hoc, joins, agregaciones, índices | Por clave y por estructura; sin consultas ad hoc   |
+| Latencia típica  | Milisegundos                             | Sub-milisegundo                                    |
+| Volumen de datos | Limitado por disco                       | Limitado por memoria (más caro por GB)             |
+
+<MermaidDiagram
+  caption="Una guía rápida para decidir dónde vive un dato."
+  chart={`
+flowchart TD
+  Q1{"¿Es un dato de negocio<br/>que no se puede perder?"} -->|"sí"| PG["PostgreSQL<br/>fuente de verdad"]
+  Q1 -->|"no"| Q2{"¿Se puede reconstruir<br/>desde otra fuente?"}
+  Q2 -->|"sí"| Q3{"¿Necesita latencia muy baja<br/>o mucho volumen de lecturas?"}
+  Q3 -->|"sí"| R["Redis<br/>caché o derivado"]
+  Q3 -->|"no"| PG2["PostgreSQL alcanza<br/>menos piezas"]
+  Q2 -->|"no, pero es efímero<br/>sesión, rate limit, lock"| R2["Redis<br/>con TTL"]
+`}
+/>
+
+La pregunta clave es: **"si este dato desaparece de Redis ahora, ¿qué pasa?"**
+
+- Una caché: se reconstruye desde la base. ✅ Redis.
+- Un contador de rate limit: se reinicia la ventana; durante un rato el límite es más permisivo. ✅ Redis, aceptable.
+- Una sesión: el usuario vuelve a iniciar sesión. ✅ Redis, aceptable en la mayoría de los casos.
+- Un pago recibido: se pierde dinero. ❌ PostgreSQL.
+
+### Cuando PostgreSQL alcanza
+
+Muchos sistemas agregan Redis antes de necesitarlo. PostgreSQL resuelve bien, a escala moderada:
+
+- **Colas de trabajo** con `FOR UPDATE SKIP LOCKED` (y el outbox, que de todos modos vive en la base).
+- **Idempotencia** con constraints únicas (más fuerte que Redis).
+- **Caché de resultados** con vistas materializadas o tablas de resumen.
+- **Locks** con advisory locks.
+- **Búsqueda** de texto completo, trigramas o vectores (pgvector).
+
+Agregar Redis se justifica cuando hay **evidencia**: latencias que la base no alcanza, volumen de lecturas que la
+satura, o necesidades propias de Redis (estructuras en memoria, rate limiting de alto volumen).
+
+## Redis frente a un message broker
+
+| Criterio                  | Redis Pub/Sub        | Redis Streams                     | RabbitMQ                       | Kafka                              | SQS (gestionada)        |
+| ------------------------- | -------------------- | --------------------------------- | ------------------------------ | ---------------------------------- | ----------------------- |
+| Persistencia              | No                   | Sí (memoria + RDB/AOF)            | Sí (disco)                     | Sí (log en disco, replicado)       | Sí                      |
+| Confirmación / reintentos | No                   | Consumer groups, XACK, pendientes | Acks, reintentos, dead letters | Offsets por consumer group         | Visibility timeout, DLQ |
+| Ruteo                     | Por canal            | Por stream                        | Exchanges, colas, bindings     | Por topic y partición              | Por cola                |
+| Retención                 | Ninguna              | Limitada por memoria              | Hasta consumir                 | Configurable (días, indefinida)    | Hasta 14 días           |
+| Reprocesar el pasado      | No                   | Limitado                          | No (una vez consumido)         | Sí (rebobinar offsets)             | No                      |
+| Orden                     | Por canal            | Por stream                        | Por cola                       | Por partición                      | FIFO opcional           |
+| Escala                    | Alta, efímera        | Moderada                          | Media-alta                     | Muy alta                           | Muy alta, sin operar    |
+| Operación                 | Ya está si hay Redis | Ya está si hay Redis              | Un cluster más                 | Un cluster complejo (o gestionado) | Ninguna                 |
+
+<FlowDiagram
+  steps={[
+    {
+      title: "Notificaciones efímeras",
+      detail: "Avisos en vivo, invalidación de cachés locales: Redis Pub/Sub.",
+    },
+    { title: "Mensajería moderada", detail: "Ya hay Redis y el volumen es acotado: Redis Streams." },
+    {
+      title: "Colas de trabajo",
+      detail: "Reintentos, ruteo, dead letters: RabbitMQ o SQS.",
+      tone: "runtime",
+    },
+    {
+      title: "Log de eventos",
+      detail: "Alto volumen, retención y reprocesamiento: Kafka.",
+      tone: "boundary",
+    },
+  ]}
+  caption="De lo más simple a lo más robusto; se elige el mínimo que cumple las garantías necesarias."
+/>
+
+En una plataforma de cobranzas típica: los **envíos de una campaña** encajan en una cola de trabajo (SQS, RabbitMQ o
+BullMQ sobre Redis) con reintentos y límites; los **eventos de dominio** (pago recibido, promesa registrada) para
+varios consumidores (notificaciones, analítica, el agente) encajan en un log de eventos o en un bus gestionado; las
+**actualizaciones en vivo del panel** encajan en Pub/Sub o WebSockets.
+
+## Cómo defender la decisión
+
+Una respuesta sólida en una entrevista nombra los **criterios** y los **compromisos**:
+
+> "Los pagos y las promesas viven en PostgreSQL porque necesito transacciones y constraints para la idempotencia.
+> Uso Redis para la caché de configuración de agentes y para el rate limiting de mensajes salientes, porque son datos
+> que puedo reconstruir y necesitan latencia baja con varias réplicas. Si Redis se cae, el rate limiting se degrada a
+> un límite conservador local y la configuración se lee de la base. Los eventos de pago se publican con un outbox
+> hacia una cola gestionada, porque no se pueden perder y quiero reintentos y dead letters sin operar un cluster."
+
+## Comparación con C# y Java
+
+| Pieza               | Ecosistema .NET                                        | Ecosistema Java               | Ecosistema Node.js           |
+| ------------------- | ------------------------------------------------------ | ----------------------------- | ---------------------------- |
+| Colas sobre la base | Hangfire (SQL Server/PostgreSQL)                       | db-scheduler, Quartz con JDBC | pg-boss, Graphile Worker     |
+| Colas sobre Redis   | Hangfire con Redis                                     | Redisson                      | BullMQ                       |
+| Brokers             | MassTransit, NServiceBus (RabbitMQ, Azure Service Bus) | Spring AMQP, Spring Kafka     | amqplib, kafkajs, SDK de AWS |
+
+## Errores frecuentes
+
+- **Datos de negocio sólo en Redis.**
+- **Agregar Redis o Kafka "por si acaso"** sin una necesidad medida.
+- **Pub/Sub para eventos que no se pueden perder.**
+- **Kafka para una cola de trabajos simple** de bajo volumen.
+- **No definir la degradación** cuando Redis no está disponible.
+- **Justificar con "es más rápido"** sin nombrar garantías, costos ni modos de falla.
+
+## Ejercicio interactivo
+
+<KnowledgeCheck
+  id="redis.tradeoffs.q1"
+  question="¿Dónde guardás el registro de que un deudor pidió no ser contactado (opt-out)?"
+  options={[
+    {
+      text: "En Redis, con TTL de un año.",
+      explanation: "Es un dato de cumplimiento que no se puede perder ni vencer.",
+    },
+    {
+      text: "En PostgreSQL como fuente de verdad (puede cachearse en Redis para consultas rápidas).",
+      correct: true,
+      explanation: "Correcto. Perderlo tiene consecuencias legales; la caché es opcional y reconstruible.",
+    },
+    {
+      text: "En la memoria persistente del agente.",
+      explanation: "Es un dato de negocio y de cumplimiento, no una memoria conversacional.",
+    },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="redis.tradeoffs.q2"
+  question="Varios servicios (notificaciones, analítica, agente) deben reaccionar a cada pago recibido, y analítica quiere reprocesar los últimos 30 días cuando cambia su lógica. ¿Qué se ajusta mejor?"
+  options={[
+    { text: "Redis Pub/Sub.", explanation: "No persiste: lo que no se escuchó en vivo se pierde." },
+    {
+      text: "Un log de eventos como Kafka (o un servicio gestionado equivalente) con retención y consumer groups.",
+      correct: true,
+      explanation:
+        "Correcto. Varios consumidores independientes y reprocesamiento del pasado son su fortaleza.",
+    },
+    {
+      text: "Una tabla de PostgreSQL consultada por cada servicio cada segundo.",
+      explanation: "Funciona a pequeña escala, pero acopla servicios a la base y escala mal.",
+    },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="redis.tradeoffs.q3"
+  question="Un servicio con 200 trabajos por minuto ya usa PostgreSQL y no tiene Redis. ¿Hace falta agregar un broker para la cola de trabajos?"
+  options={[
+    {
+      text: "Sí, siempre hace falta un broker para colas.",
+      explanation: "A esta escala, PostgreSQL con SKIP LOCKED suele alcanzar.",
+    },
+    {
+      text: "Probablemente no: una cola en PostgreSQL con FOR UPDATE SKIP LOCKED alcanza y evita sumar infraestructura.",
+      correct: true,
+      explanation: "Correcto. Se agrega otra pieza cuando hay una necesidad medida.",
+    },
+    { text: "Sí, Kafka es el estándar.", explanation: "Es desproporcionado para ese volumen y patrón." },
+  ]}
+/>

@@ -233,13 +233,21 @@ C# y Java, errores frecuentes, knowledge checks y preguntas de entrevista.
 | React                    | 7         | ✅ Tanda 3 |
 | Next.js                  | 5         | ✅ Tanda 3 |
 | LLMs y agentes de IA     | 8         | ✅ Tanda 4 |
-| PostgreSQL               | 0         | Pendiente  |
-| Redis                    | 0         | Pendiente  |
+| PostgreSQL               | 6         | ✅ Tanda 5 |
+| Redis                    | 4         | ✅ Tanda 5 |
 | Arquitectura de software | 0         | Pendiente  |
 | System Design            | 0         | Pendiente  |
 
 ### Implementado y verificado
 
+- **PostgreSQL (6 lecciones):** introducción y SQL esencial (Docker, psql, tipos, DDL/DML, agregaciones, NULL,
+  consultas parametrizadas), modelado (normalización, claves, constraints, JSONB, migraciones expand/contract),
+  consultas (joins, CTEs, window functions, keyset), índices y EXPLAIN ANALYZE, transacciones (aislamiento, MVCC,
+  locks, SKIP LOCKED, upserts, outbox) y operación (pooling, particionado, inyección SQL, RLS, mantenimiento). Los
+  ejemplos de window functions corren tal cual en el Database Lab.
+- **Redis (4 lecciones):** introducción (comandos, atomicidad, clientes), estructuras, expiración, persistencia y
+  eviction, patrones (cache aside, stampede, rate limiting con Lua, idempotencia, locks y sus límites, Pub/Sub y
+  Streams) y compromisos frente a PostgreSQL y a brokers.
 - **LLMs y agentes (8 lecciones):** introducción (qué es un LLM y un agente, Messages API, puerto propio),
   tokens, contexto, variabilidad, costos, latencia y prompt caching, prompts, salidas estructuradas y el loop de
   tool calling, alucinaciones, prompt injection y RAG con embeddings, configuración versionada, herramientas con
@@ -285,13 +293,13 @@ C# y Java, errores frecuentes, knowledge checks y preguntas de entrevista.
 
 ### Contenido pendiente respecto del objetivo inicial (§35)
 
-| Elemento                    | Actual                                       | Objetivo |
-| --------------------------- | -------------------------------------------- | -------- |
-| Lecciones sustantivas       | 40                                           | 40       |
-| Challenges                  | 11 + 4 de arquitectura (+ 6 ejercicios SQL)  | 25       |
-| Preguntas de evaluación     | 120 knowledge checks + 27 del Interview Arena | 60 ✅    |
-| Flashcards                  | 32                                           | 30 ✅    |
-| Diagramas                   | 13 (10 interactivos + 1 flujo + 2 Mermaid)   | 12 ✅    |
-| Simuladores o laboratorios  | 9 (3 laboratorios + 6 simuladores)           | 5 ✅     |
-| Escenarios de System Design | 5 (4 del Studio + rate limiting)             | 5 ✅     |
-| Ruta de 7 días operativa    | No                                           | 1        |
+| Elemento                    | Actual                                        | Objetivo |
+| --------------------------- | --------------------------------------------- | -------- |
+| Lecciones sustantivas       | 50                                            | 40 ✅    |
+| Challenges                  | 11 + 4 de arquitectura (+ 6 ejercicios SQL)   | 25       |
+| Preguntas de evaluación     | 150 knowledge checks + 27 del Interview Arena | 60 ✅    |
+| Flashcards                  | 32                                            | 30 ✅    |
+| Diagramas                   | 13 (10 interactivos + 1 flujo + 2 Mermaid)    | 12 ✅    |
+| Simuladores o laboratorios  | 9 (3 laboratorios + 6 simuladores)            | 5 ✅     |
+| Escenarios de System Design | 5 (4 del Studio + rate limiting)              | 5 ✅     |
+| Ruta de 7 días operativa    | No                                            | 1        |

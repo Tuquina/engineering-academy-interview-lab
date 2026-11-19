@@ -1,0 +1,345 @@
+---
+id: postgresql.modeling
+moduleId: postgresql.modeling
+title: "Modelado relacional: normalización, claves, constraints, JSONB y migraciones"
+description: "Cómo se diseña un esquema que proteja la integridad de los datos: entidades y relaciones, normalización y cuándo desnormalizar, claves primarias naturales y sustitutas, foreign keys, constraints que hacen imposibles los estados inválidos, cuándo usar JSONB y cómo evolucionar el esquema con migraciones sin downtime."
+difficulty: intermediate
+order: 1
+objectives:
+  - "Modelar entidades y relaciones 1:N y N:M para un dominio de cobranzas."
+  - "Aplicar normalización y justificar las desnormalizaciones."
+  - "Elegir claves primarias y usar foreign keys con la acción de borrado correcta."
+  - "Expresar reglas de negocio con NOT NULL, CHECK, UNIQUE (también parciales) y EXCLUDE."
+  - "Decidir cuándo usar JSONB y cuándo columnas."
+  - "Escribir migraciones seguras y compatibles hacia atrás (expand y contract)."
+prerequisites: ["postgresql.introduction"]
+estimatedMinutes: 45
+tags: ["modelado", "normalización", "constraints", "foreign keys", "jsonb", "migraciones", "c#", "java"]
+version: "1.0.0"
+comparesWith: ["csharp", "java"]
+references:
+  - title: "PostgreSQL — Constraints"
+    url: "https://www.postgresql.org/docs/current/ddl-constraints.html"
+  - title: "PostgreSQL — JSON Types"
+    url: "https://www.postgresql.org/docs/current/datatype-json.html"
+  - title: "PostgreSQL — ALTER TABLE"
+    url: "https://www.postgresql.org/docs/current/sql-altertable.html"
+  - title: "Drizzle ORM — Migrations"
+    url: "https://orm.drizzle.team/docs/migrations"
+  - title: "Martin Fowler — Evolutionary Database Design"
+    url: "https://martinfowler.com/articles/evodb.html"
+interviewQuestions:
+  - question: "¿Por qué poner reglas de negocio como constraints en la base y no sólo en la aplicación?"
+    keyPoints:
+      - "La base es la última línea de defensa: la verifica sin importar qué código escriba (varios servicios, scripts, migraciones)."
+      - "Las constraints son atómicas y seguras ante concurrencia; los chequeos previos en la aplicación tienen carreras."
+      - "Ejemplos: UNIQUE para idempotencia, CHECK para rangos, FK para referencias, índices únicos parciales para una sola promesa vigente."
+      - "La aplicación igual valida para dar buenos mensajes de error."
+  - question: "¿Cuándo usarías JSONB?"
+    keyPoints:
+      - "Para datos semiestructurados o variables: payloads de webhooks, metadatos por tenant, configuración, respuestas de proveedores."
+      - "No para datos que se consultan, filtran o relacionan con frecuencia: esos van en columnas con tipos y constraints."
+      - "Se puede indexar con GIN o con índices sobre expresiones."
+      - "Riesgo: perder integridad y tipos; conviene validar su forma en la aplicación."
+  - question: "¿Cómo renombrarías una columna en producción sin downtime?"
+    keyPoints:
+      - "Expand: agregar la columna nueva, escribir en ambas, completar los datos existentes por lotes."
+      - "Migrar las lecturas a la columna nueva y desplegar."
+      - "Contract: dejar de escribir la vieja y eliminarla en un despliegue posterior."
+      - "Cada paso es compatible con la versión anterior y la nueva del código que conviven durante el deploy."
+summary:
+  - "Se modela el dominio: entidades, relaciones y sus reglas, no las pantallas."
+  - "Normalizar evita duplicación y anomalías; se desnormaliza con un motivo medido y un mecanismo de sincronización."
+  - "Claves sustitutas (identity o uuid) para identidad; claves naturales como UNIQUE."
+  - "Las foreign keys garantizan referencias; ON DELETE se elige a propósito (RESTRICT por defecto en datos financieros)."
+  - "CHECK, UNIQUE, índices únicos parciales y EXCLUDE hacen imposibles los estados inválidos."
+  - "JSONB para lo semiestructurado; columnas para lo que se consulta y se valida."
+  - "Migraciones versionadas y compatibles hacia atrás: expand, migrar datos, contract."
+---
+
+## ¿Qué problema resuelve?
+
+Un servicio de cobranzas tenía la regla "una deuda puede tener a lo sumo una promesa de pago vigente". Estaba en el
+código: antes de insertar, se consultaba si existía una. Con dos mensajes casi simultáneos del deudor, ambos chequeos
+pasaron y quedaron dos promesas vigentes; el agente después mencionaba fechas contradictorias. Una sola línea en el
+esquema lo habría hecho imposible:
+
+```sql
+CREATE UNIQUE INDEX one_active_promise_per_debt ON payment_promises (debt_id) WHERE status = 'active';
+```
+
+El modelado relacional consiste en que **el esquema exprese las reglas del dominio**, para que los estados inválidos
+no se puedan guardar, sin importar qué código escriba.
+
+## Entidades y relaciones
+
+<MermaidDiagram
+  caption="Modelo simplificado de una plataforma de cobranzas multi-tenant."
+  chart={`
+erDiagram
+  TENANTS ||--o{ CUSTOMERS : tiene
+  CUSTOMERS ||--o{ DEBTS : debe
+  DEBTS ||--o{ PAYMENTS : recibe
+  DEBTS ||--o{ PAYMENT_PROMISES : tiene
+  CAMPAIGNS ||--o{ CAMPAIGN_TARGETS : incluye
+  DEBTS ||--o{ CAMPAIGN_TARGETS : participa
+  CUSTOMERS ||--o{ CONVERSATIONS : mantiene
+  DEBTS {
+    bigint id PK
+    bigint customer_id FK
+    bigint balance_cents
+    date due_date
+    text status
+  }
+  PAYMENT_PROMISES {
+    bigint id PK
+    bigint debt_id FK
+    date promised_for
+    bigint amount_cents
+    text status
+  }
+`}
+/>
+
+- **1:N** (un cliente tiene muchas deudas): foreign key en el lado "muchos" (`debts.customer_id`).
+- **N:M** (campañas y deudas): tabla intermedia (`campaign_targets`) con las dos foreign keys y, a menudo, atributos
+  propios de la relación (fecha de inclusión, resultado).
+- **1:1** es raro y suele indicar que se puede fusionar o que una parte es opcional y pesada.
+
+## Normalización y desnormalización
+
+**Normalizar** es organizar los datos para que **cada hecho se guarde una sola vez**. Las formas normales formalizan
+la idea; en la práctica, la regla es: si un dato se repite en muchas filas, probablemente debería estar en otra
+tabla.
+
+```sql
+-- ❌ Desnormalizado: el nombre del cliente se repite en cada deuda
+CREATE TABLE debts_bad (id bigint, customer_name text, customer_email text, balance_cents bigint);
+-- Si el cliente cambia el email, hay que actualizar N filas; si se olvida una, hay datos contradictorios.
+
+-- ✅ Normalizado: el cliente se guarda una vez y las deudas lo referencian
+-- (customers y debts de la lección anterior)
+```
+
+**Desnormalizar** (duplicar a propósito) es válido con un motivo concreto, normalmente de lectura, y con un
+mecanismo que mantenga la copia sincronizada:
+
+| Desnormalización                                                     | Motivo                             | Cómo se mantiene                                          |
+| -------------------------------------------------------------------- | ---------------------------------- | --------------------------------------------------------- |
+| `debts.balance_cents` (en lugar de calcularlo de los pagos cada vez) | Lectura frecuente y barata         | Se actualiza en la misma transacción que registra el pago |
+| Tabla de resumen por campaña                                         | Dashboards sobre millones de filas | Vista materializada o proceso asíncrono                   |
+| Copia del nombre del cliente en un evento                            | El evento debe reflejar el momento | Inmutable a propósito: es historia                        |
+
+## Claves primarias
+
+| Opción                                | Ventajas                                       | Desventajas                                       |
+| ------------------------------------- | ---------------------------------------------- | ------------------------------------------------- |
+| `bigint generated always as identity` | Compacta, rápida, ordenada                     | Revela volumen; se genera en la base              |
+| `uuid` (v4 aleatorio)                 | Se genera en cualquier lado; no revela volumen | Más grande; inserciones dispersas en el índice    |
+| `uuid` v7 (ordenado por tiempo)       | Se genera en cualquier lado y es ordenado      | Más grande que bigint                             |
+| Clave natural (DNI, email)            | Significado de negocio                         | Cambia, se repite entre tenants, es dato personal |
+
+Recomendación habitual: **clave sustituta** como primaria (identity o uuid) y la clave natural como **`UNIQUE`**
+(por ejemplo, `UNIQUE (tenant_id, document_number)`).
+
+## Foreign keys
+
+```sql
+CREATE TABLE payments (
+  id            bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  debt_id       bigint NOT NULL REFERENCES debts (id) ON DELETE RESTRICT,
+  provider_payment_id text NOT NULL,
+  amount_cents  bigint NOT NULL CHECK (amount_cents > 0),
+  paid_at       timestamptz NOT NULL,
+  UNIQUE (provider_payment_id)              -- el mismo pago del proveedor no se registra dos veces
+);
+```
+
+| `ON DELETE`                            | Efecto al borrar la fila referenciada | Cuándo                                                          |
+| -------------------------------------- | ------------------------------------- | --------------------------------------------------------------- |
+| `RESTRICT` / `NO ACTION` (por defecto) | Impide el borrado                     | Datos financieros y de auditoría                                |
+| `CASCADE`                              | Borra también las filas dependientes  | Datos que no tienen sentido sin el padre (ítems de un borrador) |
+| `SET NULL`                             | Deja la referencia en NULL            | Relaciones opcionales                                           |
+
+En dominios financieros, casi nunca se borra: se **marca** (estado, `archived_at`) y las foreign keys con `RESTRICT`
+evitan perder historia por accidente. PostgreSQL **no crea índices automáticamente** en las columnas de foreign key:
+hay que crearlos, porque los joins y los borrados del padre los necesitan.
+
+## Constraints: hacer imposibles los estados inválidos
+
+```sql
+CREATE TABLE payment_promises (
+  id            bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  debt_id       bigint NOT NULL REFERENCES debts (id),
+  promised_for  date   NOT NULL,
+  amount_cents  bigint NOT NULL CHECK (amount_cents > 0),
+  status        text   NOT NULL CHECK (status IN ('active', 'kept', 'broken', 'cancelled')),
+  created_at    timestamptz NOT NULL DEFAULT now(),
+  kept_at       timestamptz,
+  -- Regla entre columnas: kept_at existe si y sólo si la promesa se cumplió
+  CHECK ((status = 'kept') = (kept_at IS NOT NULL))
+);
+
+-- Una sola promesa activa por deuda (índice único parcial)
+CREATE UNIQUE INDEX one_active_promise_per_debt ON payment_promises (debt_id) WHERE status = 'active';
+```
+
+| Constraint           | Expresa                                                             |
+| -------------------- | ------------------------------------------------------------------- |
+| `NOT NULL`           | El dato es obligatorio                                              |
+| `CHECK`              | Rangos, conjuntos de valores y reglas entre columnas de la fila     |
+| `UNIQUE`             | Unicidad (también compuesta: `UNIQUE (tenant_id, email)`)           |
+| Índice único parcial | Unicidad condicional ("una activa por deuda")                       |
+| `FOREIGN KEY`        | La referencia existe                                                |
+| `EXCLUDE`            | Que no haya solapamientos (por ejemplo, rangos de fechas de planes) |
+
+Las constraints son **seguras ante concurrencia**: dos transacciones simultáneas no pueden violarlas, a diferencia de
+un "consultar y después insertar" en la aplicación. La aplicación igual valida antes, para devolver buenos mensajes;
+la constraint es la red de seguridad.
+
+## JSONB: cuándo sí y cuándo no
+
+`jsonb` guarda JSON en un formato binario que se puede consultar e indexar:
+
+```sql
+CREATE TABLE webhook_events (
+  id                 bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  provider_event_id  text NOT NULL UNIQUE,
+  type               text NOT NULL,
+  payload            jsonb NOT NULL,          -- el payload completo del proveedor, tal como llegó
+  received_at        timestamptz NOT NULL DEFAULT now()
+);
+
+SELECT payload ->> 'debt_reference' AS debt_reference      -- ->> extrae como texto
+  FROM webhook_events
+ WHERE payload @> '{"status": "succeeded"}';               -- @> "contiene", indexable con GIN
+
+CREATE INDEX webhook_events_payload_idx ON webhook_events USING gin (payload jsonb_path_ops);
+```
+
+| Usá JSONB para...                                       | Usá columnas para...                                |
+| ------------------------------------------------------- | --------------------------------------------------- |
+| Payloads crudos de webhooks y respuestas de proveedores | Datos que se filtran, ordenan o unen con frecuencia |
+| Configuración y metadatos variables por tenant          | Datos con reglas (constraints, FKs)                 |
+| Atributos dispersos que cambian seguido                 | Montos, estados, fechas y referencias               |
+
+JSONB no tiene esquema: la forma del contenido se valida en la aplicación (por ejemplo con Zod) al escribir y al leer.
+
+## Migraciones
+
+El esquema evoluciona con **migraciones versionadas**: archivos ordenados que se aplican una sola vez por entorno y
+se guardan en el repositorio. Herramientas: Drizzle Kit, Prisma Migrate, node-pg-migrate, Flyway, Liquibase.
+
+Durante un despliegue, **conviven la versión vieja y la nueva del código**. Por eso los cambios incompatibles se
+hacen en varios pasos (**expand and contract**):
+
+<FlowDiagram
+  steps={[
+    {
+      title: "Expand",
+      detail: "Agregar la columna nueva (nullable o con default). El código viejo la ignora.",
+    },
+    { title: "Escribir en ambas", detail: "El código nuevo escribe la columna vieja y la nueva." },
+    {
+      title: "Backfill",
+      detail: "Completar los datos existentes por lotes, sin bloquear la tabla.",
+      tone: "boundary",
+    },
+    { title: "Leer de la nueva", detail: "Desplegar el código que lee la columna nueva." },
+    {
+      title: "Contract",
+      detail: "En un despliegue posterior, dejar de escribir la vieja y eliminarla.",
+      tone: "runtime",
+    },
+  ]}
+  caption="Cada paso es compatible con el código que está corriendo en ese momento."
+/>
+
+Cuidados en tablas grandes:
+
+- **Crear índices con `CREATE INDEX CONCURRENTLY`**, que no bloquea las escrituras (no puede ir dentro de una
+  transacción).
+- **Agregar `NOT NULL` o una FK** sobre datos existentes en dos pasos: primero `NOT VALID` y después `VALIDATE
+CONSTRAINT`, que valida sin el bloqueo más fuerte.
+- **Backfills por lotes**, no un `UPDATE` de diez millones de filas en una transacción.
+- **`lock_timeout`** en las migraciones para que no queden esperando un lock y bloqueen todo detrás.
+
+## Comparación con C# y Java
+
+| Concepto           | .NET                                            | Java                                    | Node.js                                      |
+| ------------------ | ----------------------------------------------- | --------------------------------------- | -------------------------------------------- |
+| Definir el esquema | Entidades EF Core + Fluent API                  | Entidades JPA + anotaciones             | Esquema Drizzle/Prisma o SQL                 |
+| Migraciones        | EF Core Migrations                              | Flyway, Liquibase                       | Drizzle Kit, Prisma Migrate, node-pg-migrate |
+| Constraints        | `HasCheckConstraint`, índices únicos con filtro | `@Column(unique)`, `@Check` (Hibernate) | Declaradas en el esquema o en SQL            |
+| JSON               | Columnas JSON mapeadas a tipos owned            | `@JdbcTypeCode(SqlTypes.JSON)`          | `jsonb` + validación con Zod                 |
+
+## Errores frecuentes
+
+- **Reglas de negocio sólo en la aplicación** ("consulto y después inserto").
+- **Foreign keys sin índice.**
+- **`ON DELETE CASCADE`** en datos financieros.
+- **Todo en JSONB** para "ganar flexibilidad", perdiendo tipos e integridad.
+- **Claves naturales como primaria** (DNI, email) que después cambian.
+- **Migraciones que bloquean tablas grandes** (índices sin `CONCURRENTLY`, backfills gigantes).
+- **Renombrar o borrar columnas en un solo paso** mientras el código viejo sigue corriendo.
+
+## Ejercicio interactivo
+
+<KnowledgeCheck
+  id="postgresql.modeling.q1"
+  question="¿Cómo garantizás que una deuda tenga a lo sumo una promesa de pago activa, incluso con requests concurrentes?"
+  options={[
+    {
+      text: "Consultando antes de insertar en la aplicación.",
+      explanation: "Dos requests concurrentes pueden pasar el chequeo a la vez.",
+    },
+    {
+      text: "Con un índice único parcial: `UNIQUE (debt_id) WHERE status = 'active'`.",
+      correct: true,
+      explanation:
+        "Correcto. La base lo garantiza de forma atómica; la segunda inserción falla con un error de unicidad.",
+    },
+    {
+      text: "Con un CHECK sobre status.",
+      explanation: "CHECK valida una fila; no puede ver las demás filas.",
+    },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="postgresql.modeling.q2"
+  question="Tenés que agregar un índice a una tabla de 50 millones de filas en producción. ¿Cómo lo hacés?"
+  options={[
+    {
+      text: "`CREATE INDEX` dentro de la migración normal.",
+      explanation: "Bloquea las escrituras de la tabla mientras se construye.",
+    },
+    {
+      text: "`CREATE INDEX CONCURRENTLY`, fuera de una transacción.",
+      correct: true,
+      explanation: "Correcto. Tarda más, pero no bloquea las escrituras.",
+    },
+    {
+      text: "Borrar la tabla y recrearla con el índice.",
+      explanation: "Implica downtime y riesgo de perder datos.",
+    },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="postgresql.modeling.q3"
+  question="¿Qué conviene guardar en una columna JSONB?"
+  options={[
+    {
+      text: "El estado de la deuda, para poder agregar estados nuevos sin migraciones.",
+      explanation: "Es un dato central que se filtra y tiene reglas: va en una columna con CHECK.",
+    },
+    {
+      text: "El payload crudo de un webhook del proveedor, para auditoría y reprocesamiento.",
+      correct: true,
+      explanation:
+        "Correcto. Es semiestructurado y lo define un tercero; los campos que se consultan se extraen a columnas.",
+    },
+    { text: "Los montos de los pagos.", explanation: "Los montos necesitan tipos exactos y constraints." },
+  ]}
+/>

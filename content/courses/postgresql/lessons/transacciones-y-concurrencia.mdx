@@ -1,0 +1,348 @@
+---
+id: postgresql.transactions
+moduleId: postgresql.transactions
+title: "Transacciones y concurrencia: ACID, aislamiento, MVCC, locks, upserts y outbox"
+description: "Cómo garantizar la consistencia cuando muchas operaciones tocan los mismos datos a la vez: transacciones y ACID, niveles de aislamiento y sus anomalías, cómo funciona MVCC en PostgreSQL, locks de fila y deadlocks, concurrencia optimista y pesimista, idempotencia con constraints y UPSERT, y el patrón Transactional Outbox."
+difficulty: advanced
+order: 1
+objectives:
+  - "Explicar ACID y usar transacciones correctamente desde Node.js."
+  - "Describir los niveles de aislamiento de PostgreSQL y las anomalías que previene cada uno."
+  - "Explicar MVCC y por qué los lectores no bloquean a los escritores."
+  - "Usar locks de fila (FOR UPDATE, SKIP LOCKED) y prevenir deadlocks."
+  - "Elegir entre concurrencia optimista y pesimista."
+  - "Implementar idempotencia con constraints e INSERT ... ON CONFLICT, y publicar eventos con un outbox."
+prerequisites: ["postgresql.indexes"]
+estimatedMinutes: 55
+tags:
+  ["transacciones", "acid", "aislamiento", "mvcc", "locks", "deadlocks", "upsert", "outbox", "concurrencia"]
+version: "1.0.0"
+comparesWith: ["csharp", "java"]
+references:
+  - title: "PostgreSQL — Transaction Isolation"
+    url: "https://www.postgresql.org/docs/current/transaction-iso.html"
+  - title: "PostgreSQL — Explicit Locking"
+    url: "https://www.postgresql.org/docs/current/explicit-locking.html"
+  - title: "PostgreSQL — MVCC Introduction"
+    url: "https://www.postgresql.org/docs/current/mvcc-intro.html"
+  - title: "PostgreSQL — INSERT ... ON CONFLICT"
+    url: "https://www.postgresql.org/docs/current/sql-insert.html#SQL-ON-CONFLICT"
+  - title: "microservices.io — Transactional outbox"
+    url: "https://microservices.io/patterns/data/transactional-outbox.html"
+interviewQuestions:
+  - question: "Dos webhooks del mismo pago llegan al mismo tiempo. ¿Cómo evitás aplicarlo dos veces?"
+    keyPoints:
+      - "Una constraint UNIQUE sobre el identificador del pago del proveedor."
+      - "INSERT ... ON CONFLICT DO NOTHING RETURNING: sólo la transacción que inserta aplica el efecto."
+      - "El registro del pago y la actualización del saldo en la misma transacción."
+      - "El chequeo previo con SELECT no alcanza: tiene una ventana de carrera."
+  - question: "¿Qué es MVCC y qué consecuencias tiene?"
+    keyPoints:
+      - "Multi-Version Concurrency Control: cada transacción ve una instantánea consistente; las escrituras crean versiones nuevas de las filas."
+      - "Los lectores no bloquean a los escritores ni viceversa."
+      - "Las versiones viejas quedan como filas muertas que limpia VACUUM; transacciones largas impiden la limpieza."
+      - "Dos escrituras sobre la misma fila sí se esperan: la segunda espera a que la primera termine."
+  - question: "¿Concurrencia optimista o pesimista?"
+    keyPoints:
+      - "Pesimista: bloquear la fila (SELECT ... FOR UPDATE) antes de modificarla; adecuada con conflictos frecuentes y secciones cortas."
+      - "Optimista: una columna version y UPDATE ... WHERE version = $v; si no actualiza filas, hubo conflicto y se reintenta o se informa."
+      - "Optimista escala mejor con conflictos raros y operaciones que involucran interacción del usuario."
+      - "En muchos casos, una operación atómica (UPDATE balance = balance - x) evita ambos."
+summary:
+  - "Una transacción agrupa operaciones con garantías ACID: todo o nada, consistente, aislada y durable."
+  - "PostgreSQL usa Read Committed por defecto; Repeatable Read y Serializable previenen más anomalías y pueden fallar con errores de serialización que se reintentan."
+  - "MVCC: cada transacción ve una instantánea; leer no bloquea escribir."
+  - "Las operaciones atómicas en SQL (UPDATE ... SET x = x - $1) evitan lost updates sin locks explícitos."
+  - "FOR UPDATE bloquea filas; SKIP LOCKED permite colas de trabajo; los deadlocks se previenen con un orden consistente de locks."
+  - "Optimista con columna version para conflictos raros; pesimista con FOR UPDATE para conflictos frecuentes y cortos."
+  - "UNIQUE + ON CONFLICT dan idempotencia atómica; el outbox publica eventos sin escritura doble."
+---
+
+## ¿Qué problema resuelve?
+
+En un servicio de cobranzas ocurren muchas cosas a la vez sobre los mismos datos: webhooks de pagos (a veces
+duplicados), un agente registrando una promesa, un proceso nocturno marcando promesas incumplidas, un operador
+aplicando una quita. Sin un buen manejo de la concurrencia aparecen los bugs más caros: **pagos aplicados dos veces,
+saldos perdidos, eventos publicados sobre datos que nunca se guardaron**.
+
+## Transacciones y ACID
+
+Una **transacción** agrupa varias operaciones en una unidad con cuatro garantías:
+
+| Propiedad        | Significado                                                         |
+| ---------------- | ------------------------------------------------------------------- |
+| **Atomicidad**   | Todo o nada: si algo falla, no queda ningún cambio parcial.         |
+| **Consistencia** | Al terminar, se cumplen todas las constraints.                      |
+| **Aislamiento**  | Las transacciones concurrentes no se ven a medias (según el nivel). |
+| **Durabilidad**  | Una vez confirmada, sobrevive a una caída (se escribe en el WAL).   |
+
+```ts
+import type { Pool, PoolClient } from "pg";
+
+/** Ejecuta `work` en una transacción: COMMIT si termina, ROLLBACK si lanza. */
+export async function inTransaction<T>(pool: Pool, work: (client: PoolClient) => Promise<T>): Promise<T> {
+  const client = await pool.connect(); // la transacción vive en UNA conexión
+  try {
+    await client.query("BEGIN");
+    const result = await work(client);
+    await client.query("COMMIT");
+    return result;
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+```
+
+Un error frecuente en Node.js: usar `pool.query` dentro de lo que se cree una transacción. Cada `pool.query` puede ir
+por **una conexión distinta**, fuera de la transacción. Todas las consultas de la transacción usan el mismo `client`.
+Las transacciones deben ser **cortas**: nada de llamadas HTTP a proveedores o a un LLM con la transacción abierta.
+
+## Niveles de aislamiento
+
+| Nivel           | Previene                                   | Puede ocurrir                                                                | En PostgreSQL                      |
+| --------------- | ------------------------------------------ | ---------------------------------------------------------------------------- | ---------------------------------- |
+| Read Committed  | Lecturas sucias                            | Lecturas no repetibles, fantasmas, lost update en patrones read-modify-write | **Por defecto**                    |
+| Repeatable Read | Además, lecturas no repetibles y fantasmas | Write skew                                                                   | Instantánea de toda la transacción |
+| Serializable    | Todas las anomalías                        | Errores de serialización a reintentar                                        | SSI: detecta conflictos y aborta   |
+
+- En **Read Committed**, cada sentencia ve los datos confirmados al momento en que empieza. Dos sentencias de la
+  misma transacción pueden ver datos distintos.
+- En **Repeatable Read** y **Serializable**, cuando hay un conflicto la transacción falla con un **error de
+  serialización** (`40001`): la aplicación debe **reintentar** la transacción completa.
+
+## MVCC: cómo lo hace PostgreSQL
+
+PostgreSQL implementa el aislamiento con **MVCC** (_Multi-Version Concurrency Control_): un `UPDATE` no sobrescribe la
+fila, **crea una versión nueva**. Cada transacción ve las versiones visibles según su instantánea.
+
+<MermaidDiagram
+  caption="Con MVCC, la lectura ve una versión consistente mientras otra transacción escribe una nueva."
+  chart={`
+sequenceDiagram
+  participant A as Transacción A (lee)
+  participant DB as Fila debt 42
+  participant B as Transacción B (escribe)
+  Note over DB: versión 1: balance 100.000
+  A->>DB: SELECT balance
+  DB-->>A: 100.000 (versión 1)
+  B->>DB: UPDATE balance = 60.000
+  Note over DB: versión 2 creada, todavía no confirmada
+  A->>DB: SELECT balance
+  DB-->>A: 100.000 (no ve lo no confirmado)
+  B->>DB: COMMIT
+  A->>DB: SELECT balance (Read Committed)
+  DB-->>A: 60.000 (versión 2)
+`}
+/>
+
+Consecuencias:
+
+- **Los lectores no bloquean a los escritores, ni los escritores a los lectores.**
+- **Dos escrituras sobre la misma fila sí se esperan**: la segunda espera a que la primera confirme o cancele.
+- Las versiones viejas (filas muertas) las limpia **VACUUM** (automático con autovacuum). Una **transacción abierta
+  durante horas** impide limpiar y produce _bloat_.
+
+## El lost update y cómo evitarlo
+
+```ts
+// ❌ Read-modify-write en la aplicación: dos pagos concurrentes pierden uno
+const { rows } = await client.query("SELECT balance_cents FROM debts WHERE id = $1", [debtId]);
+await client.query("UPDATE debts SET balance_cents = $1 WHERE id = $2", [
+  rows[0].balance_cents - paid,
+  debtId,
+]);
+```
+
+Tres soluciones, en orden de preferencia:
+
+```sql
+-- 1. Operación atómica: la base calcula sobre el valor actual (y la segunda espera a la primera)
+UPDATE debts SET balance_cents = balance_cents - $1 WHERE id = $2 AND balance_cents >= $1 RETURNING balance_cents;
+
+-- 2. Pesimista: bloquear la fila antes de leerla para decidir
+SELECT balance_cents, status FROM debts WHERE id = $1 FOR UPDATE;
+-- ... lógica que necesita el valor ...
+UPDATE debts SET ... WHERE id = $1;
+
+-- 3. Optimista: columna version; si nadie la cambió, se actualiza
+UPDATE debts SET status = 'settled', version = version + 1 WHERE id = $1 AND version = $2;
+-- 0 filas afectadas = alguien cambió la deuda: recargar y reintentar, o informar el conflicto (409)
+```
+
+| Enfoque   | Cuándo                                                                             |
+| --------- | ---------------------------------------------------------------------------------- |
+| Atómico   | La operación se expresa en una sentencia (incrementos, decrementos, condiciones)   |
+| Pesimista | Conflictos frecuentes, sección corta, hay que decidir con el valor actual          |
+| Optimista | Conflictos raros, o la edición involucra tiempo de usuario (un formulario abierto) |
+
+## Locks, colas y deadlocks
+
+`SELECT ... FOR UPDATE SKIP LOCKED` permite usar una tabla como **cola de trabajo** con varios workers sin que dos
+tomen la misma fila:
+
+```sql
+-- Cada worker toma hasta 10 trabajos pendientes que nadie más tomó
+UPDATE outbox SET status = 'processing', locked_at = now()
+ WHERE id IN (
+   SELECT id FROM outbox
+    WHERE status = 'pending'
+    ORDER BY id
+    LIMIT 10
+    FOR UPDATE SKIP LOCKED
+ )
+RETURNING id, type, payload;
+```
+
+Un **deadlock** ocurre cuando dos transacciones se esperan mutuamente: A bloqueó la deuda 1 y quiere la 2; B bloqueó
+la 2 y quiere la 1. PostgreSQL lo detecta y **aborta una de las dos** (error `40P01`). Prevención:
+
+- **Orden consistente:** bloquear siempre en el mismo orden (por ejemplo, por ID ascendente).
+- **Transacciones cortas** y con pocos locks.
+- **Reintentar** la transacción abortada.
+- **`lock_timeout`** para no esperar indefinidamente.
+
+## Idempotencia con constraints y UPSERT
+
+La forma más robusta de hacer idempotente una operación es que **la base lo garantice**:
+
+```sql
+INSERT INTO payments (provider, external_id, loan_id, amount_cents, paid_at)
+VALUES ($1, $2, $3, $4, $5)
+ON CONFLICT (provider, external_id) DO NOTHING
+RETURNING id;
+```
+
+```ts
+await inTransaction(pool, async (client) => {
+  const inserted = await client.query(INSERT_PAYMENT_SQL, [
+    provider,
+    externalId,
+    loanId,
+    amountCents,
+    paidAt,
+  ]);
+  if (inserted.rowCount === 0) return { status: "duplicate" }; // otro request ya lo aplicó: no repetir efectos
+  await client.query("UPDATE loans SET balance_cents = balance_cents - $1 WHERE id = $2", [
+    amountCents,
+    loanId,
+  ]);
+  return { status: "applied" };
+});
+```
+
+`ON CONFLICT DO UPDATE` (_upsert_) actualiza la fila existente; `DO NOTHING` la ignora. En ambos casos la verificación
+y la escritura son **atómicas**: no hay ventana de carrera. El Database Lab tiene un ejercicio sobre este patrón.
+
+## Transactional Outbox
+
+Después de registrar un pago hay que **publicar un evento** (para detener recordatorios, actualizar el agente,
+notificar al cliente). Hacerlo con dos escrituras separadas (base y broker) tiene un problema: si una falla, el
+sistema queda inconsistente.
+
+<FlowDiagram
+  steps={[
+    {
+      title: "Transacción",
+      detail: "INSERT del pago + UPDATE del saldo + INSERT en la tabla outbox.",
+      tone: "runtime",
+    },
+    { title: "COMMIT", detail: "O se guarda todo o nada: el evento existe si y sólo si el pago existe." },
+    { title: "Relay", detail: "Un proceso lee el outbox con FOR UPDATE SKIP LOCKED y publica en el broker." },
+    {
+      title: "Marcar publicado",
+      detail: "Si el relay cae, reintenta: entrega al menos una vez.",
+      tone: "boundary",
+    },
+  ]}
+  caption="El outbox evita la escritura doble: el evento se guarda en la misma transacción que el cambio."
+/>
+
+Los consumidores deben ser **idempotentes**, porque el relay puede publicar el mismo evento más de una vez. La Pattern
+Library tiene el patrón [Transactional Outbox](/patterns/transactional-outbox) con su diagrama interactivo.
+
+## Comparación con C# y Java
+
+| Concepto                     | .NET                                     | Java / Spring              | Node.js + PostgreSQL                            |
+| ---------------------------- | ---------------------------------------- | -------------------------- | ----------------------------------------------- |
+| Transacción                  | `BeginTransaction`, `TransactionScope`   | `@Transactional`           | `BEGIN`/`COMMIT` en un client, o la API del ORM |
+| Concurrencia optimista       | `[ConcurrencyCheck]`, `RowVersion` en EF | `@Version` en JPA          | Columna `version` + `WHERE version = $v`        |
+| Lock pesimista               | `FOR UPDATE` en SQL crudo o hints        | `@Lock(PESSIMISTIC_WRITE)` | `SELECT ... FOR UPDATE`                         |
+| Reintentos por serialización | Políticas de reintento de Npgsql/EF      | Spring Retry               | Reintento propio ante `40001`/`40P01`           |
+
+Una diferencia práctica: `@Transactional` en Spring propaga la transacción por el hilo de forma implícita. En Node.js
+**no hay transacción implícita**: la conexión de la transacción se pasa explícitamente (o con `AsyncLocalStorage`).
+
+## Errores frecuentes
+
+- **Read-modify-write en la aplicación** sin atomicidad ni locks.
+- **`pool.query` dentro de una "transacción"**, que en realidad usa otras conexiones.
+- **Transacciones largas** con llamadas HTTP o a un LLM adentro.
+- **Chequear con `SELECT` antes de insertar** en lugar de usar una constraint.
+- **No reintentar** errores de serialización o deadlocks.
+- **Publicar eventos fuera de la transacción** sin outbox.
+- **Consumidores no idempotentes.**
+
+## Ejercicio interactivo
+
+<KnowledgeCheck
+  id="postgresql.transactions.q1"
+  question="Dos pagos de $3.000 y $2.000 llegan a la vez para una deuda de $10.000. El código hace SELECT del saldo y después UPDATE con el valor calculado. ¿Qué puede pasar?"
+  options={[
+    {
+      text: "Siempre queda en $5.000.",
+      explanation: "Ambos pueden leer $10.000 antes de que el otro escriba.",
+    },
+    {
+      text: "Puede quedar en $7.000 o $8.000: una actualización pisa a la otra (lost update).",
+      correct: true,
+      explanation:
+        "Correcto. Se resuelve con UPDATE atómico (balance = balance - $1), FOR UPDATE o concurrencia optimista.",
+    },
+    {
+      text: "PostgreSQL rechaza la segunda transacción.",
+      explanation: "En Read Committed no hay error: simplemente se pierde una actualización.",
+    },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="postgresql.transactions.q2"
+  question="¿Para qué sirve `FOR UPDATE SKIP LOCKED`?"
+  options={[
+    { text: "Para leer sin bloquear a nadie.", explanation: "Con MVCC, un SELECT común ya no bloquea." },
+    {
+      text: "Para que varios workers tomen filas distintas de una tabla de trabajos sin esperarse ni tomar la misma.",
+      correct: true,
+      explanation:
+        "Correcto. Cada worker bloquea las filas que toma y saltea las ya bloqueadas: ideal para outbox y colas en PostgreSQL.",
+    },
+    {
+      text: "Para evitar deadlocks siempre.",
+      explanation: "Ayuda en colas, pero los deadlocks se previenen con orden consistente de locks.",
+    },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="postgresql.transactions.q3"
+  question="Después de guardar un pago, el código publica un evento en el broker. A veces el pago se guarda y el evento no se publica. ¿Qué patrón lo resuelve?"
+  options={[
+    {
+      text: "Publicar el evento antes de guardar el pago.",
+      explanation: "Invierte el problema: podría publicarse un evento de un pago que no se guardó.",
+    },
+    {
+      text: "Transactional Outbox: guardar el evento en una tabla en la misma transacción y publicarlo con un relay.",
+      correct: true,
+      explanation:
+        "Correcto. El evento existe si y sólo si el pago existe; el relay garantiza entrega al menos una vez.",
+    },
+    {
+      text: "Reintentar la publicación tres veces.",
+      explanation: "Si el proceso cae entre el commit y la publicación, el evento se pierde igual.",
+    },
+  ]}
+/>

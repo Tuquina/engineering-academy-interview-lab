@@ -10,6 +10,23 @@
   "tags": ["postgresql", "sql", "transacciones"],
   "modules": [
     {
+      "id": "postgresql.intro",
+      "slug": "introduccion",
+      "title": "Introducción",
+      "description": "Qué es PostgreSQL, cómo se ejecuta y la sintaxis SQL esencial: crear tablas, insertar, consultar, filtrar, agrupar y modificar datos.",
+      "order": 0,
+      "topics": [
+        "Qué es PostgreSQL y por qué es la base relacional por defecto",
+        "Ejecutar PostgreSQL en Docker y conectarse con psql",
+        "Tipos de datos esenciales",
+        "CREATE TABLE, INSERT, UPDATE y DELETE",
+        "SELECT, WHERE, ORDER BY y LIMIT",
+        "Agregaciones: GROUP BY y HAVING",
+        "NULL y lógica de tres valores",
+        "Usar PostgreSQL desde Node.js con consultas parametrizadas"
+      ]
+    },
+    {
       "id": "postgresql.modeling",
       "slug": "modelado",
       "title": "Modelado relacional",

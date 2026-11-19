@@ -1,0 +1,344 @@
+---
+id: postgresql.queries
+moduleId: postgresql.queries-indexes
+title: "Consultas: joins, subconsultas, CTEs, window functions y paginación"
+description: "El SQL que resuelve preguntas reales de negocio: los tipos de join y sus trampas, subconsultas y EXISTS, CTEs para estructurar consultas (incluidas las recursivas), window functions para rankings, acumulados y comparación con filas anteriores, y paginación eficiente con keyset en lugar de OFFSET."
+difficulty: intermediate
+order: 1
+objectives:
+  - "Elegir entre INNER, LEFT, y anti-joins y evitar la duplicación de filas por joins."
+  - "Usar subconsultas, EXISTS y LATERAL con criterio."
+  - "Estructurar consultas complejas con CTEs."
+  - "Resolver rankings, acumulados y comparaciones con window functions."
+  - "Paginar con keyset en lugar de OFFSET y explicar por qué escala mejor."
+prerequisites: ["postgresql.modeling"]
+estimatedMinutes: 45
+tags: ["sql", "joins", "cte", "window functions", "paginación", "keyset"]
+version: "1.0.0"
+comparesWith: ["csharp", "java"]
+references:
+  - title: "PostgreSQL — Joins Between Tables"
+    url: "https://www.postgresql.org/docs/current/tutorial-join.html"
+  - title: "PostgreSQL — WITH Queries (Common Table Expressions)"
+    url: "https://www.postgresql.org/docs/current/queries-with.html"
+  - title: "PostgreSQL — Window Functions"
+    url: "https://www.postgresql.org/docs/current/tutorial-window.html"
+  - title: "PostgreSQL — LATERAL subqueries"
+    url: "https://www.postgresql.org/docs/current/queries-table-expressions.html#QUERIES-LATERAL"
+  - title: "Use The Index, Luke — Paging Through Results"
+    url: "https://use-the-index-luke.com/sql/partial-results/fetch-next-page"
+interviewQuestions:
+  - question: "¿Qué es una window function y en qué se diferencia de GROUP BY?"
+    keyPoints:
+      - "Calcula un valor sobre un conjunto de filas relacionadas (la ventana) sin colapsarlas en una sola fila."
+      - "PARTITION BY define los grupos y ORDER BY el orden dentro de cada uno."
+      - "Casos: rankings (row_number, rank), acumulados (sum over), comparar con la fila anterior (lag, lead)."
+      - "GROUP BY devuelve una fila por grupo; las window functions conservan todas las filas."
+  - question: "¿Por qué la paginación con OFFSET se vuelve lenta y cuál es la alternativa?"
+    keyPoints:
+      - "OFFSET N obliga a leer y descartar N filas: el costo crece con el número de página."
+      - "Con inserciones concurrentes, las páginas pueden repetir u omitir filas."
+      - "Keyset (cursor): WHERE (orden, id) > (último visto) ORDER BY orden, id LIMIT n, apoyado en un índice."
+      - "Se pierde el salto a una página arbitraria, que rara vez hace falta en APIs."
+  - question: "¿Qué cuidado hay que tener al hacer joins con tablas de relación 1:N antes de agregar?"
+    keyPoints:
+      - "El join multiplica filas: sumar un monto del lado 1 después de unir con el lado N lo cuenta varias veces."
+      - "Se agrega primero en una subconsulta o CTE y después se une, o se usan agregados con DISTINCT con cuidado."
+summary:
+  - "INNER JOIN conserva coincidencias; LEFT JOIN conserva todas las filas de la izquierda."
+  - "Un join con una relación 1:N multiplica filas: agregá antes de unir."
+  - "NOT EXISTS es el anti-join seguro (NOT IN falla con NULL)."
+  - "LATERAL permite 'para cada fila, la consulta de las N más recientes'."
+  - "Las CTEs (WITH) dan nombre a pasos intermedios; las recursivas recorren jerarquías."
+  - "Window functions: row_number, rank, sum over, lag y lead calculan sobre ventanas sin colapsar filas."
+  - "Paginación keyset: filtrar por el último valor visto con un índice; OFFSET escala mal."
+---
+
+## ¿Qué problema resuelve?
+
+Las preguntas de negocio de una plataforma de cobranzas rara vez son "traer una fila por ID":
+
+- ¿Cuál es la cuota impaga más antigua de cada cliente?
+- ¿Qué porcentaje de las promesas de cada agente se cumplió en los últimos 30 días?
+- ¿Cómo evolucionó el saldo de cada cartera mes a mes?
+- Dame la siguiente página de 50 deudores de una campaña, ordenados por saldo.
+
+Resolverlas en SQL (en lugar de traer miles de filas y procesarlas en la aplicación) es más rápido, consistente y
+simple. El **Database Lab** de la plataforma (`/database-lab`) tiene ejercicios con estas mismas preguntas; los ejemplos de
+window functions usan sus tablas (`loans`, `installments`) y se pueden ejecutar ahí tal cual. El resto usa el modelo
+de la lección de modelado.
+
+## Joins
+
+<MermaidDiagram
+  caption="Qué conserva cada tipo de join entre clientes y deudas."
+  chart={`
+flowchart LR
+  subgraph INNER["INNER JOIN"]
+    I["Sólo clientes con deudas<br/>y sus deudas"]
+  end
+  subgraph LEFT["LEFT JOIN"]
+    L["Todos los clientes<br/>deudas o NULL"]
+  end
+  subgraph ANTI["Anti-join NOT EXISTS"]
+    A["Clientes sin<br/>ninguna deuda"]
+  end
+`}
+/>
+
+```sql
+-- INNER: clientes con al menos una deuda vencida
+SELECT DISTINCT c.id, c.full_name
+  FROM customers c
+  JOIN debts d ON d.customer_id = c.id AND d.due_date < CURRENT_DATE;
+
+-- LEFT: todos los clientes, con la cantidad de deudas (0 si no tienen)
+SELECT c.id, c.full_name, count(d.id) AS debts   -- count(d.id) ignora los NULL
+  FROM customers c
+  LEFT JOIN debts d ON d.customer_id = c.id
+ GROUP BY c.id, c.full_name;
+
+-- Anti-join: clientes que no fueron contactados en ninguna conversación
+SELECT c.id
+  FROM customers c
+ WHERE NOT EXISTS (SELECT 1 FROM conversations v WHERE v.customer_id = c.id);
+```
+
+Dos trampas clásicas:
+
+1. **Un filtro sobre la tabla derecha en el `WHERE` convierte un `LEFT JOIN` en `INNER`.** Si escribís
+   `LEFT JOIN debts d ... WHERE d.status = 'pending'`, los clientes sin deudas (con `d.status` en `NULL`)
+   desaparecen. El filtro va en el `ON`.
+2. **El join multiplica filas.** Si unís deudas con pagos (1:N) y sumás `balance_cents`, el saldo de una deuda se
+   cuenta una vez por cada pago:
+
+```sql
+-- ❌ El saldo se suma una vez por cada pago de la deuda
+SELECT sum(d.balance_cents), sum(p.amount_cents)
+  FROM debts d LEFT JOIN payments p ON p.debt_id = d.id;
+
+-- ✅ Agregar los pagos primero y unir después
+SELECT sum(d.balance_cents) AS balance, sum(coalesce(p.paid, 0)) AS paid
+  FROM debts d
+  LEFT JOIN (SELECT debt_id, sum(amount_cents) AS paid FROM payments GROUP BY debt_id) p ON p.debt_id = d.id;
+```
+
+## Subconsultas, EXISTS y LATERAL
+
+```sql
+-- Subconsulta escalar: el saldo de cada deuda junto con el promedio de su cliente
+SELECT d.id, d.balance_cents,
+       (SELECT avg(balance_cents) FROM debts x WHERE x.customer_id = d.customer_id) AS customer_avg
+  FROM debts d;
+
+-- LATERAL: para cada cliente, sus 3 pagos más recientes
+SELECT c.id, recent.amount_cents, recent.paid_at
+  FROM customers c
+  CROSS JOIN LATERAL (
+    SELECT p.amount_cents, p.paid_at
+      FROM payments p JOIN debts d ON d.id = p.debt_id
+     WHERE d.customer_id = c.id
+     ORDER BY p.paid_at DESC
+     LIMIT 3
+  ) recent;
+```
+
+`LATERAL` permite que la subconsulta de la derecha use columnas de la izquierda: es la forma natural de expresar
+"para cada fila, los N más recientes".
+
+## CTEs: consultas por pasos
+
+Una **CTE** (`WITH`) da nombre a un resultado intermedio. Hace legibles las consultas largas, como variables en
+código:
+
+```sql
+WITH promises_30d AS (
+  SELECT agent_id, status
+    FROM payment_promises
+   WHERE created_at >= CURRENT_DATE - INTERVAL '30 days'
+),
+by_agent AS (
+  SELECT agent_id,
+         count(*) AS total,
+         count(*) FILTER (WHERE status = 'kept') AS kept
+    FROM promises_30d
+   GROUP BY agent_id
+)
+SELECT a.name, b.total, b.kept, round(100.0 * b.kept / nullif(b.total, 0), 1) AS kept_pct
+  FROM by_agent b
+  JOIN agents a ON a.id = b.agent_id
+ ORDER BY kept_pct DESC NULLS LAST;
+```
+
+Desde PostgreSQL 12, el planificador puede **incorporar** las CTEs no recursivas a la consulta principal (ya no son
+una barrera de optimización por defecto). Las **CTEs recursivas** (`WITH RECURSIVE`) recorren jerarquías: un árbol
+de carteras, una cadena de reestructuraciones de deuda.
+
+## Window functions
+
+Una **window function** calcula un valor sobre un conjunto de filas relacionadas **sin colapsarlas** (a diferencia
+de `GROUP BY`):
+
+```sql
+-- Cuotas impagas con su posición, el acumulado y el vencimiento anterior, por cliente
+SELECT l.customer_id, i.id AS installment_id, i.due_date, i.amount_cents,
+       row_number() OVER w AS position,
+       sum(i.amount_cents) OVER w AS running_total,
+       lag(i.due_date) OVER w AS previous_due_date
+  FROM installments i
+  JOIN loans l ON l.id = i.loan_id
+ WHERE i.paid_cents < i.amount_cents
+WINDOW w AS (PARTITION BY l.customer_id ORDER BY i.due_date);
+```
+
+<FlowDiagram
+  steps={[
+    {
+      title: "PARTITION BY customer_id",
+      detail: "Una ventana por cliente (como un grupo, sin colapsar filas).",
+    },
+    { title: "ORDER BY due_date", detail: "Orden dentro de cada ventana." },
+    { title: "Función", detail: "row_number, rank, sum, avg, lag, lead, first_value..." },
+    {
+      title: "Resultado",
+      detail: "Cada fila conserva sus columnas y suma el valor calculado.",
+      tone: "runtime",
+    },
+  ]}
+  caption="Las window functions agregan contexto a cada fila sin perder el detalle."
+/>
+
+| Función                                                        | Uso típico                                                  |
+| -------------------------------------------------------------- | ----------------------------------------------------------- |
+| `row_number()`                                                 | "La primera de cada grupo": la cuota impaga más antigua     |
+| `rank()`, `dense_rank()`                                       | Rankings con empates: agentes por recupero                  |
+| `sum(...) OVER (ORDER BY ...)`                                 | Acumulados: saldo acumulado mes a mes                       |
+| `lag()`, `lead()`                                              | Comparar con la fila anterior o siguiente: días entre pagos |
+| `avg(...) OVER (... ROWS BETWEEN 6 PRECEDING AND CURRENT ROW)` | Promedios móviles                                           |
+
+El patrón "la primera fila de cada grupo" es muy frecuente:
+
+```sql
+-- Cuota impaga más antigua de cada cliente
+SELECT *
+  FROM (
+    SELECT i.*, row_number() OVER (PARTITION BY l.customer_id ORDER BY i.due_date) AS rn
+      FROM installments i JOIN loans l ON l.id = i.loan_id
+     WHERE i.paid_cents < i.amount_cents
+  ) ranked
+ WHERE rn = 1;
+
+-- Alternativa propia de PostgreSQL
+SELECT DISTINCT ON (l.customer_id) l.customer_id, i.id, i.due_date
+  FROM installments i JOIN loans l ON l.id = i.loan_id
+ WHERE i.paid_cents < i.amount_cents
+ ORDER BY l.customer_id, i.due_date;
+```
+
+## Paginación: OFFSET frente a keyset
+
+```sql
+-- OFFSET: simple, pero el costo crece con la página
+SELECT id, balance_cents FROM debts
+ WHERE campaign_id = 7
+ ORDER BY balance_cents DESC, id DESC
+ LIMIT 50 OFFSET 50000;           -- lee y descarta 50.000 filas
+
+-- Keyset: continuar desde el último elemento visto
+SELECT id, balance_cents FROM debts
+ WHERE campaign_id = 7
+   AND (balance_cents, id) < ($1, $2)   -- valores de la última fila de la página anterior
+ ORDER BY balance_cents DESC, id DESC
+ LIMIT 50;
+-- Con un índice en (campaign_id, balance_cents DESC, id DESC), cada página cuesta lo mismo.
+```
+
+| Aspecto                  | OFFSET                          | Keyset (cursor)                         |
+| ------------------------ | ------------------------------- | --------------------------------------- |
+| Costo de la página N     | Crece con N                     | Constante con el índice adecuado        |
+| Inserciones concurrentes | Puede repetir u omitir filas    | Estable                                 |
+| Saltar a la página 37    | Sí                              | No (se navega por "siguiente")          |
+| Uso típico               | Tablas chicas, paneles internos | APIs, listados grandes, scroll infinito |
+
+En una API, el cursor se devuelve **opaco** (codificado) para que el cliente no dependa de su estructura. El orden
+siempre incluye una columna única (el `id`) para desempatar.
+
+## Comparación con C# y Java
+
+| Necesidad         | .NET (LINQ / EF Core)             | Java (JPA / Streams)                    | SQL en PostgreSQL                 |
+| ----------------- | --------------------------------- | --------------------------------------- | --------------------------------- |
+| Join              | `join` / navegación con `Include` | `JOIN FETCH`, relaciones                | `JOIN`, `LEFT JOIN`               |
+| Anti-join         | `!Any()`                          | `NOT EXISTS` en JPQL                    | `NOT EXISTS`                      |
+| Ranking por grupo | `GroupBy` + `OrderBy` en memoria  | Streams en memoria o SQL nativo         | `row_number() OVER (...)`         |
+| Paginación        | `Skip/Take` (OFFSET)              | `setFirstResult/setMaxResults` (OFFSET) | Keyset con `WHERE (a, b) < (...)` |
+
+Los ORMs facilitan las consultas simples, pero las window functions, `LATERAL` o el keyset suelen requerir SQL
+explícito o el soporte avanzado del query builder.
+
+## Errores frecuentes
+
+- **Filtros de la tabla derecha en el `WHERE`** de un `LEFT JOIN`.
+- **Sumar después de un join 1:N** y duplicar montos.
+- **`NOT IN` con subconsultas** que pueden devolver `NULL`.
+- **Traer todo a la aplicación** para rankear o acumular.
+- **OFFSET en listados grandes** de APIs.
+- **Orden de paginación sin desempate único**, que repite u omite filas.
+
+## Ejercicio interactivo
+
+<KnowledgeCheck
+  id="postgresql.queries.q1"
+  question="`SELECT c.id, count(d.id) FROM customers c LEFT JOIN debts d ON d.customer_id = c.id WHERE d.status = 'pending' GROUP BY c.id` no muestra a los clientes sin deudas. ¿Por qué?"
+  options={[
+    {
+      text: "Porque count no cuenta ceros.",
+      explanation: "count(d.id) devolvería 0; el problema es que esas filas se filtraron antes.",
+    },
+    {
+      text: "Porque el filtro sobre d en el WHERE descarta las filas con d en NULL; debe ir en el ON del join.",
+      correct: true,
+      explanation: "Correcto. El WHERE convierte el LEFT JOIN en un INNER JOIN de hecho.",
+    },
+    { text: "Porque falta un DISTINCT.", explanation: "DISTINCT no recupera filas filtradas." },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="postgresql.queries.q2"
+  question="Necesitás la cuota impaga más antigua de cada cliente. ¿Qué herramienta es la más directa?"
+  options={[
+    {
+      text: "GROUP BY customer_id con min(due_date).",
+      explanation: "Da la fecha, pero no el resto de las columnas de esa cuota sin otro join.",
+    },
+    {
+      text: "`row_number() OVER (PARTITION BY customer_id ORDER BY due_date)` y quedarse con rn = 1 (o DISTINCT ON).",
+      correct: true,
+      explanation: "Correcto. Es el patrón 'primera fila de cada grupo'.",
+    },
+    {
+      text: "Traer todas las cuotas y filtrar en TypeScript.",
+      explanation: "Mueve trabajo y datos innecesarios a la aplicación.",
+    },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="postgresql.queries.q3"
+  question="Una API lista deudores con `LIMIT 50 OFFSET n` y las páginas altas tardan varios segundos. ¿Qué cambiás?"
+  options={[
+    {
+      text: "Subir el LIMIT para pedir menos páginas.",
+      explanation: "Las páginas profundas siguen leyendo y descartando filas.",
+    },
+    {
+      text: "Paginación keyset con un cursor sobre (orden, id) y un índice que lo soporte.",
+      correct: true,
+      explanation: "Correcto. Cada página cuesta lo mismo y es estable ante inserciones.",
+    },
+    {
+      text: "Cachear todas las páginas.",
+      explanation: "Agrega complejidad e invalidación sin resolver la causa.",
+    },
+  ]}
+/>

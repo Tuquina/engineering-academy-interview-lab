@@ -1,0 +1,295 @@
+---
+id: postgresql.operations
+moduleId: postgresql.operations
+title: "Operación y seguridad: pooling, particionado, inyección SQL, Row Level Security y mantenimiento"
+description: "Lo que hace falta para operar PostgreSQL en producción: cómo funcionan las conexiones y el pooling (y por qué importan en serverless), particionado de tablas grandes, prevención de inyección SQL con consultas parametrizadas, aislamiento multi-tenant con Row Level Security, roles con mínimo privilegio, VACUUM, backups y réplicas."
+difficulty: intermediate
+order: 1
+objectives:
+  - "Explicar el costo de una conexión y dimensionar pools, incluido el uso de PgBouncer."
+  - "Decidir cuándo particionar una tabla y cómo elegir la clave de partición."
+  - "Prevenir inyección SQL con consultas parametrizadas y validar identificadores dinámicos."
+  - "Implementar aislamiento multi-tenant con Row Level Security como segunda barrera."
+  - "Aplicar roles con mínimo privilegio y conocer VACUUM, backups y réplicas."
+prerequisites: ["postgresql.transactions"]
+estimatedMinutes: 40
+tags:
+  [
+    "connection pooling",
+    "pgbouncer",
+    "particionado",
+    "sql injection",
+    "row level security",
+    "vacuum",
+    "backups",
+  ]
+version: "1.0.0"
+comparesWith: ["csharp", "java"]
+references:
+  - title: "PostgreSQL — Table Partitioning"
+    url: "https://www.postgresql.org/docs/current/ddl-partitioning.html"
+  - title: "PostgreSQL — Row Security Policies"
+    url: "https://www.postgresql.org/docs/current/ddl-rowsecurity.html"
+  - title: "PostgreSQL — Routine Vacuuming"
+    url: "https://www.postgresql.org/docs/current/routine-vacuuming.html"
+  - title: "PgBouncer — Features (pool modes)"
+    url: "https://www.pgbouncer.org/features.html"
+  - title: "OWASP — SQL Injection Prevention Cheat Sheet"
+    url: "https://cheatsheetseries.owasp.org/cheatsheets/SQL_Injection_Prevention_Cheat_Sheet.html"
+interviewQuestions:
+  - question: "¿Cómo prevenís la inyección SQL?"
+    keyPoints:
+      - "Consultas parametrizadas: los valores viajan separados del texto SQL y nunca se interpretan como código."
+      - "Los identificadores dinámicos (columna de orden, tabla) no se parametrizan: se validan contra una lista permitida."
+      - "Un usuario de base con mínimo privilegio limita el daño."
+      - "Los ORMs y query builders parametrizan, salvo en sus métodos de SQL crudo."
+  - question: "¿Qué es Row Level Security y cómo lo usarías en una plataforma multi-tenant?"
+    keyPoints:
+      - "Políticas en la tabla que filtran qué filas puede ver o modificar cada sesión."
+      - "La aplicación fija el tenant de la sesión (por ejemplo con set_config) al inicio de la transacción."
+      - "Es una segunda barrera: aunque una consulta olvide el filtro por tenant, la base no devuelve filas de otros."
+      - "El rol de la aplicación no debe ser dueño de la tabla ni tener BYPASSRLS."
+  - question: "¿Por qué hace falta un pooler como PgBouncer?"
+    keyPoints:
+      - "Cada conexión de PostgreSQL es un proceso con memoria propia: miles de conexiones degradan la base."
+      - "Con muchas réplicas o funciones serverless, cada instancia abre sus conexiones y se agota max_connections."
+      - "Un pooler multiplexa muchas conexiones de clientes sobre pocas conexiones reales."
+      - "En modo transacción hay que evitar estado de sesión (SET, prepared statements de sesión, advisory locks de sesión)."
+summary:
+  - "Cada conexión es un proceso en el servidor: se usan pools acotados y, a escala, un pooler externo."
+  - "Conexiones totales = réplicas × tamaño del pool; con serverless, un pooler es casi obligatorio."
+  - "Particionar sirve para tablas muy grandes con una clave natural (tiempo, tenant): mantenimiento y consultas por rango."
+  - "Inyección SQL: siempre parámetros; identificadores dinámicos sólo de una lista permitida."
+  - "Row Level Security filtra filas por tenant en la base, como segunda barrera."
+  - "Roles con mínimo privilegio: la aplicación no es dueña de las tablas ni superusuario."
+  - "Autovacuum, backups con restauración probada y réplicas de lectura son parte de la operación."
+---
+
+## ¿Qué problema resuelve?
+
+El esquema está bien modelado, las consultas tienen índices y las transacciones son correctas. Aun así, en
+producción aparecen otros problemas: la base rechaza conexiones cuando se escala la aplicación, una tabla de eventos
+de 2.000 millones de filas se vuelve imposible de mantener, un parámetro de ordenamiento permite inyección SQL, o una
+consulta olvidó filtrar por tenant y mostró datos de otro cliente. Esta lección cubre la operación y la seguridad.
+
+## Conexiones y pooling
+
+En PostgreSQL, **cada conexión es un proceso** en el servidor, con su propia memoria. Abrir una conexión cuesta
+(TCP, TLS, autenticación) y mantener miles degrada a la base. Por eso:
+
+- La aplicación usa un **pool** acotado por réplica (lección de performance del curso de Node.js).
+- El total es **réplicas × tamaño del pool**, y debe entrar holgadamente en `max_connections`.
+- Con **funciones serverless** (cada invocación puede abrir sus propias conexiones) o muchas réplicas, se usa un
+  **pooler externo**: PgBouncer o el pooler del proveedor gestionado.
+
+<MermaidDiagram
+  caption="Un pooler multiplexa cientos de conexiones de clientes sobre unas pocas conexiones reales a PostgreSQL."
+  chart={`
+flowchart LR
+  F1["Función serverless 1"] --> PB["PgBouncer<br/>modo transacción"]
+  F2["Función serverless 2"] --> PB
+  F3["Función serverless N"] --> PB
+  API["Réplicas de la API"] --> PB
+  PB -->|"20 conexiones reales"| PG["PostgreSQL"]
+`}
+/>
+
+| Modo de PgBouncer | La conexión real se asigna...      | Limitaciones                                                                                                                       |
+| ----------------- | ---------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| Sesión            | Durante toda la sesión del cliente | Poca multiplexación                                                                                                                |
+| **Transacción**   | Durante cada transacción           | No usar estado de sesión: `SET`, `LISTEN`, advisory locks de sesión, prepared statements de sesión (según versión y configuración) |
+| Sentencia         | Por cada sentencia                 | No admite transacciones de varias sentencias                                                                                       |
+
+## Particionado
+
+El **particionado** divide una tabla lógica en tablas físicas según una clave:
+
+```sql
+CREATE TABLE conversation_events (
+  id          bigint GENERATED ALWAYS AS IDENTITY,
+  tenant_id   bigint NOT NULL,
+  occurred_at timestamptz NOT NULL,
+  type        text NOT NULL,
+  payload     jsonb NOT NULL,
+  PRIMARY KEY (id, occurred_at)                 -- la clave de partición debe estar en la PK
+) PARTITION BY RANGE (occurred_at);
+
+CREATE TABLE conversation_events_2026_11 PARTITION OF conversation_events
+  FOR VALUES FROM ('2026-11-01') TO ('2026-12-01');
+```
+
+| Beneficio                                                                      | Ejemplo                                                               |
+| ------------------------------------------------------------------------------ | --------------------------------------------------------------------- |
+| Consultas por rango leen sólo las particiones relevantes (_partition pruning_) | Eventos de la última semana                                           |
+| Borrar datos viejos es instantáneo                                             | `DROP TABLE conversation_events_2024_01` en vez de un `DELETE` masivo |
+| Mantenimiento por partición                                                    | VACUUM e índices más chicos                                           |
+
+No es una optimización por defecto: agrega complejidad (la clave de partición en la PK y en las consultas, crear
+particiones futuras). Se justifica en **tablas muy grandes** con una clave natural de acceso, típicamente **tiempo**
+(eventos, mensajes, logs de auditoría).
+
+## Inyección SQL
+
+La **inyección SQL** ocurre cuando un valor del usuario se concatena en el texto de la consulta y termina
+interpretado como SQL:
+
+```ts
+// ❌ Inyección: name = "x' OR '1'='1" devuelve todos los clientes
+await pool.query(`SELECT * FROM customers WHERE full_name = '${name}'`);
+
+// ✅ Parametrizado: el valor viaja separado y nunca se interpreta como SQL
+await pool.query("SELECT * FROM customers WHERE full_name = $1", [name]);
+```
+
+Los **identificadores** (nombres de columnas o tablas) no se pueden parametrizar. Para un ordenamiento dinámico, se
+valida contra una **lista permitida**:
+
+```ts
+const SORTABLE_COLUMNS = { balance: "balance_cents", due: "due_date", created: "created_at" } as const;
+
+export function orderByClause(sort: string): string {
+  const column = SORTABLE_COLUMNS[sort as keyof typeof SORTABLE_COLUMNS];
+  if (!column) throw new InvalidSortError(sort); // nunca se concatena el input original
+  return `ORDER BY ${column} DESC, id DESC`;
+}
+```
+
+Los ORMs y query builders parametrizan automáticamente, **salvo** en sus funciones de SQL crudo, donde vuelve a ser
+responsabilidad del desarrollador.
+
+## Row Level Security para multi-tenancy
+
+La primera barrera de aislamiento entre tenants es la aplicación (repositorios que exigen el tenant). **Row Level
+Security** agrega una **segunda barrera en la base**: aunque una consulta olvide el filtro, la base no devuelve filas
+de otro tenant.
+
+```sql
+ALTER TABLE debts ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY tenant_isolation ON debts
+  USING (tenant_id = current_setting('app.tenant_id')::bigint)
+  WITH CHECK (tenant_id = current_setting('app.tenant_id')::bigint);
+```
+
+```ts
+await inTransaction(pool, async (client) => {
+  // Fija el tenant para esta transacción (true = local a la transacción: seguro con poolers en modo transacción)
+  await client.query("SELECT set_config('app.tenant_id', $1, true)", [String(user.tenantId)]);
+  return client.query("SELECT * FROM debts WHERE status = 'pending'"); // sólo filas del tenant
+});
+```
+
+Requisitos para que sirva: el rol de la aplicación **no es dueño de la tabla** ni tiene `BYPASSRLS` (los dueños y
+superusuarios ignoran las políticas salvo que se fuerce con `FORCE ROW LEVEL SECURITY`), y el tenant se fija **en
+cada transacción**, nunca a nivel de sesión compartida.
+
+## Roles y mínimo privilegio
+
+<FlowDiagram
+  steps={[
+    {
+      title: "Rol de migraciones",
+      detail: "Dueño del esquema: crea y altera tablas. Sólo lo usa el pipeline.",
+    },
+    {
+      title: "Rol de la aplicación",
+      detail: "SELECT, INSERT, UPDATE en sus tablas; sin DDL, sin BYPASSRLS.",
+      tone: "runtime",
+    },
+    { title: "Rol de lectura", detail: "Para reportes y analítica, idealmente sobre una réplica." },
+    {
+      title: "Humanos",
+      detail: "Acceso nominal, auditado y temporal; nunca la credencial de la aplicación.",
+      tone: "boundary",
+    },
+  ]}
+  caption="Cada actor con los permisos mínimos: si una credencial se filtra, el daño queda acotado."
+/>
+
+## Mantenimiento: VACUUM, backups y réplicas
+
+- **VACUUM y autovacuum** limpian las versiones muertas que deja MVCC y actualizan estadísticas. Se vigilan el
+  _bloat_, las transacciones abiertas durante mucho tiempo (impiden limpiar) y el progreso de autovacuum en tablas
+  con muchas escrituras.
+- **Backups:** backups físicos con WAL (recuperación a un punto en el tiempo, PITR) en los servicios gestionados; un
+  backup sólo cuenta si se **probó restaurarlo**.
+- **Réplicas de lectura:** descargan consultas de reportes; la replicación es asíncrona por defecto, así que una
+  réplica puede estar levemente atrasada (no leer de ahí justo después de escribir).
+- **Monitoreo:** conexiones, consultas lentas (`pg_stat_statements`), locks en espera, retraso de réplicas, espacio
+  en disco.
+
+## Comparación con C# y Java
+
+| Tema                        | .NET                              | Java                       | Node.js + PostgreSQL           |
+| --------------------------- | --------------------------------- | -------------------------- | ------------------------------ |
+| Pool de conexiones          | Integrado en Npgsql               | HikariCP                   | `pg.Pool` + PgBouncer a escala |
+| Parámetros                  | `NpgsqlParameter`                 | `PreparedStatement`        | `$1`, `$2` en `pg`             |
+| Multi-tenancy en la base    | Filtros globales de EF Core + RLS | Filtros de Hibernate + RLS | Repositorios con tenant + RLS  |
+| Migraciones con privilegios | Rol separado en el pipeline       | Rol separado en Flyway     | Rol separado en el pipeline    |
+
+## Errores frecuentes
+
+- **Pools grandes en muchas réplicas** que agotan `max_connections`.
+- **Funciones serverless conectando directo** a PostgreSQL sin pooler.
+- **Concatenar valores o identificadores** en el SQL.
+- **RLS con el rol dueño de la tabla**, que ignora las políticas.
+- **Fijar el tenant a nivel de sesión** con un pooler en modo transacción.
+- **La aplicación conectada como superusuario.**
+- **Backups nunca restaurados** en una prueba.
+
+## Ejercicio interactivo
+
+<KnowledgeCheck
+  id="postgresql.operations.q1"
+  question="Un endpoint permite `?sort=balance_cents` y hace `ORDER BY ${sort}`. ¿Cómo lo corregís?"
+  options={[
+    {
+      text: "Pasando sort como parámetro $1.",
+      explanation: "Los parámetros sólo sirven para valores, no para identificadores.",
+    },
+    {
+      text: "Mapeando el valor recibido contra una lista permitida de columnas y rechazando el resto.",
+      correct: true,
+      explanation: "Correcto. El input nunca se concatena; sólo valores conocidos de una lista.",
+    },
+    {
+      text: "Escapando las comillas del input.",
+      explanation: "Escapar a mano es frágil y no protege identificadores.",
+    },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="postgresql.operations.q2"
+  question="Activaste RLS en `debts`, pero la aplicación sigue viendo filas de todos los tenants. ¿Cuál es la causa más probable?"
+  options={[
+    {
+      text: "RLS sólo funciona con SELECT.",
+      explanation: "Funciona con SELECT, INSERT, UPDATE y DELETE según la política.",
+    },
+    {
+      text: "La aplicación se conecta con el rol dueño de la tabla (o con BYPASSRLS), que ignora las políticas.",
+      correct: true,
+      explanation:
+        "Correcto. Se usa un rol de aplicación sin privilegios de dueño, o FORCE ROW LEVEL SECURITY.",
+    },
+    { text: "Falta un índice en tenant_id.", explanation: "El índice afecta performance, no el filtrado." },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="postgresql.operations.q3"
+  question="La tabla `conversation_events` crece 300 millones de filas por mes y se consultan casi siempre los últimos 30 días. ¿Qué considerás?"
+  options={[
+    {
+      text: "Agregar un índice por cada columna.",
+      explanation: "No resuelve el borrado de datos viejos ni el tamaño de la tabla.",
+    },
+    {
+      text: "Particionar por rango de occurred_at (mensual), para pruning en consultas recientes y borrado de meses viejos con DROP.",
+      correct: true,
+      explanation: "Correcto. Es el caso típico de particionado por tiempo.",
+    },
+    { text: "Moverla a JSONB.", explanation: "No cambia el volumen ni el patrón de acceso." },
+  ]}
+/>

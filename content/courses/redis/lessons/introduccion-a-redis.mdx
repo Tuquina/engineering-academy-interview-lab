@@ -1,0 +1,254 @@
+---
+id: redis.introduction
+moduleId: redis.intro
+title: "Introducción a Redis: qué es, para qué se usa y comandos básicos"
+description: "Qué es Redis y qué lugar ocupa en un backend junto a PostgreSQL: un almacén clave-valor en memoria con estructuras de datos y operaciones atómicas. Cómo se ejecuta en Docker, cómo se usa redis-cli, los comandos básicos, por qué sus comandos son atómicos y cómo se usa desde Node.js."
+difficulty: basic
+order: 1
+objectives:
+  - "Explicar qué es Redis y en qué casos se usa en un backend."
+  - "Ejecutar Redis en Docker y probar comandos con redis-cli."
+  - "Usar los comandos básicos de strings, contadores y expiración."
+  - "Explicar por qué los comandos de Redis son atómicos y qué implica su modelo de ejecución."
+  - "Conectarse a Redis desde Node.js y usar pipelines."
+prerequisites: ["nodejs.introduction"]
+estimatedMinutes: 30
+tags: ["redis", "introducción", "clave-valor", "en memoria", "redis-cli", "docker"]
+version: "1.0.0"
+comparesWith: ["csharp", "java"]
+references:
+  - title: "Redis — Get started"
+    url: "https://redis.io/docs/latest/get-started/"
+  - title: "Redis — Commands"
+    url: "https://redis.io/docs/latest/commands/"
+  - title: "Redis — Data types"
+    url: "https://redis.io/docs/latest/develop/data-types/"
+  - title: "Redis — Pipelining"
+    url: "https://redis.io/docs/latest/develop/use/pipelining/"
+  - title: "node-redis — documentación"
+    url: "https://redis.io/docs/latest/develop/clients/nodejs/"
+  - title: "Valkey — proyecto open source derivado de Redis"
+    url: "https://valkey.io/"
+interviewQuestions:
+  - question: "¿Qué es Redis y para qué lo usarías en un backend?"
+    keyPoints:
+      - "Un almacén clave-valor en memoria con estructuras de datos (strings, hashes, listas, sets, sorted sets, streams)."
+      - "Latencia muy baja y operaciones atómicas sobre esas estructuras."
+      - "Casos: caché, sesiones, rate limiting, contadores, colas livianas, locks, rankings, deduplicación."
+      - "Complementa a la base relacional; no la reemplaza como fuente de verdad."
+  - question: "¿Por qué los comandos de Redis son atómicos?"
+    keyPoints:
+      - "Redis ejecuta los comandos de a uno sobre el dataset (el procesamiento de comandos es secuencial)."
+      - "INCR, SET NX o HINCRBY no pueden intercalarse con otro comando a mitad de ejecución."
+      - "Para varios comandos atómicos juntos se usa MULTI/EXEC o un script Lua."
+      - "Consecuencia: un comando lento (KEYS sobre millones de claves) bloquea a todos los clientes."
+summary:
+  - "Redis es un almacén clave-valor en memoria con estructuras de datos y comandos atómicos."
+  - "Se usa como caché, para sesiones, contadores, rate limiting, locks, rankings y colas livianas."
+  - "Los datos viven en memoria: la persistencia es opcional y configurable; no es la fuente de verdad del negocio."
+  - "SET con EX define un TTL; SET NX escribe sólo si la clave no existe; INCR incrementa atómicamente."
+  - "Los comandos se ejecutan de a uno: atomicidad gratis, pero un comando lento bloquea a todos."
+  - "Desde Node.js se usa un cliente (node-redis o ioredis) con una conexión compartida; pipelines para lotes."
+---
+
+## Qué vas a aprender en este curso
+
+En el stack de una plataforma de agentes, Redis aparece en casi todos los lugares donde la base relacional sería
+demasiado lenta o inadecuada: caché de configuración de agentes, rate limiting de mensajes salientes, deduplicación
+de webhooks, locks para no procesar dos veces una conversación, colas de trabajo.
+
+| Módulo                      | Qué vas a poder hacer                                                               |
+| --------------------------- | ----------------------------------------------------------------------------------- |
+| Introducción                | Ejecutar Redis, usar comandos básicos y conectarte desde Node.js.                   |
+| Tipos de datos y expiración | Elegir la estructura adecuada, usar TTL y entender persistencia y eviction.         |
+| Patrones de uso             | Implementar caché, rate limiting, idempotencia, locks y mensajería con sus límites. |
+| Compromisos                 | Decidir entre Redis, PostgreSQL y un message broker.                                |
+
+## Qué es Redis
+
+**Redis** es un almacén de datos **en memoria** que guarda pares **clave → valor**, donde el valor puede ser una
+**estructura de datos**: un string, un hash, una lista, un set, un sorted set o un stream. Sus características
+centrales:
+
+- **Latencia muy baja** (operaciones típicas por debajo del milisegundo dentro de la misma red), porque los datos
+  están en memoria.
+- **Operaciones atómicas sobre estructuras:** incrementar un contador, agregar a un set, tomar el primero de una
+  lista; sin leer-modificar-escribir desde la aplicación.
+- **Expiración por clave (TTL):** los datos pueden caducar solos.
+- **Persistencia opcional:** puede guardar snapshots o un log de escrituras, pero su fortaleza es la memoria.
+
+Después de un cambio de licencia de Redis en 2024, la comunidad creó **Valkey**, un fork open source compatible con
+los comandos de Redis que ofrecen varios proveedores de nube. Para lo que cubre este curso, son intercambiables.
+
+<MermaidDiagram
+  caption="Redis complementa a PostgreSQL: datos efímeros, rápidos o de coordinación; la verdad del negocio sigue en la base."
+  chart={`
+flowchart LR
+  API["API / workers Node.js"] -->|"fuente de verdad<br/>deudas, pagos, promesas"| PG["PostgreSQL"]
+  API -->|"caché, rate limits,<br/>locks, deduplicación"| R["Redis"]
+  R -.->|"si se pierde, se reconstruye"| PG
+`}
+/>
+
+## Ejecutarlo en Docker y usar redis-cli
+
+```bash
+docker run --name collections-redis -p 6379:6379 -d redis:8
+
+docker exec -it collections-redis redis-cli
+```
+
+```bash
+127.0.0.1:6379> SET agent:config:42 '{"tone":"cordial"}'
+OK
+127.0.0.1:6379> GET agent:config:42
+"{\"tone\":\"cordial\"}"
+127.0.0.1:6379> SET session:abc123 "usr_7" EX 3600      # expira en una hora
+OK
+127.0.0.1:6379> TTL session:abc123
+(integer) 3598
+127.0.0.1:6379> INCR sms:sent:tnt_1:2026-11-19           # contador atómico
+(integer) 1
+127.0.0.1:6379> SET webhook:evt_91 1 NX EX 86400         # sólo si no existe
+OK
+127.0.0.1:6379> SET webhook:evt_91 1 NX EX 86400
+(nil)                                                    # ya existía: duplicado
+127.0.0.1:6379> DEL agent:config:42
+(integer) 1
+```
+
+| Comando                    | Qué hace                                                                                            |
+| -------------------------- | --------------------------------------------------------------------------------------------------- |
+| `SET clave valor`          | Guarda un valor (con `EX` segundos, `PX` milisegundos, `NX` sólo si no existe, `XX` sólo si existe) |
+| `GET clave`                | Lee un valor (`nil` si no existe)                                                                   |
+| `DEL clave`                | Borra                                                                                               |
+| `EXPIRE clave seg`         | Define un TTL                                                                                       |
+| `TTL clave`                | Segundos restantes (`-1` sin expiración, `-2` no existe)                                            |
+| `INCR` / `INCRBY`          | Incrementa un entero atómicamente                                                                   |
+| `EXISTS clave`             | Si existe                                                                                           |
+| `SCAN cursor MATCH patrón` | Recorre claves de a poco (en lugar de `KEYS`)                                                       |
+
+### Convención de nombres
+
+Las claves se nombran con prefijos separados por `:` que expresan una jerarquía: `tenant:42:agent:7:config`,
+`ratelimit:sms:tnt_1:2026-11-19T10`. En un sistema multi-tenant, **el tenant forma parte de la clave**: una clave de
+caché sin tenant puede devolver datos de otro cliente.
+
+## El modelo de ejecución: comandos atómicos
+
+Redis procesa los comandos que modifican y leen datos **de a uno por vez** (el núcleo de ejecución de comandos es
+secuencial, aunque las versiones modernas usan hilos para la I/O de red). Dos consecuencias opuestas:
+
+1. **Atomicidad gratis:** `INCR`, `SET NX` o `HINCRBY` no pueden intercalarse con otro comando a mitad de camino. Un
+   contador incrementado por mil clientes a la vez termina en el número correcto.
+2. **Un comando lento bloquea a todos:** `KEYS *` sobre millones de claves, un `SMEMBERS` de un set gigante o un script
+   Lua largo detienen al resto de los clientes mientras corren. Se usa `SCAN` para recorrer y se evita trabajo O(N)
+   sobre colecciones grandes.
+
+Para ejecutar **varios comandos como una unidad atómica** existen `MULTI`/`EXEC` (transacciones) y los **scripts
+Lua** (`EVAL`), que se ven en la lección de patrones.
+
+<FlowDiagram
+  steps={[
+    { title: "Clientes concurrentes", detail: "Cientos de conexiones envían comandos." },
+    { title: "Cola de comandos", detail: "Redis los ejecuta de a uno sobre el dataset." },
+    { title: "Cada comando es atómico", detail: "INCR, SET NX, LPUSH no se intercalan.", tone: "runtime" },
+    {
+      title: "Un comando lento",
+      detail: "Bloquea a todos mientras dura: evitar KEYS y operaciones O(N) grandes.",
+      tone: "boundary",
+    },
+  ]}
+  caption="La ejecución secuencial da atomicidad y exige que cada comando sea rápido."
+/>
+
+## Usarlo desde Node.js
+
+```ts
+import { createClient } from "redis";
+
+const redis = createClient({ url: process.env.REDIS_URL });
+redis.on("error", (error) => logger.error({ error }, "redis_error")); // evita que un error sin listener tire el proceso
+await redis.connect();
+
+await redis.set(`tenant:${tenantId}:agent:${agentId}:config`, JSON.stringify(config), { EX: 300 });
+const cached = await redis.get(`tenant:${tenantId}:agent:${agentId}:config`);
+const sentToday = await redis.incr(`sms:sent:${tenantId}:${today}`);
+```
+
+- **Una conexión compartida** por proceso suele alcanzar: Redis multiplexa bien y el cliente encola los comandos.
+- **Pipelining:** enviar varios comandos sin esperar cada respuesta reduce los viajes de red. Los clientes lo hacen
+  automáticamente con comandos concurrentes, o explícitamente con `multi()`/pipelines.
+- Los valores son **strings o bytes**: los objetos se serializan (JSON) y se **validan al leer**, como cualquier dato
+  externo.
+- Clientes habituales: **node-redis** (oficial) e **ioredis**.
+
+## Comparación con C# y Java
+
+| Concepto          | .NET                                       | Java                     | Node.js                                     |
+| ----------------- | ------------------------------------------ | ------------------------ | ------------------------------------------- |
+| Cliente           | StackExchange.Redis                        | Lettuce, Jedis, Redisson | node-redis, ioredis                         |
+| Caché distribuida | `IDistributedCache` con Redis, HybridCache | Spring Cache con Redis   | Cliente directo o librerías de caché        |
+| Sesiones          | Session state con Redis                    | Spring Session con Redis | express-session/Auth.js con adaptador Redis |
+| Caché en proceso  | `IMemoryCache`                             | Caffeine                 | `Map` con LRU (lru-cache)                   |
+
+## Errores frecuentes
+
+- **Usar Redis como fuente de verdad** de datos de negocio sin persistencia ni respaldo.
+- **`KEYS *` en producción.**
+- **Claves sin tenant** en sistemas multi-tenant.
+- **Datos sin TTL** que crecen hasta agotar la memoria.
+- **Leer-modificar-escribir desde la aplicación** en lugar de usar comandos atómicos (`INCR`, `SET NX`).
+- **No escuchar el evento `error`** del cliente en Node.js.
+- **Una conexión nueva por request.**
+
+## Ejercicio interactivo
+
+<KnowledgeCheck
+  id="redis.introduction.q1"
+  question="Mil requests concurrentes ejecutan `INCR sms:sent:tnt_1:2026-11-19`. ¿Cuál es el valor final si empezó en 0?"
+  options={[
+    {
+      text: "Un valor menor a 1.000 por condiciones de carrera.",
+      explanation: "INCR es atómico: no hay lecturas intercaladas.",
+    },
+    {
+      text: "Exactamente 1.000.",
+      correct: true,
+      explanation: "Correcto. Redis ejecuta los comandos de a uno y INCR lee y escribe en un solo paso.",
+    },
+    {
+      text: "Depende de la cantidad de hilos del servidor.",
+      explanation: "La ejecución de comandos sobre los datos es secuencial.",
+    },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="redis.introduction.q2"
+  question="¿Qué devuelve `SET webhook:evt_91 1 NX EX 86400` si la clave ya existe?"
+  options={[
+    { text: "OK, y sobrescribe el valor.", explanation: "NX impide escribir si la clave existe." },
+    {
+      text: "nil: no escribe, lo que indica que el evento ya se había registrado.",
+      correct: true,
+      explanation:
+        "Correcto. Es una forma atómica de detectar duplicados (con sus límites, que se ven en patrones).",
+    },
+    { text: "Un error.", explanation: "No es un error: simplemente no se escribe." },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="redis.introduction.q3"
+  question="¿Por qué se desaconseja `KEYS tenant:*` en producción?"
+  options={[
+    { text: "Porque no admite patrones.", explanation: "Sí admite patrones; el problema es su costo." },
+    {
+      text: "Porque recorre todas las claves en un solo comando y bloquea a los demás clientes mientras dura.",
+      correct: true,
+      explanation: "Correcto. SCAN recorre de a poco sin bloquear.",
+    },
+    { text: "Porque borra las claves.", explanation: "KEYS sólo lista." },
+  ]}
+/>

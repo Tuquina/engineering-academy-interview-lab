@@ -1,0 +1,287 @@
+---
+id: postgresql.indexes
+moduleId: postgresql.queries-indexes
+title: "Índices y planes de ejecución: B-tree, compuestos, parciales, de cobertura, EXPLAIN y optimización"
+description: "Cómo hacer rápidas las consultas con evidencia: qué es un índice B-tree y cómo lo usa el planificador, índices compuestos (y por qué importa el orden de las columnas), parciales, de cobertura y por expresión, otros tipos (GIN, BRIN), selectividad y estadísticas, cómo leer EXPLAIN ANALYZE y cómo detectar y resolver el problema N+1."
+difficulty: intermediate
+order: 2
+objectives:
+  - "Explicar cómo funciona un índice B-tree y qué consultas puede acelerar."
+  - "Diseñar índices compuestos respetando la regla del prefijo izquierdo."
+  - "Usar índices parciales, de cobertura y por expresión cuando corresponde."
+  - "Leer un plan con EXPLAIN ANALYZE e identificar el nodo costoso."
+  - "Explicar selectividad y estadísticas, y por qué a veces el planificador no usa un índice."
+  - "Detectar y resolver el problema N+1."
+prerequisites: ["postgresql.queries"]
+estimatedMinutes: 45
+tags: ["índices", "b-tree", "explain", "query planner", "selectividad", "n+1", "performance"]
+version: "1.0.0"
+comparesWith: ["csharp", "java"]
+references:
+  - title: "PostgreSQL — Indexes"
+    url: "https://www.postgresql.org/docs/current/indexes.html"
+  - title: "PostgreSQL — Using EXPLAIN"
+    url: "https://www.postgresql.org/docs/current/using-explain.html"
+  - title: "PostgreSQL — Index-Only Scans and Covering Indexes"
+    url: "https://www.postgresql.org/docs/current/indexes-index-only-scans.html"
+  - title: "PostgreSQL — Partial Indexes"
+    url: "https://www.postgresql.org/docs/current/indexes-partial.html"
+  - title: "Use The Index, Luke"
+    url: "https://use-the-index-luke.com/"
+interviewQuestions:
+  - question: "¿Cómo decidís el orden de las columnas en un índice compuesto?"
+    keyPoints:
+      - "Un índice (a, b, c) sirve para filtros sobre a, sobre a y b, o sobre a, b y c: la regla del prefijo izquierdo."
+      - "Primero las columnas filtradas por igualdad, después las de rango u orden."
+      - "Si la consulta ordena, poner las columnas del ORDER BY al final permite evitar el sort."
+      - "La selectividad importa, pero el patrón de las consultas reales es lo que decide."
+  - question: "¿Qué mirás en un EXPLAIN ANALYZE?"
+    keyPoints:
+      - "El nodo con más tiempo real y si es un Seq Scan sobre una tabla grande con un filtro selectivo."
+      - "Diferencias grandes entre filas estimadas y reales: estadísticas desactualizadas o correlaciones."
+      - "Rows Removed by Filter alto, sorts en disco, loops anidados con muchas iteraciones."
+      - "Con BUFFERS, cuántas páginas se leyeron de memoria o de disco."
+  - question: "¿Por qué no crear un índice para cada columna?"
+    keyPoints:
+      - "Cada índice ocupa espacio y se actualiza en cada INSERT, UPDATE y DELETE: escrituras más lentas."
+      - "Muchos índices de una columna no reemplazan a un compuesto bien diseñado."
+      - "Los índices que no se usan sólo cuestan; se revisan con pg_stat_user_indexes."
+summary:
+  - "Un índice B-tree mantiene valores ordenados y permite buscar, filtrar rangos y ordenar sin recorrer la tabla."
+  - "Índice compuesto: igualdades primero, rangos y orden después; regla del prefijo izquierdo."
+  - "Parcial (WHERE ...) para subconjuntos consultados; de cobertura (INCLUDE) para index-only scans; por expresión para funciones."
+  - "GIN para JSONB, arrays y texto completo; BRIN para tablas enormes ordenadas por tiempo."
+  - "El planificador elige por costo estimado con estadísticas; un índice poco selectivo puede no usarse."
+  - "EXPLAIN ANALYZE ejecuta la consulta y muestra el plan con tiempos y filas reales."
+  - "N+1: una consulta por cada fila de otra; se resuelve con joins o consultas por lote."
+---
+
+## ¿Qué problema resuelve?
+
+El panel de supervisores muestra "deudas vencidas de la campaña, ordenadas por saldo". Con 10.000 deudas tardaba 20
+ms; con 8 millones tarda 9 segundos. La consulta no cambió: cambió el volumen. Sin un índice adecuado, PostgreSQL
+**lee la tabla entera** para encontrar unas pocas filas. Esta lección explica cómo se diseñan índices **a partir de
+las consultas** y cómo se verifica con evidencia que funcionan.
+
+## Qué es un índice B-tree
+
+Un índice es una **estructura separada** que mantiene los valores de una o más columnas **ordenados**, con punteros a
+las filas de la tabla. El tipo por defecto, **B-tree**, es un árbol balanceado que permite:
+
+- Búsquedas por igualdad (`=`) y por rango (`<`, `>`, `BETWEEN`).
+- Devolver filas ya ordenadas (`ORDER BY`) sin un paso de sort.
+- Encontrar valores con `IS NULL` y prefijos de texto (con el operador adecuado).
+
+<MermaidDiagram
+  caption="Un B-tree se recorre desde la raíz hasta las hojas en pocos pasos, incluso con millones de filas."
+  chart={`
+flowchart TD
+  R["Raíz<br/>antes de 2026-06 o desde 2026-06"] --> N1["Nodo<br/>2026-01 ... 2026-05"]
+  R --> N2["Nodo<br/>2026-06 ... 2026-11"]
+  N1 --> H1["Hojas ordenadas<br/>valor → ubicación de la fila"]
+  N2 --> H2["Hojas ordenadas<br/>valor → ubicación de la fila"]
+  H2 --> T["Tabla (heap)<br/>filas completas"]
+`}
+/>
+
+El costo: cada índice **ocupa espacio** y **se actualiza en cada escritura**. Una tabla con diez índices escribe
+mucho más lento que una con dos.
+
+## Índices compuestos y el orden de las columnas
+
+```sql
+-- Consulta frecuente del panel
+SELECT id, customer_id, balance_cents
+  FROM debts
+ WHERE tenant_id = $1 AND status = 'pending' AND due_date < $2
+ ORDER BY due_date
+ LIMIT 100;
+
+-- Índice que la soporta: igualdades primero, después la columna de rango y orden
+CREATE INDEX debts_tenant_status_due_idx ON debts (tenant_id, status, due_date);
+```
+
+La **regla del prefijo izquierdo**: un índice en `(a, b, c)` sirve para filtros sobre `a`, sobre `a, b` y sobre
+`a, b, c`, pero en general **no** para filtros sólo sobre `b` o sobre `c`. Es como una guía telefónica ordenada por
+apellido y nombre: buscar por apellido es rápido; buscar sólo por nombre obliga a leerla toda.
+
+Criterio práctico de orden:
+
+1. Columnas filtradas por **igualdad** (`tenant_id`, `status`).
+2. La columna de **rango** (`due_date < ...`) o de **orden** (`ORDER BY due_date`).
+3. Si hace falta, columnas extra para cubrir la consulta (`INCLUDE`).
+
+## Índices parciales, de cobertura y por expresión
+
+```sql
+-- Parcial: sólo las deudas abiertas, que son las que se consultan (y un índice más chico)
+CREATE INDEX debts_open_due_idx ON debts (tenant_id, due_date) WHERE status <> 'paid';
+
+-- De cobertura: incluye columnas para responder sin ir a la tabla (index-only scan)
+CREATE INDEX debts_tenant_due_cover_idx ON debts (tenant_id, due_date) INCLUDE (balance_cents, customer_id);
+
+-- Por expresión: búsquedas por email sin distinguir mayúsculas
+CREATE INDEX customers_email_lower_idx ON customers (lower(email));
+SELECT * FROM customers WHERE lower(email) = lower($1);   -- la consulta debe usar la misma expresión
+```
+
+| Tipo de índice | Cuándo                                                              |
+| -------------- | ------------------------------------------------------------------- |
+| Parcial        | Se consulta siempre un subconjunto (abiertas, activas, no borradas) |
+| De cobertura   | Consultas muy frecuentes que leen pocas columnas                    |
+| Por expresión  | Filtros sobre funciones (`lower`, `date_trunc`, campos de JSONB)    |
+| Único parcial  | Reglas de unicidad condicional (lección de modelado)                |
+
+### Otros tipos
+
+| Tipo                      | Para qué                                                                                             |
+| ------------------------- | ---------------------------------------------------------------------------------------------------- |
+| GIN                       | JSONB (`@>`), arrays, búsqueda de texto completo, trigramas (`pg_trgm`)                              |
+| GiST                      | Rangos, geometrías, exclusión de solapamientos                                                       |
+| BRIN                      | Tablas enormes con datos correlacionados con el orden físico (eventos por tiempo): índices diminutos |
+| Hash                      | Sólo igualdad; rara vez mejor que B-tree                                                             |
+| HNSW / IVFFlat (pgvector) | Búsqueda aproximada de vecinos para embeddings                                                       |
+
+## Selectividad, estadísticas y el planificador
+
+PostgreSQL tiene un **planificador basado en costos**: estima cuántas filas devuelve cada paso usando
+**estadísticas** de las columnas (que recolecta `ANALYZE`, automáticamente con autovacuum) y elige el plan más barato
+**estimado**.
+
+- La **selectividad** es qué fracción de filas cumple un filtro. `status = 'paid'` sobre una tabla donde el 90 % está
+  pagado es **poco selectivo**: leer la tabla secuencialmente puede ser más barato que saltar del índice a la tabla
+  millones de veces. Por eso, a veces, **el planificador ignora un índice a propósito**.
+- Si las estimaciones están muy lejos de la realidad (estadísticas viejas, columnas correlacionadas), el plan puede
+  ser malo. Se corre `ANALYZE` y, para correlaciones, se pueden crear estadísticas extendidas (`CREATE STATISTICS`).
+
+## EXPLAIN y EXPLAIN ANALYZE
+
+`EXPLAIN` muestra el plan elegido; `EXPLAIN ANALYZE` **además ejecuta** la consulta y muestra tiempos y filas reales
+(cuidado con `UPDATE` y `DELETE`: se ejecutan de verdad, conviene envolverlos en `BEGIN` ... `ROLLBACK`).
+
+```sql
+EXPLAIN (ANALYZE, BUFFERS)
+SELECT id, balance_cents FROM debts
+ WHERE tenant_id = 3 AND status = 'pending' AND due_date < '2026-11-01'
+ ORDER BY due_date LIMIT 100;
+```
+
+```text
+-- Sin el índice adecuado
+Limit  (actual time=8412.3..8412.4 rows=100 loops=1)
+  ->  Sort  (actual time=8412.3..8412.3 rows=100 loops=1)
+        Sort Key: due_date
+        ->  Seq Scan on debts  (actual time=0.02..8301.7 rows=412339 loops=1)
+              Filter: ((tenant_id = 3) AND (status = 'pending') AND (due_date < '2026-11-01'))
+              Rows Removed by Filter: 7587661
+
+-- Con el índice (tenant_id, status, due_date)
+Limit  (actual time=0.04..0.31 rows=100 loops=1)
+  ->  Index Scan using debts_tenant_status_due_idx on debts  (actual time=0.04..0.30 rows=100 loops=1)
+        Index Cond: ((tenant_id = 3) AND (status = 'pending') AND (due_date < '2026-11-01'))
+```
+
+| Nodo / señal                                | Qué indica                                                                      |
+| ------------------------------------------- | ------------------------------------------------------------------------------- |
+| `Seq Scan` en tabla grande                  | Lectura completa; malo si el filtro es selectivo                                |
+| `Index Scan`                                | Recorre el índice y va a la tabla por cada fila                                 |
+| `Index Only Scan`                           | Responde sólo con el índice (cobertura)                                         |
+| `Bitmap Heap Scan`                          | Combina índices y lee las páginas de la tabla en orden                          |
+| `Nested Loop` con muchos `loops`            | Un join que repite la búsqueda muchas veces: falta un índice en el lado interno |
+| `Rows Removed by Filter` alto               | Se leyeron muchas filas para descartarlas                                       |
+| `Sort Method: external merge`               | El sort no entró en memoria (`work_mem`)                                        |
+| Filas estimadas muy distintas de las reales | Estadísticas desactualizadas o correlaciones                                    |
+
+En producción, la extensión **`pg_stat_statements`** muestra qué consultas consumen más tiempo total: es el punto de
+partida para saber **qué** optimizar.
+
+## El problema N+1
+
+```ts
+// ❌ N+1: 1 consulta para las deudas + 1 por cada deuda para su cliente
+const debts = await db.query("SELECT * FROM debts WHERE campaign_id = $1", [campaignId]);
+for (const debt of debts.rows) {
+  debt.customer = (await db.query("SELECT * FROM customers WHERE id = $1", [debt.customer_id])).rows[0];
+}
+
+// ✅ Una consulta con join, o dos consultas por lote
+const customers = await db.query("SELECT * FROM customers WHERE id = ANY($1)", [
+  debts.rows.map((d) => d.customer_id),
+]);
+```
+
+El N+1 es la causa más común de endpoints lentos en aplicaciones con ORM, porque la carga perezosa de relaciones lo
+esconde. Se detecta en las trazas (decenas de spans de consultas idénticas) o en los logs de consultas.
+
+## Comparación con C# y Java
+
+| Tema                   | SQL Server / .NET                  | Java / JPA                                   | PostgreSQL                              |
+| ---------------------- | ---------------------------------- | -------------------------------------------- | --------------------------------------- |
+| Plan de ejecución      | Execution plan (SSMS)              | Plan de la base subyacente                   | `EXPLAIN (ANALYZE, BUFFERS)`            |
+| Índice de cobertura    | `INCLUDE` en SQL Server            | Según la base                                | `INCLUDE`                               |
+| Índice filtrado        | Filtered index                     | Según la base                                | Índice parcial (`WHERE`)                |
+| Consultas más costosas | Query Store                        | Según la base                                | `pg_stat_statements`                    |
+| N+1 en el ORM          | Lazy loading de EF Core; `Include` | `FetchType.LAZY`; `JOIN FETCH`, `@BatchSize` | Joins explícitos, `ANY($1)`, DataLoader |
+
+## Errores frecuentes
+
+- **Indexar columnas sueltas "por si acaso"** en lugar de diseñar a partir de las consultas.
+- **Índices compuestos con el orden equivocado.**
+- **Filtrar con una función** (`lower(email)`) sin un índice por expresión.
+- **Optimizar sin `EXPLAIN ANALYZE`** ni datos de volumen realista.
+- **Ignorar las escrituras**: cada índice extra las encarece.
+- **Foreign keys sin índice** en el lado hijo.
+- **N+1 escondidos en el ORM.**
+
+## Ejercicio interactivo
+
+<KnowledgeCheck
+  id="postgresql.indexes.q1"
+  question="Existe el índice `(tenant_id, status, due_date)`. ¿Cuál de estas consultas NO puede aprovecharlo bien?"
+  options={[
+    {
+      text: "`WHERE tenant_id = 3 AND status = 'pending'`",
+      explanation: "Usa el prefijo (tenant_id, status).",
+    },
+    {
+      text: "`WHERE tenant_id = 3 AND status = 'pending' AND due_date < '2026-11-01'`",
+      explanation: "Usa las tres columnas en el orden ideal.",
+    },
+    {
+      text: "`WHERE due_date < '2026-11-01'`",
+      correct: true,
+      explanation:
+        "Correcto. due_date no es prefijo del índice: por la regla del prefijo izquierdo, en general no sirve.",
+    },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="postgresql.indexes.q2"
+  question="Un EXPLAIN ANALYZE muestra `Seq Scan ... Rows Removed by Filter: 7.587.661` para devolver 100 filas. ¿Qué indica?"
+  options={[
+    { text: "Que la consulta es óptima.", explanation: "Leyó millones de filas para devolver 100." },
+    {
+      text: "Que falta un índice que soporte el filtro (y el orden) de la consulta.",
+      correct: true,
+      explanation:
+        "Correcto. Un filtro selectivo resuelto con lectura completa es la señal clásica de un índice faltante.",
+    },
+    { text: "Que hay que aumentar el LIMIT.", explanation: "El costo está en el filtro, no en el límite." },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="postgresql.indexes.q3"
+  question="Creaste un índice sobre `status`, pero el planificador lo ignora en `WHERE status = 'paid'`. ¿Cuál es la explicación más probable?"
+  options={[
+    { text: "PostgreSQL no usa índices con texto.", explanation: "Los usa sin problema." },
+    {
+      text: "La mayoría de las filas son 'paid': el filtro es poco selectivo y leer la tabla es más barato.",
+      correct: true,
+      explanation:
+        "Correcto. El planificador elige por costo estimado; un índice poco selectivo puede no convenir.",
+    },
+    { text: "Falta reiniciar la base.", explanation: "Los índices se usan apenas se crean." },
+  ]}
+/>

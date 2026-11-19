@@ -1,0 +1,295 @@
+---
+id: redis.data-types
+moduleId: redis.data-types
+title: "Tipos de datos, expiración, persistencia y eviction"
+description: "Las estructuras de datos de Redis y cuándo usar cada una (strings, hashes, lists, sets, sorted sets y streams), cómo funciona la expiración, qué opciones de persistencia existen (RDB y AOF) y qué pasa cuando se llena la memoria según la política de eviction."
+difficulty: intermediate
+order: 1
+objectives:
+  - "Elegir la estructura de Redis adecuada para cada problema."
+  - "Usar hashes, sets, sorted sets y lists con sus comandos principales y su complejidad."
+  - "Explicar Redis Streams y los consumer groups."
+  - "Configurar expiración y entender cómo se eliminan las claves vencidas."
+  - "Comparar RDB y AOF y elegir una política de eviction según el uso."
+prerequisites: ["redis.introduction"]
+estimatedMinutes: 40
+tags: ["redis", "hashes", "sorted sets", "streams", "ttl", "persistencia", "eviction"]
+version: "1.0.0"
+comparesWith: ["csharp", "java"]
+references:
+  - title: "Redis — Data types"
+    url: "https://redis.io/docs/latest/develop/data-types/"
+  - title: "Redis — Streams"
+    url: "https://redis.io/docs/latest/develop/data-types/streams/"
+  - title: "Redis — EXPIRE"
+    url: "https://redis.io/docs/latest/commands/expire/"
+  - title: "Redis — Persistence"
+    url: "https://redis.io/docs/latest/operate/oss_and_stack/management/persistence/"
+  - title: "Redis — Key eviction"
+    url: "https://redis.io/docs/latest/develop/reference/eviction/"
+interviewQuestions:
+  - question: "¿Qué estructura de Redis usarías para un ranking de agentes por promesas cumplidas?"
+    keyPoints:
+      - "Un sorted set: cada miembro tiene un score y se mantiene ordenado."
+      - "ZINCRBY para sumar puntos y ZRANGE con REV o ZREVRANGE para el top N, en tiempo logarítmico."
+      - "ZRANK para la posición de un agente."
+  - question: "¿Qué pasa cuando Redis se queda sin memoria?"
+    keyPoints:
+      - "Depende de maxmemory-policy: noeviction rechaza escrituras; las políticas LRU, LFU o TTL eliminan claves."
+      - "Para una caché, allkeys-lru o allkeys-lfu; si conviven datos sin TTL importantes, volatile-*."
+      - "Si se usa para colas o locks, noeviction evita perder datos silenciosamente."
+  - question: "¿Redis pierde datos si se reinicia?"
+    keyPoints:
+      - "Depende de la persistencia: sin ella, sí."
+      - "RDB guarda snapshots periódicos: se pierden los cambios desde el último snapshot."
+      - "AOF registra cada escritura; con fsync cada segundo se puede perder hasta un segundo."
+      - "Aun con persistencia, no reemplaza a una base transaccional como fuente de verdad."
+summary:
+  - "Strings: valores simples, JSON serializado, contadores."
+  - "Hashes: objetos con campos (HSET, HGET, HINCRBY)."
+  - "Lists: colas y pilas (LPUSH, RPOP, BLPOP); Sets: pertenencia y unicidad (SADD, SISMEMBER)."
+  - "Sorted sets: rankings, ventanas temporales y prioridades (ZADD, ZRANGE, ZREMRANGEBYSCORE)."
+  - "Streams: logs append-only con consumer groups y confirmación (XADD, XREADGROUP, XACK)."
+  - "TTL por clave; las claves vencidas se eliminan de forma perezosa y con muestreo activo."
+  - "Persistencia: RDB (snapshots) y AOF (log de escrituras); eviction según maxmemory-policy."
+---
+
+## ¿Qué problema resuelve?
+
+Usar Redis sólo con `SET` y `GET` de JSON desperdicia su mayor ventaja: **estructuras de datos con operaciones
+atómicas**. Un ranking de agentes, un conjunto de deudores ya contactados hoy, una ventana deslizante de requests o
+una cola de mensajes salientes tienen una estructura natural en Redis que evita leer, modificar y reescribir desde la
+aplicación (y las carreras que eso trae).
+
+## Las estructuras de datos
+
+<MermaidDiagram
+  caption="Cada estructura resuelve un tipo de problema; elegirla bien evita lógica y carreras en la aplicación."
+  chart={`
+flowchart TB
+  K["Clave"] --> S["String<br/>valor, JSON, contador"]
+  K --> H["Hash<br/>objeto con campos"]
+  K --> L["List<br/>cola o pila"]
+  K --> SE["Set<br/>miembros únicos"]
+  K --> Z["Sorted set<br/>miembros con score ordenados"]
+  K --> X["Stream<br/>log append-only con consumidores"]
+`}
+/>
+
+### Strings
+
+El tipo básico: texto, números o bytes (hasta 512 MB, aunque conviene mucho menos).
+
+```bash
+SET tenant:1:agent:7:config '{"tone":"cordial","model":"..."}' EX 300
+INCRBY campaign:91:sent 25
+GETDEL otp:usr_7                  # leer y borrar en un paso
+```
+
+### Hashes
+
+Un objeto con campos; permite leer o modificar un campo sin reescribir todo:
+
+```bash
+HSET conversation:c_88 stage negotiating last_message_at 1795070000 turns 6
+HINCRBY conversation:c_88 turns 1
+HGET conversation:c_88 stage
+HGETALL conversation:c_88
+```
+
+### Lists
+
+Listas enlazadas: inserción y extracción en los extremos en O(1). Sirven como colas simples:
+
+```bash
+LPUSH outbound:sms '{"to":"...","text":"..."}'     # productor
+BRPOP outbound:sms 5                               # consumidor: espera hasta 5 s si está vacía
+LRANGE recent:events:c_88 0 9                      # últimos 10 eventos
+LTRIM recent:events:c_88 0 99                      # conservar sólo los 100 más recientes
+```
+
+Una lista como cola **no tiene confirmación**: si el consumidor toma un mensaje y se cae, se pierde. Para colas
+confiables se usan Streams (o patrones como `LMOVE` a una lista de "en proceso").
+
+### Sets
+
+Colecciones de miembros **únicos**, con pertenencia en O(1):
+
+```bash
+SADD contacted:tnt_1:2026-11-19 cus_42 cus_77
+SISMEMBER contacted:tnt_1:2026-11-19 cus_42        # 1: ya contactado hoy
+SCARD contacted:tnt_1:2026-11-19                   # cuántos
+SINTER campaign:91:targets optout:tnt_1            # intersección: objetivos que pidieron no ser contactados
+```
+
+### Sorted sets
+
+Miembros únicos con un **score** numérico, siempre ordenados. Son la estructura más versátil:
+
+```bash
+ZINCRBY ranking:agents:2026-11 1 agent_7                 # sumar una promesa cumplida
+ZRANGE ranking:agents:2026-11 0 9 REV WITHSCORES         # top 10
+ZADD scheduled:reminders 1795080000 reminder_551         # score = timestamp de ejecución
+ZRANGE scheduled:reminders -inf 1795075000 BYSCORE       # los que ya vencieron
+ZREMRANGEBYSCORE ratelimit:usr_7 0 1795069940            # quitar entradas fuera de la ventana
+```
+
+| Uso                                  | Score                     |
+| ------------------------------------ | ------------------------- |
+| Rankings                             | Puntaje                   |
+| Tareas programadas                   | Timestamp de ejecución    |
+| Ventanas deslizantes (rate limiting) | Timestamp de cada request |
+| Colas con prioridad                  | Prioridad                 |
+
+### Streams
+
+Un **stream** es un **log append-only** de entradas con ID creciente. Admite **consumer groups**: varios consumidores
+se reparten las entradas y cada una debe **confirmarse** (`XACK`); las no confirmadas quedan pendientes y se pueden
+reasignar si un consumidor cae.
+
+```bash
+XADD events:payments * debt_id debt_42 amount 4000000        # * = ID automático
+XGROUP CREATE events:payments notifier $ MKSTREAM
+XREADGROUP GROUP notifier worker-1 COUNT 10 BLOCK 5000 STREAMS events:payments >
+XACK events:payments notifier 1795070000000-0
+XPENDING events:payments notifier                             # entregadas y no confirmadas
+```
+
+## Complejidad de los comandos
+
+| Operación                                | Complejidad                           |
+| ---------------------------------------- | ------------------------------------- |
+| `GET`, `SET`, `HGET`, `SADD`, `LPUSH`    | O(1)                                  |
+| `ZADD`, `ZRANK`, `ZINCRBY`               | O(log N)                              |
+| `ZRANGE` (M elementos)                   | O(log N + M)                          |
+| `HGETALL`, `SMEMBERS`, `LRANGE` completo | O(N): cuidado con colecciones grandes |
+| `KEYS`                                   | O(N) sobre todas las claves: evitar   |
+
+## Expiración
+
+Cualquier clave puede tener un **TTL**. Al vencer, deja de ser visible.
+
+```bash
+SET session:abc "usr_7" EX 3600
+EXPIRE contacted:tnt_1:2026-11-19 172800     # el set diario vive dos días
+PERSIST session:abc                          # quitar la expiración
+```
+
+- El TTL se define **por clave**, no por campo de un hash ni por miembro de un set (para eso se usan claves separadas
+  o sorted sets con timestamps). Versiones recientes agregaron comandos de expiración por campo de hash (`HEXPIRE`).
+- Las claves vencidas se eliminan de forma **perezosa** (al intentar leerlas) y con un proceso **activo** que muestrea
+  claves con TTL periódicamente.
+- **Toda clave de caché tiene TTL.** Una caché sin TTL es una fuga de memoria con otro nombre.
+
+## Persistencia
+
+| Modo             | Cómo funciona                                    | Posible pérdida ante una caída                 |
+| ---------------- | ------------------------------------------------ | ---------------------------------------------- |
+| Sin persistencia | Todo en memoria                                  | Todo                                           |
+| **RDB**          | Snapshots periódicos del dataset                 | Lo escrito desde el último snapshot            |
+| **AOF**          | Log de cada escritura; se reproduce al reiniciar | Según `appendfsync`: hasta ~1 s con `everysec` |
+| RDB + AOF        | Ambos                                            | Como AOF, con reinicios más rápidos            |
+
+Aun con AOF, Redis **no es una base transaccional**: no tiene constraints, relaciones ni transacciones con rollback.
+Lo que se guarda en Redis debería poder **reconstruirse** desde la fuente de verdad, salvo que se haya decidido
+conscientemente lo contrario (por ejemplo, una cola de Streams con AOF y réplicas).
+
+## Eviction: cuando se llena la memoria
+
+Con `maxmemory` configurado, al llegar al límite Redis aplica la **`maxmemory-policy`**:
+
+| Política                                         | Qué hace                                      | Uso típico                                            |
+| ------------------------------------------------ | --------------------------------------------- | ----------------------------------------------------- |
+| `noeviction`                                     | Rechaza escrituras con error                  | Colas, locks, datos que no deben perderse en silencio |
+| `allkeys-lru`                                    | Elimina las claves menos usadas recientemente | Caché general                                         |
+| `allkeys-lfu`                                    | Elimina las menos usadas con frecuencia       | Caché con claves muy populares                        |
+| `volatile-lru` / `volatile-lfu` / `volatile-ttl` | Sólo entre claves con TTL                     | Caché y datos persistentes en la misma instancia      |
+
+<FlowDiagram
+  steps={[
+    { title: "Escritura nueva", detail: "La memoria está en maxmemory." },
+    { title: "Política", detail: "maxmemory-policy decide qué hacer." },
+    { title: "Caché", detail: "allkeys-lru/lfu: se descartan claves poco usadas.", tone: "runtime" },
+    {
+      title: "Colas y locks",
+      detail: "noeviction: falla la escritura en lugar de perder datos.",
+      tone: "boundary",
+    },
+  ]}
+  caption="Mezclar caché y datos críticos en la misma instancia complica la elección de la política."
+/>
+
+Una práctica común es **separar instancias**: una para caché (con eviction) y otra para colas, locks y rate limiting
+(sin eviction).
+
+## Comparación con C# y Java
+
+| Estructura de Redis | Equivalente en memoria (.NET) | Equivalente en memoria (Java)       |
+| ------------------- | ----------------------------- | ----------------------------------- |
+| Hash                | `Dictionary<string, string>`  | `Map<String, String>`               |
+| List                | `LinkedList<T>`, `Queue<T>`   | `Deque<T>`                          |
+| Set                 | `HashSet<T>`                  | `Set<T>`                            |
+| Sorted set          | `SortedSet<T>` con score      | `TreeMap` / `ConcurrentSkipListMap` |
+| Stream              | Channels / Kafka              | Kafka, Reactive streams             |
+
+La diferencia: en Redis estas estructuras son **compartidas entre procesos y réplicas** y sus operaciones son
+atómicas, lo que las hace aptas para coordinación distribuida.
+
+## Errores frecuentes
+
+- **Todo como string JSON**, leyendo y reescribiendo objetos completos.
+- **Listas como colas confiables** sin confirmación.
+- **Comandos O(N) sobre colecciones gigantes** (`HGETALL`, `SMEMBERS`).
+- **Claves de caché sin TTL.**
+- **Asumir que la persistencia convierte a Redis en la fuente de verdad.**
+- **`allkeys-lru` en una instancia que también guarda locks o colas.**
+
+## Ejercicio interactivo
+
+<KnowledgeCheck
+  id="redis.data-types.q1"
+  question="Necesitás programar recordatorios para ejecutarse en un momento dado y que un worker tome los vencidos. ¿Qué estructura usás?"
+  options={[
+    { text: "Una lista.", explanation: "No permite consultar eficientemente por momento de ejecución." },
+    {
+      text: "Un sorted set con el timestamp de ejecución como score.",
+      correct: true,
+      explanation: "Correcto. ZRANGE ... BYSCORE devuelve los vencidos en orden, en tiempo logarítmico.",
+    },
+    { text: "Un hash por recordatorio.", explanation: "Guarda los datos, pero no ofrece el orden temporal." },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="redis.data-types.q2"
+  question="Un consumidor toma un mensaje de una lista con RPOP y se cae antes de procesarlo. ¿Qué pasa con el mensaje?"
+  options={[
+    { text: "Vuelve a la lista automáticamente.", explanation: "RPOP lo quitó: no hay confirmación." },
+    {
+      text: "Se pierde. Para colas con confirmación se usan Streams con consumer groups y XACK.",
+      correct: true,
+      explanation: "Correcto. Los pendientes no confirmados de un stream se pueden reasignar.",
+    },
+    {
+      text: "Queda bloqueado hasta que el consumidor vuelva.",
+      explanation: "Las listas no tienen ese mecanismo.",
+    },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="redis.data-types.q3"
+  question="Una instancia de Redis guarda caché y también los locks de procesamiento de conversaciones, con `allkeys-lru`. ¿Qué riesgo hay?"
+  options={[
+    {
+      text: "Ninguno: LRU sólo borra caché.",
+      explanation: "allkeys-* considera todas las claves, incluidas las de locks.",
+    },
+    {
+      text: "Bajo presión de memoria puede descartar un lock y permitir procesamiento duplicado.",
+      correct: true,
+      explanation: "Correcto. Conviene separar instancias o usar noeviction / volatile-* según el caso.",
+    },
+    { text: "Que la caché nunca expire.", explanation: "La expiración depende del TTL, no de la política." },
+  ]}
+/>
