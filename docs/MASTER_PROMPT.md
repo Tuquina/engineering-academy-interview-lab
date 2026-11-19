@@ -1757,6 +1757,28 @@ La aplicación es amplia. Organizar el desarrollo en fases ejecutables, con entr
 
 **Resultado:** preparación avanzada.
 
+### Fase 4.5 — Teoría de los cursos
+
+Agregada a pedido del usuario después de la Fase 4: las herramientas existen, pero los cursos necesitan la teoría
+completa para aprender desde cero (para alguien que ya programa) antes de practicar.
+
+- [ ] Módulo de introducción en cada curso: qué es, para qué sirve, sintaxis básica y ejemplos (ADR-0008).
+- [x] TypeScript.
+- [ ] Node.js.
+- [ ] React.
+- [ ] Next.js.
+- [ ] LLMs y agentes de IA.
+- [ ] PostgreSQL.
+- [ ] Redis.
+- [ ] Arquitectura de software.
+- [ ] System Design.
+- [x] Verificación automática de diagramas y del mínimo de calidad de cada lección.
+
+Cada lección: teoría explicada a fondo, diagramas, ejemplos de código, comparación con C# y Java cuando aplica,
+errores frecuentes, knowledge checks y preguntas de entrevista.
+
+**Resultado:** cursos completos de introducción y teoría, con al menos 40 lecciones sustantivas (§35).
+
 ### Fase 5 — Agentes IA
 
 - [ ] Agent configuration.

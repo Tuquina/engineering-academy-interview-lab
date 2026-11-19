@@ -39,6 +39,9 @@ Reglas:
   curso como prefijo (`go.concurrency`).
 - `order` del curso es relativo a su área.
 - `topics` es el temario planificado: se muestra aunque todavía no haya lecciones.
+- Todo curso empieza con un módulo de introducción (ADR-0008): `id` `<curso>.intro`, slug `introduccion`,
+  `order: 0`. Su lección explica qué es la tecnología, qué problema resuelve, cómo se ejecuta, la sintaxis básica
+  con ejemplos pequeños y el mapa del curso. Se escribe para alguien que ya programa: no explica qué es un `if`.
 
 El curso aparece automáticamente en la biblioteca, en la barra lateral y en el dashboard.
 
@@ -93,7 +96,11 @@ El lector genera automáticamente **¿Qué vas a aprender?** (desde `objectives`
 9. Ejercicio interactivo (`<KnowledgeCheck>`)
 
 El test `tests/content/catalog-content.test.ts` exige un mínimo de secciones, extensión, referencias y preguntas de
-entrevista para evitar lecciones de relleno.
+entrevista para evitar lecciones de relleno. `tests/content/lesson-diagrams.test.ts` parsea cada diagrama Mermaid.
+
+En Mermaid, las etiquetas con paréntesis, llaves o signos deben ir entre comillas (`A["fetch (con signal)"]`).
+En los props de componentes (`question`, `text`, `explanation`) no se pueden usar comillas dobles dentro del
+string: usá comillas simples o backticks.
 
 ### Componentes disponibles en MDX
 

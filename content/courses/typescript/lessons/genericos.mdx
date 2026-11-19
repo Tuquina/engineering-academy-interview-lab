@@ -1,0 +1,352 @@
+---
+id: typescript.generics
+moduleId: typescript.advanced-types
+title: "Genéricos: funciones, restricciones, keyof e indexed access"
+description: "Cómo escribir código reutilizable sin perder tipos: funciones, interfaces y clases genéricas, restricciones con extends, valores por defecto, keyof, typeof en el espacio de tipos e indexed access types. Con las diferencias frente a los genéricos de C# y Java."
+difficulty: intermediate
+order: 1
+objectives:
+  - "Escribir funciones, interfaces y clases genéricas y entender cómo se infieren sus argumentos."
+  - "Restringir parámetros de tipo con extends y usar valores por defecto."
+  - "Usar keyof, typeof e indexed access types para derivar tipos de valores y de otros tipos."
+  - "Reconocer genéricos innecesarios y explicar las diferencias con C# y Java (reificación, varianza)."
+prerequisites: ["typescript.unions-narrowing"]
+estimatedMinutes: 40
+tags: ["genéricos", "keyof", "indexed access", "restricciones", "c#", "java"]
+version: "1.0.0"
+comparesWith: ["csharp", "java"]
+references:
+  - title: "TypeScript Handbook — Generics"
+    url: "https://www.typescriptlang.org/docs/handbook/2/generics.html"
+  - title: "TypeScript Handbook — Keyof Type Operator"
+    url: "https://www.typescriptlang.org/docs/handbook/2/keyof-types.html"
+  - title: "TypeScript Handbook — Typeof Type Operator"
+    url: "https://www.typescriptlang.org/docs/handbook/2/typeof-types.html"
+  - title: "TypeScript Handbook — Indexed Access Types"
+    url: "https://www.typescriptlang.org/docs/handbook/2/indexed-access-types.html"
+  - title: "TypeScript 5.0 — const Type Parameters"
+    url: "https://www.typescriptlang.org/docs/handbook/release-notes/typescript-5-0.html#const-type-parameters"
+interviewQuestions:
+  - question: "¿Qué diferencias hay entre los genéricos de TypeScript y los de C# o Java?"
+    keyPoints:
+      - "En TypeScript los genéricos se borran por completo: T no existe en runtime (C# los reifica; Java borra los argumentos pero conserva las clases)."
+      - "Las restricciones son estructurales (T extends { id: string }), no por herencia nominal."
+      - "La varianza se calcula estructuralmente y los parámetros de métodos son bivariantes; C# y Java la declaran (in/out, ? extends/? super)."
+      - "La inferencia de argumentos genéricos es más potente: se infiere desde los argumentos y el contexto."
+  - question: "¿Qué hace keyof y cómo lo combinarías con genéricos?"
+    keyPoints:
+      - "keyof T produce la unión de las claves de T como literal types."
+      - "Con K extends keyof T se escriben funciones que reciben una clave válida y devuelven T[K]."
+      - "Ejemplo: getProperty(obj, key), pluck, ordenar por una propiedad o construir índices tipados."
+  - question: "¿Cuándo un genérico es innecesario?"
+    keyPoints:
+      - "Cuando el parámetro de tipo aparece una sola vez en la firma: no relaciona nada y se puede reemplazar por el tipo concreto o unknown."
+      - "Cuando sólo se usa para hacer un cast del retorno (parseJson<T>), lo que da falsa seguridad."
+      - "Un genérico útil relaciona entradas con salidas o entre sí."
+summary:
+  - "Un genérico relaciona tipos: la entrada y la salida de una función, o elementos de una colección."
+  - "Los argumentos genéricos casi siempre se infieren; se escriben explícitos sólo si la inferencia no alcanza."
+  - "T extends X restringe T a tipos con la forma de X (estructural)."
+  - "keyof T es la unión de claves; T[K] es el tipo de la propiedad K."
+  - "typeof valor (en posición de tipo) obtiene el tipo de una variable existente."
+  - "Los genéricos se borran: para crear o validar hace falta un valor de runtime (fábrica o esquema)."
+  - "Si T aparece una sola vez en la firma, sobra."
+---
+
+## ¿Qué problema resuelve?
+
+Imaginá una función que devuelve el primer elemento de un array. Sin genéricos hay dos opciones malas:
+
+```ts
+function firstAny(items: any[]): any {
+  return items[0]; // perdés el tipo: todo lo que toques después es any
+}
+
+function firstDebt(items: Debt[]): Debt | undefined {
+  return items[0]; // correcto, pero hay que repetirla para Customer, Payment...
+}
+```
+
+Un **genérico** dice: "esta función funciona con cualquier tipo, y **el tipo de salida depende del de entrada**".
+
+```ts
+function first<T>(items: readonly T[]): T | undefined {
+  return items[0];
+}
+
+const debt = first(debts); // Debt | undefined (T se infiere como Debt)
+const name = first(["Ana", "Luis"]); // string | undefined
+```
+
+La idea es la misma que `List<T>` en C# o Java. Lo que cambia es **qué pasa en runtime** y **cómo se razona la
+compatibilidad**.
+
+## Funciones, interfaces y clases genéricas
+
+```ts
+// Función con dos parámetros de tipo relacionados
+function mapValues<K extends string, V, R>(record: Record<K, V>, fn: (value: V) => R): Record<K, R> {
+  const result = {} as Record<K, R>;
+  for (const key in record) result[key] = fn(record[key]);
+  return result;
+}
+
+// Interface genérica: el contrato de un repositorio
+interface Repository<T, Id = string> {
+  findById(id: Id): Promise<T | undefined>;
+  save(entity: T): Promise<void>;
+}
+
+// Clase genérica
+class InMemoryRepository<T extends { id: string }> implements Repository<T> {
+  private readonly items = new Map<string, T>();
+
+  async findById(id: string): Promise<T | undefined> {
+    return this.items.get(id);
+  }
+
+  async save(entity: T): Promise<void> {
+    this.items.set(entity.id, entity);
+  }
+}
+
+const debtRepository = new InMemoryRepository<Debt>();
+```
+
+`Id = string` es un **valor por defecto**: `Repository<Debt>` equivale a `Repository<Debt, string>`.
+
+### Inferencia de argumentos genéricos
+
+Casi nunca hace falta escribir `<Debt>` al llamar una función: el compilador infiere `T` desde los argumentos.
+Sólo se escribe cuando no hay nada de dónde inferir (como en `new InMemoryRepository<Debt>()`, que no recibe
+argumentos) o cuando la inferencia da un tipo más amplio que el deseado.
+
+Para que la inferencia conserve literales en lugar de ensancharlos, existen los **const type parameters**:
+
+```ts
+function defineChannels<const T extends readonly string[]>(channels: T): T {
+  return channels;
+}
+
+const channels = defineChannels(["sms", "email"]); // readonly ["sms", "email"], no string[]
+```
+
+## Restricciones con extends
+
+`T extends X` significa "T puede ser cualquier tipo **asignable a X**". Como la compatibilidad es estructural, no
+hace falta que T herede de nada: basta con que tenga la forma.
+
+```ts
+interface HasId {
+  id: string;
+}
+
+function indexById<T extends HasId>(items: readonly T[]): Map<string, T> {
+  return new Map(items.map((item) => [item.id, item]));
+}
+
+indexById(debts); // ✅ Debt tiene id
+indexById([{ id: "x", extra: true }]); // ✅ cualquier objeto con id
+indexById([1, 2, 3]); // ❌ number no tiene id
+```
+
+En C# esto sería `where T : IHasId` y requeriría que `Debt` implemente `IHasId`. En TypeScript, cualquier objeto
+con `id: string` cumple la restricción.
+
+## keyof, typeof e indexed access
+
+Tres operadores que trabajan **en el espacio de tipos** y permiten derivar un tipo de otro.
+
+```ts
+interface Customer {
+  id: string;
+  name: string;
+  segment: "retail" | "sme";
+  balanceCents: number;
+}
+
+type CustomerKey = keyof Customer; // "id" | "name" | "segment" | "balanceCents"
+type Segment = Customer["segment"]; // "retail" | "sme"   (indexed access)
+type IdOrName = Customer["id" | "name"]; // string
+
+const defaults = { channel: "sms", retries: 3 };
+type Defaults = typeof defaults; // { channel: string; retries: number }  (typeof en posición de tipo)
+```
+
+Combinados con genéricos, permiten funciones que relacionan una clave con el tipo de su valor:
+
+```ts
+function getProperty<T, K extends keyof T>(obj: T, key: K): T[K] {
+  return obj[key];
+}
+
+const customer: Customer = { id: "c1", name: "Ana", segment: "sme", balanceCents: 0 };
+const segment = getProperty(customer, "segment"); // "retail" | "sme"
+getProperty(customer, "email"); // ❌ "email" no es keyof Customer
+
+function sortBy<T, K extends keyof T>(items: readonly T[], key: K): T[] {
+  return items.toSorted((a, b) => (a[key] < b[key] ? -1 : a[key] > b[key] ? 1 : 0));
+}
+
+sortBy(customers, "balanceCents"); // el editor autocompleta las claves válidas
+```
+
+<MermaidDiagram
+  caption="keyof, indexed access y typeof derivan tipos: si cambia Customer, todo lo derivado cambia con él."
+  chart={`
+flowchart LR
+  C["interface Customer"] -->|"keyof"| K["'id' | 'name' | 'segment' | 'balanceCents'"]
+  C -->|"Customer['segment']"| S["'retail' | 'sme'"]
+  V["const defaults = { ... }"] -->|"typeof"| D["tipo de defaults"]
+  K --> G["getProperty con K extends keyof T"]
+  G -->|"retorno T[K]"| R["tipo exacto de la propiedad"]
+`}
+/>
+
+### Derivar en lugar de duplicar
+
+El valor de estos operadores es mantener **una sola fuente de verdad**. Por ejemplo, una lista de estados que se
+usa en runtime (para un `<select>`) y también como tipo:
+
+```ts
+export const DEBT_STATUSES = ["pending", "promised", "paid"] as const;
+export type DebtStatus = (typeof DEBT_STATUSES)[number]; // "pending" | "promised" | "paid"
+```
+
+Agregar un estado al array actualiza el tipo automáticamente.
+
+## Genéricos que sobran (y los que mienten)
+
+```ts
+// ❌ T aparece una sola vez: no relaciona nada
+function logValue<T>(value: T): void {
+  console.log(value);
+}
+// ✅ equivalente y más honesto
+function logValueFixed(value: unknown): void {
+  console.log(value);
+}
+
+// ❌ El genérico sólo sirve para "castear" el retorno: falsa seguridad
+async function getJson<T>(url: string): Promise<T> {
+  const response = await fetch(url);
+  return response.json(); // any, se convierte en T sin verificar nada
+}
+
+// ✅ Un valor de runtime representa el tipo: el genérico se infiere del esquema
+async function getJsonWith<T>(url: string, schema: { parse(data: unknown): T }): Promise<T> {
+  const response = await fetch(url);
+  return schema.parse(await response.json());
+}
+```
+
+La regla: **un parámetro de tipo debería aparecer al menos dos veces** (en dos parámetros, o en un parámetro y el
+retorno). Si aparece una vez, no aporta.
+
+## Varianza en una sola sección
+
+En C# se declara la varianza (`IEnumerable<out T>`, `Action<in T>`) y en Java se usa en el sitio de uso
+(`List<? extends Debt>`). TypeScript la **calcula estructuralmente**: un tipo genérico es compatible con otro si
+sus miembros lo son.
+
+```ts
+interface Animal {
+  name: string;
+}
+interface Dog extends Animal {
+  bark(): void;
+}
+
+const dogs: Dog[] = [];
+const animals: Animal[] = dogs; // ✅ compila (arrays son covariantes)
+animals.push({ name: "gato" }); // ✅ compila... y ahora dogs contiene algo que no ladra
+```
+
+Los arrays mutables son covariantes por pragmatismo, lo que es técnicamente inseguro (Java tiene el mismo problema
+con arrays y lanza `ArrayStoreException`; TypeScript no lanza nada). Usar `readonly Dog[]` en los parámetros evita
+el problema. Para parámetros de funciones, `strictFunctionTypes` (incluido en `strict`) los chequea de forma
+contravariante cuando se declaran como propiedades (`onEvent: (e: Event) => void`), pero no cuando se declaran como
+métodos (`onEvent(e: Event): void`).
+
+## Comparación con C# y Java
+
+| Aspecto                 | C#                                 | Java                                      | TypeScript                                   |
+| ----------------------- | ---------------------------------- | ----------------------------------------- | -------------------------------------------- |
+| Runtime                 | Reificados: `typeof(T)`, `new T()` | Borrados, pero las clases existen         | Borrados por completo                        |
+| Restricciones           | `where T : IHasId, new()`          | `<T extends HasId>` nominal               | `<T extends { id: string }>` estructural     |
+| Varianza                | Declarada: `in`/`out`              | En el sitio de uso: `? extends`/`? super` | Calculada estructuralmente                   |
+| Inferencia              | Desde argumentos                   | Desde argumentos y diamante `<>`          | Desde argumentos, contexto y retorno         |
+| Derivar tipos de claves | `nameof`, reflection               | Reflection                                | `keyof`, `T[K]`, `typeof` en compilación     |
+| Genéricos sobre valores | No                                 | No                                        | Literales como tipos: `K extends "a" \| "b"` |
+
+## Errores frecuentes
+
+- **Escribir `<T>` sin necesidad.** Si T no relaciona entradas y salidas, usá el tipo concreto o `unknown`.
+- **`parseJson<T>()` sin validación.** El genérico sólo cambia el tipo estático; el dato sigue sin verificar.
+- **Intentar `new T()` o `instanceof T`.** T no existe en runtime: pasá una fábrica (`() => T`) o un constructor.
+- **Restricciones demasiado amplias.** `T extends object` acepta arrays y funciones; preferí la forma mínima que
+  necesitás (`T extends { id: string }`).
+- **Pasar argumentos genéricos explícitos que contradicen la inferencia.** Si la inferencia da un tipo inesperado,
+  casi siempre el problema está en la firma.
+- **Confundir `typeof` de JavaScript con el de tipos.** En una expresión devuelve un string en runtime; en una
+  posición de tipo obtiene el tipo de una variable.
+
+## Ejercicio interactivo
+
+<KnowledgeCheck
+  id="typescript.generics.q1"
+  question="¿Qué tipo devuelve `getProperty(customer, 'segment')` si la firma es `getProperty<T, K extends keyof T>(obj: T, key: K): T[K]`?"
+  options={[
+    {
+      text: "`string`",
+      explanation: "Sería así si el retorno fuera `T[keyof T]` o si segment fuera string.",
+    },
+    {
+      text: "`'retail' | 'sme'`",
+      correct: true,
+      explanation:
+        "Correcto. K se infiere como el literal 'segment' y T[K] es el tipo exacto de esa propiedad.",
+    },
+    { text: "`unknown`", explanation: "Las indexed access types conservan el tipo de la propiedad." },
+    { text: "`keyof Customer`", explanation: "Eso es el tipo de la clave, no del valor." },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="typescript.generics.q2"
+  question="¿Por qué `function create<T>(): T { return new T(); }` no compila, cuando en C# `new T()` funciona con `where T : new()`?"
+  options={[
+    {
+      text: "Porque TypeScript no admite restricciones de constructor.",
+      explanation: "Sí se puede tipar un constructor (`new () => T`), pero hay que recibirlo como valor.",
+    },
+    {
+      text: "Porque T no existe en runtime y no hay ningún constructor al que llamar.",
+      correct: true,
+      explanation:
+        "Correcto. La forma idiomática es `create<T>(factory: () => T)` o recibir la clase como argumento.",
+    },
+    {
+      text: "Porque las clases genéricas no existen en TypeScript.",
+      explanation: "Existen; el problema es instanciar un parámetro de tipo.",
+    },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="typescript.generics.q3"
+  question="¿Cuál de estas firmas tiene un parámetro de tipo innecesario?"
+  options={[
+    {
+      text: "`first<T>(items: T[]): T | undefined`",
+      explanation: "T relaciona la entrada con la salida: es útil.",
+    },
+    {
+      text: "`log<T>(value: T): void`",
+      correct: true,
+      explanation:
+        "Correcto. T aparece una sola vez y no relaciona nada: `log(value: unknown): void` es equivalente.",
+    },
+    { text: "`pair<A, B>(a: A, b: B): [A, B]`", explanation: "A y B aparecen en la entrada y en la salida." },
+  ]}
+/>

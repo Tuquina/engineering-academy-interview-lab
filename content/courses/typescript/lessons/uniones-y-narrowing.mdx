@@ -1,0 +1,402 @@
+---
+id: typescript.unions-narrowing
+moduleId: typescript.fundamentals
+title: "Uniones, narrowing y discriminated unions"
+description: "El corazón del sistema de tipos de TypeScript: uniones e intersecciones, unknown, any y never, null con strictNullChecks, cómo el compilador estrecha tipos dentro de un if, type predicates, assertion functions, discriminated unions y chequeo exhaustivo."
+difficulty: intermediate
+order: 3
+objectives:
+  - "Combinar tipos con uniones e intersecciones y saber qué operaciones permite cada una."
+  - "Usar unknown, any y never con criterio y explicar el rol de never en el chequeo exhaustivo."
+  - "Aplicar las técnicas de narrowing: typeof, in, instanceof, igualdad, truthiness y control flow."
+  - "Escribir type predicates y assertion functions, conociendo el riesgo de que mientan."
+  - "Modelar estados con discriminated unions y garantizar que todos los casos se manejen."
+  - "Reconocer los riesgos de las type assertions y del operador !."
+prerequisites: ["typescript.objects-interfaces-inference"]
+estimatedMinutes: 45
+tags: ["uniones", "narrowing", "discriminated unions", "never", "strictNullChecks", "c#", "java"]
+version: "1.0.0"
+comparesWith: ["csharp", "java"]
+references:
+  - title: "TypeScript Handbook — Narrowing"
+    url: "https://www.typescriptlang.org/docs/handbook/2/narrowing.html"
+  - title: "TypeScript Handbook — Unions and Intersection Types"
+    url: "https://www.typescriptlang.org/docs/handbook/2/everyday-types.html#union-types"
+  - title: "TypeScript 3.7 — Assertion Functions"
+    url: "https://www.typescriptlang.org/docs/handbook/release-notes/typescript-3-7.html#assertion-functions"
+  - title: "TypeScript 5.5 — Inferred Type Predicates"
+    url: "https://www.typescriptlang.org/docs/handbook/release-notes/typescript-5-5.html#inferred-type-predicates"
+  - title: "C# — Pattern matching"
+    url: "https://learn.microsoft.com/en-us/dotnet/csharp/fundamentals/functional/pattern-matching"
+  - title: "Java — Sealed classes and pattern matching for switch"
+    url: "https://docs.oracle.com/en/java/javase/21/language/pattern-matching-switch.html"
+interviewQuestions:
+  - question: "¿Qué es una discriminated union y por qué es útil?"
+    keyPoints:
+      - "Una unión de tipos de objeto que comparten una propiedad literal (el discriminante, por ejemplo kind o status)."
+      - "Al chequear el discriminante, el compilador estrecha al miembro correcto y permite acceder a sus propiedades."
+      - "Hace imposibles los estados inválidos (por ejemplo, una deuda pagada sin fecha de pago)."
+      - "Con un default que asigna a never, agregar un caso nuevo produce errores de compilación en todos los switch incompletos."
+  - question: "¿Qué es el narrowing y qué técnicas conocés?"
+    keyPoints:
+      - "Es el análisis de flujo de control que estrecha el tipo de una variable dentro de una rama."
+      - "typeof para primitivos, instanceof para clases, in para propiedades, igualdad con literales y truthiness."
+      - "Type predicates (value is T) y assertion functions (asserts value is T) para chequeos reutilizables."
+      - "Los predicates no se verifican: si la implementación es incorrecta, el compilador confía igual."
+  - question: "¿Para qué sirve el tipo never?"
+    keyPoints:
+      - "Representa un conjunto vacío de valores: funciones que nunca retornan o ramas imposibles."
+      - "Es el resultado del narrowing cuando se agotaron todos los casos de una unión."
+      - "Se usa en el chequeo exhaustivo: asignar a never falla si queda algún caso sin manejar."
+  - question: "¿Qué riesgos tiene el operador ! (non-null assertion)?"
+    keyPoints:
+      - "Le dice al compilador que el valor no es null ni undefined sin verificarlo."
+      - "Si te equivocás, el error aparece en runtime como TypeError lejos de la causa."
+      - "Preferir narrowing explícito, valores por defecto con ?? o lanzar un error descriptivo."
+summary:
+  - "A | B admite valores de cualquiera; sólo se pueden usar directamente las operaciones comunes a ambos."
+  - "A & B exige cumplir los dos tipos a la vez; se usa para componer objetos."
+  - "Con strictNullChecks, null y undefined son tipos propios y hay que manejarlos explícitamente."
+  - "El narrowing estrecha tipos con typeof, instanceof, in, igualdad, truthiness y asignaciones."
+  - "Los type predicates (x is T) y las assertion functions encapsulan chequeos, pero el compilador confía en ellos."
+  - "Una discriminated union modela estados mutuamente excluyentes con una propiedad literal común."
+  - "El chequeo exhaustivo con never convierte un caso nuevo olvidado en un error de compilación."
+  - "as y ! no verifican nada: son promesas del programador al compilador."
+---
+
+## ¿Qué problema resuelve?
+
+Pensá en el estado de una deuda en una plataforma de cobranzas. Un modelo típico de C# o Java sería una clase con
+todos los campos posibles y muchos nullables:
+
+```ts
+interface DebtBad {
+  status: "pending" | "promised" | "paid" | "written_off";
+  promisedFor?: string; // sólo si status es "promised"
+  paidAt?: string; // sólo si status es "paid"
+  paidAmountCents?: number; // sólo si status es "paid"
+  writeOffReason?: string; // sólo si status es "written_off"
+}
+```
+
+Este modelo admite estados absurdos: una deuda `"paid"` sin `paidAt`, o `"pending"` con `writeOffReason`. Cada
+función que la use tiene que adivinar qué campos existen, y el compilador no puede ayudar. **Uniones y narrowing**
+permiten modelar sólo los estados válidos y que el compilador verifique que cada caso se maneja.
+
+## Uniones e intersecciones
+
+Una **unión** `A | B` es un valor que puede ser de cualquiera de los tipos. Una **intersección** `A & B` es un valor
+que es de ambos tipos a la vez.
+
+```ts
+type Identifier = string | number;
+
+function normalize(id: Identifier): string {
+  id.toUpperCase(); // ❌ toUpperCase no existe en number
+  return String(id); // ✅ String() acepta ambos
+}
+
+type WithTimestamps = { createdAt: string; updatedAt: string };
+type Debt = { id: string; amountCents: number };
+type StoredDebt = Debt & WithTimestamps; // tiene las cuatro propiedades
+```
+
+Con una unión, **sólo podés usar lo que es común a todos los miembros**. Para usar algo específico, primero hay que
+averiguar cuál de los tipos es: eso es el **narrowing**.
+
+<Callout type="info" title="Pensar en conjuntos">
+  Un tipo es un conjunto de valores. `string | number` es la unión de dos conjuntos (más valores posibles,
+  menos operaciones seguras). `A & B` es la intersección (menos valores posibles, más propiedades
+  garantizadas). `never` es el conjunto vacío y `unknown` es el conjunto de todos los valores.
+</Callout>
+
+## null, undefined y strictNullChecks
+
+Con `strict` activado, `null` y `undefined` **no** forman parte de `string` ni de ningún otro tipo. Si un valor puede
+faltar, el tipo lo dice:
+
+```ts
+function findCustomer(id: string): Customer | undefined {
+  return customers.get(id);
+}
+
+const customer = findCustomer("cus_1");
+customer.name; // ❌ 'customer' is possibly 'undefined'
+customer?.name; // ✅ string | undefined
+if (customer) customer.name; // ✅ string
+```
+
+Es lo mismo que los _nullable reference types_ de C# (`Customer?`), pero obligatorio y sin warnings ignorables.
+Java no tiene equivalente en el lenguaje: se usa `Optional<T>` o anotaciones `@Nullable`.
+
+## Narrowing: cómo el compilador estrecha tipos
+
+El compilador sigue el **flujo de control** de tu código. Dentro de una rama en la que se verificó algo, el tipo de
+la variable se reduce.
+
+```ts
+function describe(value: string | number | Date | null | undefined): string {
+  if (value == null) return "vacío"; // cubre null y undefined
+
+  if (typeof value === "string") return value.toUpperCase(); // value: string
+  if (typeof value === "number") return value.toFixed(2); // value: number
+
+  return value.toISOString(); // value: Date (lo único que queda)
+}
+```
+
+| Técnica         | Ejemplo                         | Estrecha a                                                                       |
+| --------------- | ------------------------------- | -------------------------------------------------------------------------------- |
+| `typeof`        | `typeof x === "string"`         | Primitivos: string, number, boolean, bigint, symbol, undefined, function, object |
+| `instanceof`    | `error instanceof HttpError`    | Instancias de una clase (existe en runtime)                                      |
+| `in`            | `"paidAt" in debt`              | Miembros de la unión que tienen esa propiedad                                    |
+| Igualdad        | `debt.status === "paid"`        | Miembros con ese literal                                                         |
+| Truthiness      | `if (customer)`                 | Quita `null`, `undefined` (y otros falsy)                                        |
+| `Array.isArray` | `Array.isArray(input)`          | Arrays                                                                           |
+| Asignación      | `let x: string \| number = "a"` | El tipo del valor asignado                                                       |
+
+<Callout type="warning" title="typeof null es 'object'">
+  Es un error histórico de JavaScript que se mantiene por compatibilidad. Por eso un chequeo de objeto
+  correcto es `typeof value === "object" && value !== null`.
+</Callout>
+
+### Type predicates: narrowing reutilizable
+
+Cuando el chequeo es complejo o se repite, se encapsula en una función que devuelve `value is T`:
+
+```ts
+interface ToolCall {
+  name: string;
+  arguments: Record<string, unknown>;
+}
+
+function isToolCall(value: unknown): value is ToolCall {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    "name" in value &&
+    typeof value.name === "string" &&
+    "arguments" in value &&
+    typeof value.arguments === "object" &&
+    value.arguments !== null
+  );
+}
+
+const messages: unknown[] = await loadMessages();
+const toolCalls = messages.filter(isToolCall); // ToolCall[]
+```
+
+Desde TypeScript 5.5, el compilador **infiere** predicates simples: `items.filter((x) => x !== undefined)` ya
+devuelve un array sin `undefined`.
+
+**El riesgo:** el compilador confía en el predicate sin verificar su implementación. Si te olvidás de chequear una
+propiedad, el tipo miente. Para contratos externos, un esquema (Zod) es más seguro; lo vemos en _APIs type-safe_.
+
+### Assertion functions
+
+Una variante que, en lugar de devolver un booleano, **lanza** si el valor no cumple:
+
+```ts
+function assertDefined<T>(value: T, message: string): asserts value is NonNullable<T> {
+  if (value === undefined || value === null) throw new Error(message);
+}
+
+const customer = findCustomer("cus_1");
+assertDefined(customer, "El cliente debería existir");
+customer.name; // ✅ a partir de acá es Customer
+```
+
+## Discriminated unions
+
+La solución al modelo de deuda del principio: **un tipo por estado**, todos con una propiedad literal común.
+
+```ts
+type Debt =
+  | { status: "pending"; id: string; amountCents: number }
+  | { status: "promised"; id: string; amountCents: number; promisedFor: string }
+  | { status: "paid"; id: string; amountCents: number; paidAt: string; paidAmountCents: number }
+  | { status: "written_off"; id: string; amountCents: number; writeOffReason: string };
+
+function describeDebt(debt: Debt): string {
+  switch (debt.status) {
+    case "pending":
+      return `Pendiente: ${debt.amountCents}`;
+    case "promised":
+      return `Promesa para el ${debt.promisedFor}`; // promisedFor existe sólo acá
+    case "paid":
+      return `Pagada el ${debt.paidAt}`;
+    case "written_off":
+      return `Incobrable: ${debt.writeOffReason}`;
+  }
+}
+```
+
+<MermaidDiagram
+  caption="Cada estado es un tipo distinto: las transiciones válidas se modelan como funciones que reciben un estado y devuelven otro."
+  chart={`
+stateDiagram-v2
+  [*] --> pending
+  pending --> promised: promesa de pago
+  promised --> paid: pago recibido
+  pending --> paid: pago recibido
+  promised --> pending: promesa incumplida
+  pending --> written_off: incobrable
+  paid --> [*]
+  written_off --> [*]
+`}
+/>
+
+Ventajas concretas:
+
+- **Estados inválidos imposibles:** no se puede construir una deuda `"paid"` sin `paidAt`.
+- **Autocompletado preciso:** dentro de cada `case`, el editor muestra sólo las propiedades de ese estado.
+- **Transiciones tipadas:** una función `markAsPaid(debt: Extract<Debt, { status: "promised" }>)` sólo acepta
+  deudas con promesa.
+
+### Chequeo exhaustivo con never
+
+¿Qué pasa si mañana se agrega el estado `"in_dispute"`? Con un `default` que asigna a `never`, **cada switch
+incompleto deja de compilar**:
+
+```ts
+function assertNever(value: never): never {
+  throw new Error(`Caso no contemplado: ${JSON.stringify(value)}`);
+}
+
+function nextAction(debt: Debt): string {
+  switch (debt.status) {
+    case "pending":
+      return "send_reminder";
+    case "promised":
+      return "wait_until_due";
+    case "paid":
+    case "written_off":
+      return "none";
+    default:
+      return assertNever(debt); // si falta un caso, debt no es never y no compila
+  }
+}
+```
+
+Después de los `case`, el narrowing deja a `debt` sin tipos posibles: `never`. Si se agrega un estado nuevo y no se
+maneja, en el `default` `debt` tiene el tipo del estado nuevo, que no es asignable a `never`, y aparece el error.
+
+<FlowDiagram
+  steps={[
+    { title: "Se agrega un estado", detail: "Debt suma el caso in_dispute." },
+    {
+      title: "Compilación",
+      detail: "En cada switch sin ese case, el default recibe in_dispute en lugar de never.",
+    },
+    { title: "Error", detail: "El compilador lista todos los lugares a actualizar.", tone: "boundary" },
+    {
+      title: "Se maneja el caso",
+      detail: "Ningún flujo olvida el estado nuevo en producción.",
+      tone: "runtime",
+    },
+  ]}
+  caption="El chequeo exhaustivo convierte un olvido en runtime en un error de compilación."
+/>
+
+## Type assertions y non-null: cuándo mienten
+
+```ts
+const input = document.getElementById("amount") as HTMLInputElement; // afirmación: puede ser null o un div
+const customer = customers.get(id)!; // ! afirma que no es undefined
+```
+
+Ninguna de las dos ejecuta un chequeo. Si estás equivocado, el error aparece después, como un `TypeError: Cannot
+read properties of undefined`, lejos de donde se originó. Alternativas más seguras:
+
+```ts
+const element = document.getElementById("amount");
+if (!(element instanceof HTMLInputElement)) throw new Error("Falta el input de monto");
+
+const customer = customers.get(id);
+if (!customer) throw new CustomerNotFoundError(id);
+```
+
+Las aserciones tienen usos legítimos (el constructor de un branded type después de validar, tipos que el
+compilador no puede inferir en código de bajo nivel), pero cada una es un punto donde **vos** sos responsable de la
+corrección.
+
+## Comparación con C# y Java
+
+| Concepto             | C#                                       | Java                                            | TypeScript                                 |
+| -------------------- | ---------------------------------------- | ----------------------------------------------- | ------------------------------------------ |
+| Tipo "uno de varios" | Jerarquía de clases o `OneOf` (librería) | `sealed interface` + `record` (Java 17+)        | Unión `A \| B`, sin clases                 |
+| Estrechar el tipo    | `if (x is Paid p)`, switch con patrones  | `if (x instanceof Paid p)`, switch con patrones | `typeof`, `in`, igualdad del discriminante |
+| Exhaustividad        | Warning en switch expressions            | Error con sealed + switch                       | `never` en el default                      |
+| Nulabilidad          | `string?` (warnings)                     | `Optional<T>`                                   | `string \| undefined` (errores)            |
+| Cast                 | `(Paid)x` con chequeo en runtime         | `(Paid) x` con chequeo en runtime               | `x as Paid` **sin** chequeo                |
+
+La diferencia clave está en la última fila: un cast en C# o Java lanza `InvalidCastException` o
+`ClassCastException` si el objeto no es del tipo. En TypeScript, `as` no hace nada en runtime.
+
+## Errores frecuentes
+
+- **Modelar estados con propiedades opcionales** en lugar de una discriminated union.
+- **Olvidar el `default` con `assertNever`.** Sin él, un caso nuevo puede devolver `undefined` silenciosamente.
+- **Usar `if (value)` para chequear números o strings.** `0` y `""` son falsy; usá `!== undefined`.
+- **Discriminar por una propiedad que no es literal.** Si `status` es `string` en algún miembro, el narrowing no
+  funciona.
+- **Predicates incompletos.** `value is ToolCall` que sólo verifica `name` deja pasar objetos sin `arguments`.
+- **Desestructurar antes de estrechar.** `const { status, paidAt } = debt` falla porque `paidAt` no existe en todos
+  los miembros; primero se chequea `debt.status`.
+
+## Ejercicio interactivo
+
+<KnowledgeCheck
+  id="typescript.unions-narrowing.q1"
+  question="Agregás el estado `in_dispute` a la unión `Debt`. ¿Qué pasa en una función con switch sobre `debt.status` que termina en `default: return assertNever(debt)`?"
+  options={[
+    {
+      text: "Compila y en runtime devuelve undefined para in_dispute.",
+      explanation: "Eso pasaría sin el default con assertNever.",
+    },
+    {
+      text: "No compila: en el default, debt tiene el tipo del nuevo estado y no es asignable a never.",
+      correct: true,
+      explanation: "Correcto. El compilador señala cada switch que hay que actualizar.",
+    },
+    {
+      text: "Compila, pero lanza un error en runtime al cargar el módulo.",
+      explanation: "El error es de compilación, no de runtime.",
+    },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="typescript.unions-narrowing.q2"
+  question="¿Qué tipo tiene `value` dentro de `if (typeof value === 'object')` si `value` es `string | Date | null`?"
+  options={[
+    { text: "`Date`", explanation: "Falta un caso: `typeof null` también es 'object'." },
+    {
+      text: "`Date | null`",
+      correct: true,
+      explanation: "Correcto. Por el error histórico de typeof null, hace falta además `value !== null`.",
+    },
+    {
+      text: "`object`",
+      explanation: "El compilador conserva los miembros de la unión que coinciden: Date y null.",
+    },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="typescript.unions-narrowing.q3"
+  question="En C#, `(PaidDebt)debt` lanza una excepción si el objeto no es del tipo. ¿Qué hace `debt as PaidDebt` en TypeScript si debt no es una deuda pagada?"
+  options={[
+    { text: "Lanza un TypeError.", explanation: "as no ejecuta nada en runtime." },
+    {
+      text: "Devuelve null, como as en C#.",
+      explanation: "Ese es el comportamiento del operador as de C#, no el de TypeScript.",
+    },
+    {
+      text: "Nada: el compilador lo acepta y el valor sigue siendo el mismo objeto.",
+      correct: true,
+      explanation:
+        "Correcto. El error aparece después, al usar propiedades que no existen. Preferí narrowing.",
+    },
+  ]}
+/>

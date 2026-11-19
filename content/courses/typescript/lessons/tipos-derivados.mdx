@@ -1,0 +1,338 @@
+---
+id: typescript.type-transformations
+moduleId: typescript.advanced-types
+title: "Tipos derivados: mapped types, conditional types, infer y utility types"
+description: "Cómo construir tipos a partir de otros tipos: los utility types de la librería estándar, mapped types con modificadores y remapeo de claves, conditional types, infer, distribución sobre uniones y template literal types. Con criterios para no sobrediseñar."
+difficulty: advanced
+order: 2
+objectives:
+  - "Usar los utility types más comunes y saber qué hace cada uno internamente."
+  - "Escribir mapped types con modificadores (readonly, ?) y remapeo de claves con as."
+  - "Escribir conditional types, usar infer para extraer tipos y entender la distribución sobre uniones."
+  - "Usar template literal types para tipar strings con formato."
+  - "Reconocer cuándo un tipo derivado aporta y cuándo complica sin necesidad."
+prerequisites: ["typescript.generics"]
+estimatedMinutes: 45
+tags: ["mapped types", "conditional types", "infer", "utility types", "template literal types"]
+version: "1.0.0"
+comparesWith: ["csharp", "java"]
+references:
+  - title: "TypeScript Handbook — Utility Types"
+    url: "https://www.typescriptlang.org/docs/handbook/utility-types.html"
+  - title: "TypeScript Handbook — Mapped Types"
+    url: "https://www.typescriptlang.org/docs/handbook/2/mapped-types.html"
+  - title: "TypeScript Handbook — Conditional Types"
+    url: "https://www.typescriptlang.org/docs/handbook/2/conditional-types.html"
+  - title: "TypeScript Handbook — Template Literal Types"
+    url: "https://www.typescriptlang.org/docs/handbook/2/template-literal-types.html"
+interviewQuestions:
+  - question: "¿Qué son los mapped types? Dame un ejemplo real."
+    keyPoints:
+      - "Construyen un tipo nuevo recorriendo las claves de otro: { [K in keyof T]: ... }."
+      - "Pueden agregar o quitar modificadores (readonly, ?, con + y -)."
+      - "Con as remapean o filtran claves (por ejemplo, generar getters o quitar propiedades de función)."
+      - "Partial, Required, Readonly y Record son mapped types de la librería estándar."
+  - question: "¿Qué hace infer en un conditional type?"
+    keyPoints:
+      - "Declara una variable de tipo que el compilador deduce al hacer el pattern matching del extends."
+      - "Permite extraer partes de un tipo: el retorno de una función, el tipo de una Promise, el elemento de un array."
+      - "ReturnType, Parameters y Awaited están implementados con infer."
+  - question: "¿Qué diferencia hay entre Omit y Pick, y qué problema tiene Omit?"
+    keyPoints:
+      - "Pick<T, K> conserva las claves K; Omit<T, K> conserva todas menos K."
+      - "Omit no exige que K sea una clave existente: un typo no da error."
+      - "Sobre una unión, Omit no se distribuye y colapsa los miembros; hace falta una versión distributiva."
+summary:
+  - "Los tipos derivados mantienen una fuente de verdad: si cambia el tipo base, cambian los derivados."
+  - "Partial, Required, Readonly, Pick, Omit y Record transforman objetos; Exclude, Extract y NonNullable filtran uniones."
+  - "ReturnType, Parameters y Awaited extraen tipos de funciones y promesas."
+  - "Un mapped type recorre claves: { [K in keyof T]: T[K] }, con modificadores +/- readonly y ?."
+  - "Un conditional type es un if en el espacio de tipos: T extends U ? X : Y; sobre uniones se distribuye."
+  - "infer captura una parte del tipo durante el pattern matching."
+  - "Los template literal types tipan strings con formato, como 'debt_${string}' o nombres de eventos."
+  - "Si nadie del equipo puede leer un tipo, el tipo es deuda técnica."
+---
+
+## ¿Qué problema resuelve?
+
+En una API de deudas hay varias formas del mismo concepto: la entidad completa, el body para crearla (sin `id` ni
+fechas), el body para actualizarla (todo opcional) y la vista pública (sin datos internos). En C# o Java se
+escriben cuatro clases y se mantienen sincronizadas a mano, con AutoMapper o MapStruct en el medio.
+
+En TypeScript se escribe **un tipo** y se **derivan** los demás:
+
+```ts
+interface Debt {
+  id: string;
+  customerId: string;
+  amountCents: number;
+  status: "pending" | "paid";
+  internalScore: number;
+  createdAt: string;
+}
+
+type CreateDebtInput = Omit<Debt, "id" | "status" | "createdAt" | "internalScore">;
+type UpdateDebtInput = Partial<Pick<Debt, "amountCents" | "status">>;
+type PublicDebt = Omit<Debt, "internalScore">;
+```
+
+Si mañana `Debt` agrega un campo, los tipos derivados lo reflejan solos. Esta lección explica cómo funcionan esas
+herramientas para poder usarlas y, cuando haga falta, escribir las propias.
+
+## Utility types de la librería estándar
+
+| Utility type     | Qué hace                                        | Ejemplo                                  |
+| ---------------- | ----------------------------------------------- | ---------------------------------------- |
+| `Partial<T>`     | Todas las propiedades opcionales                | Body de un PATCH                         |
+| `Required<T>`    | Todas obligatorias                              | Configuración ya completada con defaults |
+| `Readonly<T>`    | Todas readonly                                  | Estado inmutable                         |
+| `Pick<T, K>`     | Sólo las claves K                               | Vista reducida                           |
+| `Omit<T, K>`     | Todas menos K                                   | Input sin `id`                           |
+| `Record<K, V>`   | Objeto con claves K y valores V                 | Diccionarios, tablas por estado          |
+| `Exclude<U, X>`  | Quita de la unión U los miembros asignables a X | `Exclude<Status, "paid">`                |
+| `Extract<U, X>`  | Conserva los miembros asignables a X            | `Extract<Debt, { status: "paid" }>`      |
+| `NonNullable<T>` | Quita `null` y `undefined`                      | Después de validar                       |
+| `ReturnType<F>`  | Tipo de retorno de una función                  | Tipo de un factory                       |
+| `Parameters<F>`  | Tupla de parámetros                             | Wrappers y decoradores                   |
+| `Awaited<T>`     | Desenvuelve Promises (recursivamente)           | Resultado de una función async           |
+
+```ts
+async function loadDashboard(customerId: string) {
+  return { debts: [] as Debt[], balanceCents: 0 };
+}
+
+type Dashboard = Awaited<ReturnType<typeof loadDashboard>>; // { debts: Debt[]; balanceCents: number }
+type LoadArgs = Parameters<typeof loadDashboard>; // [customerId: string]
+```
+
+## Mapped types
+
+Un mapped type **recorre las claves** de otro tipo y construye uno nuevo. Es un bucle `for` en el espacio de tipos.
+
+```ts
+// Así está definido Partial en la librería estándar
+type MyPartial<T> = {
+  [K in keyof T]?: T[K];
+};
+
+// Quitar modificadores con -
+type Mutable<T> = {
+  -readonly [K in keyof T]: T[K];
+};
+
+// Transformar el tipo de cada propiedad
+type Validators<T> = {
+  [K in keyof T]: (value: T[K]) => string | null; // null = válido; string = mensaje de error
+};
+
+const debtValidators: Validators<Pick<Debt, "amountCents" | "customerId">> = {
+  amountCents: (value) => (value > 0 ? null : "El monto debe ser positivo"),
+  customerId: (value) => (value.startsWith("cus_") ? null : "ID de cliente inválido"),
+};
+```
+
+### Remapeo de claves con as
+
+Con `as` se puede **renombrar** o **filtrar** claves:
+
+```ts
+// Generar nombres de getters: { getAmountCents: () => number; ... }
+type Getters<T> = {
+  [K in keyof T as `get${Capitalize<string & K>}`]: () => T[K];
+};
+
+// Filtrar: conservar sólo las propiedades que no son funciones
+type DataOnly<T> = {
+  [K in keyof T as T[K] extends (...args: never[]) => unknown ? never : K]: T[K];
+};
+```
+
+Devolver `never` en el `as` elimina la clave.
+
+## Conditional types
+
+Un conditional type es un **if en el espacio de tipos**: `T extends U ? X : Y`.
+
+```ts
+type IsString<T> = T extends string ? true : false;
+
+type A = IsString<"hola">; // true
+type B = IsString<42>; // false
+```
+
+### Distribución sobre uniones
+
+Cuando el tipo chequeado es un parámetro genérico "desnudo" y recibe una unión, el condicional **se aplica a cada
+miembro por separado** y los resultados se unen. Así funciona `Exclude`:
+
+```ts
+type MyExclude<T, U> = T extends U ? never : T;
+
+type Status = "pending" | "promised" | "paid";
+type Open = MyExclude<Status, "paid">;
+// = ("pending" extends "paid" ? never : "pending") | ("promised" extends ...) | ("paid" extends ...)
+// = "pending" | "promised"
+```
+
+Para evitar la distribución se envuelve en una tupla: `[T] extends [U] ? X : Y`.
+
+<MermaidDiagram
+  caption="Un conditional type distributivo procesa cada miembro de la unión por separado y une los resultados."
+  chart={`
+flowchart LR
+  U["'pending' | 'promised' | 'paid'"] --> P1["'pending' extends 'paid'?<br/>no: 'pending'"]
+  U --> P2["'promised' extends 'paid'?<br/>no: 'promised'"]
+  U --> P3["'paid' extends 'paid'?<br/>sí: never"]
+  P1 --> R["'pending' | 'promised'"]
+  P2 --> R
+  P3 --> R
+`}
+/>
+
+### infer: extraer partes de un tipo
+
+Dentro del `extends` se puede declarar una variable de tipo con `infer` que el compilador deduce al comparar:
+
+```ts
+type MyReturnType<F> = F extends (...args: never[]) => infer R ? R : never;
+type ElementOf<T> = T extends readonly (infer E)[] ? E : never;
+type UnwrapPromise<T> = T extends Promise<infer V> ? V : T;
+
+type E = ElementOf<Debt[]>; // Debt
+type V = UnwrapPromise<Promise<number>>; // number
+```
+
+Un ejemplo útil en la práctica: obtener el tipo del payload de un evento a partir de su nombre.
+
+```ts
+type DomainEvent =
+  | { type: "debt.created"; payload: { debtId: string; amountCents: number } }
+  | { type: "payment.received"; payload: { debtId: string; paidCents: number } };
+
+type EventPayload<T extends DomainEvent["type"]> = Extract<DomainEvent, { type: T }>["payload"];
+
+function on<T extends DomainEvent["type"]>(type: T, handler: (payload: EventPayload<T>) => void) {}
+
+on("payment.received", (payload) => {
+  payload.paidCents; // ✅ el handler conoce el payload exacto
+});
+```
+
+## Template literal types
+
+Permiten tipar strings con estructura, combinando literales y uniones:
+
+```ts
+type DebtId = `debt_${string}`;
+type Channel = "sms" | "email";
+type ChannelEvent = `${Channel}.${"sent" | "delivered" | "failed"}`;
+// "sms.sent" | "sms.delivered" | "sms.failed" | "email.sent" | ...
+
+const id: DebtId = "debt_123"; // ✅
+const wrong: DebtId = "cus_123"; // ❌
+
+type EnvKey = Uppercase<`app_${"db_url" | "api_key"}`>; // "APP_DB_URL" | "APP_API_KEY"
+```
+
+`Uppercase`, `Lowercase`, `Capitalize` y `Uncapitalize` son utility types intrínsecos para strings.
+
+<Callout type="warning" title="Un template literal type no valida en runtime">
+  `debt_${string}` sólo verifica strings que el compilador conoce. Un ID que llega por HTTP sigue siendo
+  `unknown` hasta que lo validás.
+</Callout>
+
+## Cuándo no usar tipos derivados complejos
+
+Los tipos derivados son código: tienen costo de lectura, de mensajes de error y de tiempo de compilación.
+
+- **Sí:** derivar inputs de una entidad, mapear eventos a payloads, tablas `Record` por estado, tipar claves de
+  configuración.
+- **Con cuidado:** tipos recursivos profundos (rutas de objetos anidados como `"customer.address.city"`), que
+  generan errores ilegibles y compilación lenta.
+- **No:** reimplementar lógica de negocio en el sistema de tipos. Si un test en runtime lo cubre de forma más
+  simple, preferí el test.
+
+Una buena señal: si un tipo necesita un comentario de diez líneas para entenderse, probablemente un tipo explícito
+más simple sea mejor.
+
+## Comparación con C# y Java
+
+| Necesidad                        | C#                                | Java                    | TypeScript                            |
+| -------------------------------- | --------------------------------- | ----------------------- | ------------------------------------- |
+| DTO derivado de una entidad      | Clase nueva + AutoMapper/Mapperly | Clase nueva + MapStruct | `Omit`, `Pick`, `Partial`             |
+| Todas las propiedades opcionales | Clase nueva con nullables         | Clase nueva             | `Partial<T>`                          |
+| Tipo de retorno de un método     | Reflection                        | Reflection              | `ReturnType<typeof f>`                |
+| Strings con formato              | Validación en runtime             | Validación en runtime   | Template literal types (+ validación) |
+| Generación de tipos              | Source generators                 | Annotation processors   | Mapped y conditional types            |
+
+C# y Java resuelven estos problemas con generación de código o reflection en runtime. TypeScript los resuelve en
+el compilador, sin generar nada, porque su sistema de tipos es estructural y puede operar sobre las claves.
+
+## Errores frecuentes
+
+- **Typos en `Omit`.** `Omit<Debt, "internalScor">` compila sin error y no quita nada. Un tipo propio
+  `StrictOmit<T, K extends keyof T>` lo previene.
+- **Usar `Omit` sobre una discriminated union.** Colapsa los miembros en uno solo y se pierde el narrowing. Se
+  resuelve con una versión distributiva: `type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never`.
+- **`Partial` profundo esperado.** `Partial` es superficial: los objetos anidados siguen con sus propiedades
+  obligatorias.
+- **Esperar que un template literal valide datos externos.** Es sólo compilación.
+- **Abusar de los conditional types en APIs públicas.** Los mensajes de error se vuelven incomprensibles para
+  quien usa la API.
+
+## Ejercicio interactivo
+
+<KnowledgeCheck
+  id="typescript.type-transformations.q1"
+  question="¿Qué resultado da `Exclude<'pending' | 'promised' | 'paid', 'paid' | 'promised'>`?"
+  options={[
+    {
+      text: "`'pending'`",
+      correct: true,
+      explanation:
+        "Correcto. El condicional se distribuye sobre cada miembro y descarta los asignables a la segunda unión.",
+    },
+    {
+      text: "`never`",
+      explanation: "Sólo sería never si todos los miembros fueran asignables a la segunda unión.",
+    },
+    { text: "`'paid' | 'promised'`", explanation: "Eso es lo que devolvería Extract." },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="typescript.type-transformations.q2"
+  question="¿Qué tipo produce `{ [K in keyof T as T[K] extends Function ? never : K]: T[K] }` sobre una clase con propiedades y métodos?"
+  options={[
+    {
+      text: "Sólo los métodos.",
+      explanation: "Es al revés: las claves cuyo valor es función se mapean a never y se eliminan.",
+    },
+    {
+      text: "Sólo las propiedades que no son funciones.",
+      correct: true,
+      explanation: "Correcto. Devolver never en el remapeo con as elimina la clave del resultado.",
+    },
+    {
+      text: "Todas las propiedades, como readonly.",
+      explanation: "No hay ningún modificador readonly en el mapped type.",
+    },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="typescript.type-transformations.q3"
+  question="Necesitás el tipo de lo que resuelve una función async `loadDashboard`. ¿Qué escribís?"
+  options={[
+    {
+      text: "`ReturnType<typeof loadDashboard>`",
+      explanation: "Eso devuelve la Promise, no el valor resuelto.",
+    },
+    {
+      text: "`Awaited<ReturnType<typeof loadDashboard>>`",
+      correct: true,
+      explanation: "Correcto. ReturnType da la Promise y Awaited la desenvuelve.",
+    },
+    { text: "`typeof loadDashboard`", explanation: "Eso es el tipo de la función completa." },
+  ]}
+/>

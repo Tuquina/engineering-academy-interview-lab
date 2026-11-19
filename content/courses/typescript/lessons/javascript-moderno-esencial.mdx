@@ -1,0 +1,502 @@
+---
+id: typescript.modern-javascript
+moduleId: typescript.intro
+title: "JavaScript moderno esencial para quien viene de C# y Java"
+description: "La sintaxis que vas a leer en todo código TypeScript: variables y alcance, igualdad, valores truthy y falsy, funciones y this, objetos, destructuring, spread, optional chaining, métodos de arrays, clases, módulos y manejo de errores."
+difficulty: basic
+order: 2
+objectives:
+  - "Elegir entre const y let y explicar por qué var ya no se usa."
+  - "Comparar valores con === y predecir qué valores son truthy o falsy."
+  - "Escribir funciones declaradas y arrow functions, y explicar cómo cambia this en cada una."
+  - "Usar destructuring, spread, optional chaining y nullish coalescing para trabajar con objetos."
+  - "Transformar colecciones con map, filter, reduce y find, comparándolos con LINQ y Streams."
+  - "Escribir clases y módulos ES con import y export."
+prerequisites: ["typescript.introduction"]
+estimatedMinutes: 45
+tags: ["javascript", "sintaxis", "funciones", "clases", "módulos", "c#", "java"]
+version: "1.0.0"
+comparesWith: ["csharp", "java"]
+references:
+  - title: "MDN — JavaScript Guide"
+    url: "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide"
+  - title: "MDN — Equality comparisons and sameness"
+    url: "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Equality_comparisons_and_sameness"
+  - title: "MDN — this"
+    url: "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Operators/this"
+  - title: "MDN — JavaScript modules"
+    url: "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Modules"
+  - title: "TypeScript Handbook — Classes"
+    url: "https://www.typescriptlang.org/docs/handbook/2/classes.html"
+interviewQuestions:
+  - question: "¿Cuál es la diferencia entre == y === en JavaScript?"
+    keyPoints:
+      - "=== compara sin conversión de tipos (igualdad estricta); == aplica coerción y produce resultados sorprendentes."
+      - "Se usa siempre ===; la excepción habitual es value == null para cubrir null y undefined a la vez."
+      - "Los objetos se comparan por referencia con ambos operadores, nunca por contenido."
+  - question: "¿Cómo se comporta this en una arrow function frente a una función normal?"
+    keyPoints:
+      - "En una función normal, this depende de cómo se la llama (el objeto antes del punto, call/apply/bind o undefined en modo estricto)."
+      - "Una arrow function no tiene this propio: usa el del contexto donde se definió (léxico)."
+      - "Por eso las arrow functions son la opción natural para callbacks dentro de métodos de clase."
+      - "Pasar un método como callback (array.map(obj.method)) pierde el this si es una función normal."
+  - question: "¿Qué diferencia hay entre ?? y ||?"
+    keyPoints:
+      - "|| devuelve el lado derecho ante cualquier valor falsy: 0, '', false, NaN, null o undefined."
+      - "?? sólo lo hace ante null o undefined."
+      - "Para valores por defecto donde 0 o '' son válidos (montos, nombres vacíos), se usa ??."
+summary:
+  - "Usá const por defecto y let cuando reasignás; var tiene alcance de función y se considera obsoleto."
+  - "Compará siempre con ===; los objetos y arrays se comparan por referencia."
+  - "Falsy: false, 0, -0, 0n, '', null, undefined y NaN. Todo lo demás es truthy, incluidos [] y {}."
+  - "Las arrow functions capturan el this del contexto; las funciones normales lo reciben según cómo se las llame."
+  - "Destructuring, spread, ?. y ?? son la forma idiomática de leer y copiar objetos sin mutarlos."
+  - "map, filter, reduce y find equivalen a Select, Where, Aggregate y FirstOrDefault de LINQ, pero son eager."
+  - "Los módulos ES usan import y export; cada archivo tiene su propio alcance."
+  - "throw acepta cualquier valor: en el catch, el error es unknown y hay que verificarlo."
+---
+
+## Por qué una lección de JavaScript en un curso de TypeScript
+
+TypeScript **no cambia cómo se comporta JavaScript**: sólo le agrega tipos. Todo lo que se ejecuta (comparaciones,
+`this`, closures, módulos) sigue las reglas de JavaScript. Muchos errores de quienes vienen de C# o Java no son de
+tipos sino de semántica de JavaScript: `this` que se pierde, `||` que pisa un `0`, objetos comparados por
+referencia.
+
+Esta lección es una referencia rápida de la sintaxis que vas a ver en todo el curso. Si algo ya lo conocés, salteá
+esa sección.
+
+## Variables y alcance
+
+```ts
+const maxRetries = 3; // no se puede reasignar
+let attempt = 0; // se puede reasignar
+attempt += 1;
+
+const customer = { name: "Ana" };
+customer.name = "Ana María"; // ✅ const impide reasignar la variable, no mutar el objeto
+// customer = { name: "Luis" }; ❌ Error: no se puede reasignar una constante
+```
+
+- **`const` por defecto, `let` cuando necesitás reasignar.** Es la convención de prácticamente todos los equipos.
+- `const` es como `final` en Java o `readonly` local: **la referencia es fija, el objeto no es inmutable**.
+- Ambos tienen **alcance de bloque** (`{ ... }`), igual que en C# y Java.
+- **`var` no se usa más:** tiene alcance de función y se "eleva" (hoisting) al principio de la función, lo que
+  produce bugs sutiles. Si lo ves, es código viejo.
+
+## Igualdad y valores truthy/falsy
+
+```ts
+1 === 1; // true
+"1" === 1; // false: tipos distintos, sin conversión
+"1" == 1; // true: == convierte tipos (coerción). Por eso no se usa.
+
+[1, 2] === [1, 2]; // false: dos arrays distintos (referencias distintas)
+{ id: 1 } === { id: 1 }; // false, por la misma razón
+```
+
+**Regla:** usá siempre `===` y `!==`. La única excepción aceptada es `value == null`, que es `true` para `null` y
+para `undefined` a la vez. Los objetos y arrays **se comparan por referencia**, como las clases en C# y Java (no hay
+`Equals` sobrescribible).
+
+En una condición (`if`, `while`, `&&`, `||`, `!`) cualquier valor se convierte a booleano:
+
+| Falsy (se comporta como `false`)                           | Truthy (todo lo demás)                                       |
+| ---------------------------------------------------------- | ------------------------------------------------------------ |
+| `false`, `0`, `-0`, `0n`, `""`, `null`, `undefined`, `NaN` | `"0"`, `"false"`, `[]`, `{}`, cualquier número distinto de 0 |
+
+```ts
+function describeBalance(balanceCents: number | undefined): string {
+  if (!balanceCents) return "Sin saldo"; // ❌ trata un saldo de 0 igual que "no hay dato"
+  return `Saldo: ${balanceCents}`;
+}
+
+function describeBalanceFixed(balanceCents: number | undefined): string {
+  if (balanceCents === undefined) return "Sin dato"; // ✅ distingue ausencia de cero
+  return `Saldo: ${balanceCents}`;
+}
+```
+
+## Strings y template literals
+
+```ts
+const name = "Ana";
+const amount = 1500;
+const message = `Hola ${name}, tu deuda es de ${amount / 100} USD`; // interpolación con backticks
+const multiline = `Línea 1
+Línea 2`;
+```
+
+Comillas simples y dobles son equivalentes. Los backticks permiten interpolar y escribir varias líneas, como `$"..."`
+en C# o los text blocks de Java.
+
+## Funciones y this
+
+Hay dos sintaxis principales:
+
+```ts
+// Declaración de función: tiene nombre y se puede usar antes de su definición (hoisting)
+function add(a: number, b: number): number {
+  return a + b;
+}
+
+// Arrow function: expresión, ideal para callbacks
+const multiply = (a: number, b: number): number => a * b;
+const square = (x: number) => x * x; // retorno implícito con una sola expresión
+const toEntry = (id: string) => ({ id, createdAt: Date.now() }); // para devolver un objeto, entre paréntesis
+```
+
+Las funciones son **valores**: se guardan en variables, se pasan como argumentos y se devuelven. Una función
+recuerda las variables del lugar donde fue creada (**closure**), igual que las lambdas de C# y Java, pero sin la
+restricción de Java de que sean _effectively final_.
+
+```ts
+function createCounter() {
+  let count = 0;
+  return () => ++count; // la arrow function "recuerda" count
+}
+
+const next = createCounter();
+next(); // 1
+next(); // 2
+```
+
+### Parámetros opcionales, por defecto y rest
+
+```ts
+function sendReminder(customerId: string, channel: "sms" | "email" = "sms", note?: string): void {
+  // note puede ser undefined
+}
+
+function sumAll(...values: number[]): number {
+  return values.reduce((acc, value) => acc + value, 0); // como params en C# o varargs en Java
+}
+```
+
+### this: la mayor diferencia con C# y Java
+
+En C# y Java, `this` siempre es la instancia de la clase. En JavaScript, **en una función normal `this` depende de
+cómo se llama a la función**, no de dónde se definió. Una arrow function, en cambio, **no tiene `this` propio**: usa
+el del contexto donde se creó.
+
+```ts
+class ReminderScheduler {
+  private sent = 0;
+
+  // ❌ Método normal usado como callback: this se pierde
+  markSent() {
+    this.sent++;
+  }
+
+  // ✅ Propiedad con arrow function: this queda fijo en la instancia
+  markSentSafe = () => {
+    this.sent++;
+  };
+}
+
+const scheduler = new ReminderScheduler();
+const ids = ["c1", "c2"];
+ids.forEach(scheduler.markSent); // TypeError: Cannot read properties of undefined
+ids.forEach(scheduler.markSentSafe); // ✅
+ids.forEach(() => scheduler.markSent()); // ✅ también: se llama como método
+```
+
+<MermaidDiagram
+  caption="Cómo se decide this en una función normal frente a una arrow function."
+  chart={`
+flowchart TD
+  A{"¿Es una arrow function?"} -->|Sí| B["this = el this del lugar donde se definió"]
+  A -->|No| C{"¿Cómo se llamó?"}
+  C -->|"obj.metodo()"| D["this = obj"]
+  C -->|"new Clase()"| E["this = la nueva instancia"]
+  C -->|"fn.call(x) o fn.bind(x)"| F["this = x"]
+  C -->|"fn() suelta"| G["this = undefined en modo estricto"]
+`}
+/>
+
+## Objetos: atajos, destructuring y spread
+
+```ts
+const id = "debt_1";
+const amountCents = 150_000;
+
+const debt = { id, amountCents, status: "pending" }; // atajo: { id: id, amountCents: amountCents }
+
+// Destructuring: extraer propiedades en variables
+const { status, amountCents: amount } = debt; // renombra amountCents a amount
+
+// Destructuring en parámetros, muy común en funciones con muchas opciones
+function createPromise({ debtId, dueDate }: { debtId: string; dueDate: string }) {
+  return { debtId, dueDate };
+}
+
+// Arrays también se desestructuran
+const [first, second, ...rest] = [10, 20, 30, 40]; // rest = [30, 40]
+
+// Spread: copiar y combinar sin mutar (copia superficial)
+const paidDebt = { ...debt, status: "paid", paidAt: "2026-11-19" };
+const allAmounts = [...[1, 2], ...[3, 4]];
+```
+
+`{ ...debt, status: "paid" }` es el equivalente idiomático de un `with` sobre un `record` de C#: crea un objeto
+nuevo con una propiedad cambiada. Es la base de la inmutabilidad en React y en reducers.
+
+<Callout type="warning" title="Spread copia un solo nivel">
+  `{...debt}` copia las propiedades del primer nivel. Si `debt.customer` es un objeto, la copia y el original
+  comparten la misma referencia. Para una copia profunda de datos simples existe `structuredClone(debt)`.
+</Callout>
+
+### Optional chaining y nullish coalescing
+
+```ts
+interface Customer {
+  name: string;
+  contact?: { email?: string; phone?: string };
+}
+
+function preferredChannel(customer: Customer): string {
+  // ?. corta y devuelve undefined si lo de la izquierda es null o undefined
+  const email = customer.contact?.email;
+  // ?? usa el valor de la derecha sólo si la izquierda es null o undefined
+  return email ?? customer.contact?.phone ?? "sin contacto";
+}
+
+const retries = 0;
+retries || 3; // 3 ❌: 0 es falsy y || lo descarta
+retries ?? 3; // 0 ✅: ?? sólo reemplaza null y undefined
+```
+
+Son los mismos operadores `?.` y `??` de C#. En Java el equivalente es encadenar `Optional`.
+
+## Arrays y sus métodos funcionales
+
+```ts
+interface Installment {
+  number: number;
+  amountCents: number;
+  paid: boolean;
+}
+
+const installments: Installment[] = [
+  { number: 1, amountCents: 50_000, paid: true },
+  { number: 2, amountCents: 50_000, paid: false },
+  { number: 3, amountCents: 50_000, paid: false },
+];
+
+const pending = installments.filter((i) => !i.paid); // Where
+const amounts = pending.map((i) => i.amountCents); // Select
+const totalPending = amounts.reduce((acc, value) => acc + value, 0); // Aggregate
+const firstPending = installments.find((i) => !i.paid); // FirstOrDefault (o undefined)
+const anyPaid = installments.some((i) => i.paid); // Any
+const allPaid = installments.every((i) => i.paid); // All
+const sorted = installments.toSorted((a, b) => b.amountCents - a.amountCents); // OrderByDescending, sin mutar
+```
+
+| JavaScript               | C# (LINQ)            | Java (Streams)            |
+| ------------------------ | -------------------- | ------------------------- |
+| `map`                    | `Select`             | `map`                     |
+| `filter`                 | `Where`              | `filter`                  |
+| `reduce`                 | `Aggregate`          | `reduce`                  |
+| `find`                   | `FirstOrDefault`     | `filter(...).findFirst()` |
+| `some` / `every`         | `Any` / `All`        | `anyMatch` / `allMatch`   |
+| `flatMap`                | `SelectMany`         | `flatMap`                 |
+| `toSorted`, `toReversed` | `OrderBy`, `Reverse` | `sorted`                  |
+
+Dos diferencias importantes: los métodos de arrays son **eager** (cada `map` o `filter` crea un array nuevo, no hay
+ejecución diferida como en LINQ o Streams), y **`sort`, `reverse` y `splice` mutan el array original**. Para no mutar
+existen `toSorted`, `toReversed` y `toSpliced`.
+
+Para diccionarios y conjuntos, JavaScript tiene `Map` y `Set`, equivalentes a `Dictionary` y `HashSet`:
+
+```ts
+const byCustomer = new Map<string, Installment[]>();
+byCustomer.set("cus_1", installments);
+byCustomer.get("cus_1"); // Installment[] | undefined
+
+const seenEvents = new Set<string>();
+seenEvents.add("evt_1");
+seenEvents.has("evt_1"); // true
+```
+
+## Clases
+
+```ts
+class PaymentPromise {
+  // Campo con #: privado real en runtime. private de TypeScript se borra al compilar.
+  #reminders = 0;
+  static readonly maxReminders = 3;
+
+  constructor(
+    readonly debtId: string, // parameter property: declara y asigna el campo
+    private dueDate: Date,
+  ) {}
+
+  get isDue(): boolean {
+    return this.dueDate.getTime() <= Date.now();
+  }
+
+  remind(): boolean {
+    if (this.#reminders >= PaymentPromise.maxReminders) return false;
+    this.#reminders++;
+    return true;
+  }
+}
+
+class PartialPaymentPromise extends PaymentPromise {
+  constructor(
+    debtId: string,
+    dueDate: Date,
+    readonly amountCents: number,
+  ) {
+    super(debtId, dueDate);
+  }
+}
+```
+
+Las clases existen, funcionan como esperás y soportan herencia simple, `abstract`, `implements` de interfaces,
+getters y miembros estáticos. Pero en TypeScript idiomático **se usan menos que en C# o Java**: los datos se modelan
+con interfaces y objetos literales, y la lógica con funciones. Las clases se reservan para cuando hay estado
+encapsulado con comportamiento (un cliente HTTP, un repositorio, un caso de uso con dependencias).
+
+## Módulos ES
+
+Cada archivo es un módulo con su propio alcance. Lo que no se exporta es privado al archivo.
+
+```ts
+// src/debts/format.ts
+export function formatAmount(amountCents: number): string {
+  return (amountCents / 100).toFixed(2);
+}
+
+export const DEFAULT_CURRENCY = "USD";
+
+export default class DebtFormatter {}
+```
+
+```ts
+// src/main.ts
+import DebtFormatter, { formatAmount, DEFAULT_CURRENCY } from "./debts/format.js";
+import * as format from "./debts/format.js"; // todo el módulo como objeto
+import type { Debt } from "./debts/types.js"; // import sólo de tipos: se borra al compilar
+```
+
+- Un módulo se parece más a un archivo con miembros `internal` que a un `namespace` o un `package`.
+- **Preferí exports con nombre** sobre `export default`: se renombran con refactors y se buscan más fácil.
+- `import type` deja explícito que sólo importás tipos; con `verbatimModuleSyntax` es obligatorio.
+- En Node.js con ESM, los imports relativos llevan extensión (`.js`), aunque el archivo fuente sea `.ts`.
+- Existe un sistema anterior, CommonJS (`require` y `module.exports`). Lo vas a ver en código de Node.js viejo; el
+  curso de Node.js explica cómo conviven.
+
+## Errores y excepciones
+
+```ts
+class DebtNotFoundError extends Error {
+  constructor(readonly debtId: string) {
+    super(`No existe la deuda ${debtId}`);
+    this.name = "DebtNotFoundError";
+  }
+}
+
+try {
+  throw new DebtNotFoundError("debt_1");
+} catch (error) {
+  // error es unknown: en JavaScript se puede lanzar cualquier valor, incluso un string
+  if (error instanceof DebtNotFoundError) {
+    console.log(error.debtId);
+  } else {
+    throw error;
+  }
+} finally {
+  console.log("siempre se ejecuta");
+}
+```
+
+- No hay **excepciones chequeadas** como en Java ni `throws` en la firma: nada indica qué puede lanzar una función.
+- No hay `catch` por tipo: se captura todo y se discrimina con `instanceof`.
+- Por eso, para errores esperables del dominio, muchos equipos usan un **tipo Result** en lugar de excepciones (lo
+  vemos en el módulo de diseño).
+
+## Comparación con C# y Java
+
+| Tema                | C#                      | Java                       | JavaScript / TypeScript                             |
+| ------------------- | ----------------------- | -------------------------- | --------------------------------------------------- |
+| Variable inmutable  | `readonly`, `const`     | `final`                    | `const` (sólo la referencia)                        |
+| Igualdad de objetos | `Equals` sobrescribible | `equals` sobrescribible    | Sólo por referencia                                 |
+| `this`              | Siempre la instancia    | Siempre la instancia       | Depende de la llamada (salvo arrow functions)       |
+| Copiar con cambios  | `record with { }`       | Constructor o builder      | `{ ...obj, prop: valor }`                           |
+| Null-safe           | `?.` y `??`             | `Optional`                 | `?.` y `??`                                         |
+| Colecciones         | LINQ diferido           | Streams diferidos          | Métodos de arrays eager                             |
+| Visibilidad         | `private`, `internal`   | `private`, package-private | `#campo` (runtime), `private` (sólo tipos), módulos |
+| Excepciones         | Sin chequear            | Chequeadas y no chequeadas | Se lanza cualquier valor; `catch` recibe `unknown`  |
+
+## Errores frecuentes
+
+- **Usar `||` para valores por defecto numéricos.** `limit || 10` convierte un `0` legítimo en `10`. Usá `??`.
+- **Comparar objetos con `===` esperando igualdad por valor.** Compará propiedades o IDs.
+- **Pasar métodos como callbacks.** `promise.then(this.handle)` pierde el `this`; usá una arrow function.
+- **Mutar con `sort` o `reverse`.** Ordenar un array que recibiste como parámetro lo modifica para quien te lo pasó.
+- **Olvidar `await` o el `return` en una arrow function con llaves.** `items.map((i) => { i.amountCents })` devuelve
+  `undefined` por cada elemento: con llaves hace falta `return`.
+- **Lanzar strings.** `throw "error"` pierde el stack trace; lanzá siempre instancias de `Error`.
+
+## Ejercicio interactivo
+
+<KnowledgeCheck
+  id="typescript.modern-javascript.q1"
+  question="Una configuración tiene `maxAttempts: 0` para desactivar reintentos. ¿Qué devuelve `config.maxAttempts || 3`?"
+  options={[
+    {
+      text: "`0`",
+      explanation: "`||` trata a 0 como falsy y devuelve el lado derecho.",
+    },
+    {
+      text: "`3`",
+      correct: true,
+      explanation:
+        "Correcto, y es un bug: la configuración se ignora. Con `config.maxAttempts ?? 3` el resultado sería 0.",
+    },
+    {
+      text: "`undefined`",
+      explanation: "`||` siempre devuelve uno de los dos operandos.",
+    },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="typescript.modern-javascript.q2"
+  question="¿Por qué `ids.forEach(scheduler.markSent)` falla con `Cannot read properties of undefined` si `markSent` es un método normal que usa `this`?"
+  options={[
+    {
+      text: "Porque forEach no acepta métodos de clase.",
+      explanation: "forEach acepta cualquier función; el problema es el valor de this dentro de ella.",
+    },
+    {
+      text: "Porque la función se llama suelta, sin el objeto antes del punto, y this queda undefined.",
+      correct: true,
+      explanation:
+        "Correcto. Se soluciona con una arrow function (`(id) => scheduler.markSent(id)`), con `bind` o definiendo el método como propiedad arrow.",
+    },
+    {
+      text: "Porque markSent es privado.",
+      explanation: "La visibilidad no tiene que ver: el error ocurre en runtime por el valor de this.",
+    },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="typescript.modern-javascript.q3"
+  question="¿Cuál de estas expresiones NO modifica el array `amounts` original?"
+  options={[
+    {
+      text: "`amounts.sort((a, b) => a - b)`",
+      explanation: "`sort` ordena en el lugar y devuelve el mismo array.",
+    },
+    { text: "`amounts.reverse()`", explanation: "`reverse` también muta el array original." },
+    {
+      text: "`amounts.toSorted((a, b) => a - b)`",
+      correct: true,
+      explanation: "Correcto. `toSorted` devuelve un array nuevo ordenado y deja el original intacto.",
+    },
+    { text: "`amounts.splice(0, 1)`", explanation: "`splice` elimina elementos del array original." },
+  ]}
+/>

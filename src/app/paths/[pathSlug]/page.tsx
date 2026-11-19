@@ -97,7 +97,9 @@ export default async function PathPage({ params }: PathPageProps) {
                         Curso: {course.title}
                       </span>
                       <span className="text-muted text-xs">
-                        {count > 0 ? `${count} lecciones` : "lecciones en preparación"}
+                        {count > 0
+                          ? `${count} ${count === 1 ? "lección" : "lecciones"}`
+                          : "lecciones en preparación"}
                       </span>
                     </Link>
                   </li>

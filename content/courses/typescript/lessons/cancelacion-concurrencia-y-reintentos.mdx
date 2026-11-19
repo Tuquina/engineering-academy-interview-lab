@@ -1,0 +1,414 @@
+---
+id: typescript.async-control
+moduleId: typescript.async
+title: "Controlar la asincronía: cancelación, timeouts, concurrencia limitada, race conditions y reintentos"
+description: "Lo que separa código async que funciona en una demo de código async que aguanta producción: cancelar con AbortController, poner timeouts a todo, limitar cuántas operaciones corren a la vez, evitar race conditions entre awaits y reintentar con backoff exponencial y jitter sólo lo que es seguro reintentar."
+difficulty: advanced
+order: 2
+objectives:
+  - "Cancelar operaciones con AbortController y AbortSignal, y propagar la señal a través de capas."
+  - "Aplicar timeouts con AbortSignal.timeout y combinar señales con AbortSignal.any."
+  - "Limitar la concurrencia de un lote de tareas sin saturar a un proveedor externo."
+  - "Detectar race conditions entre awaits en código de un solo hilo y corregirlas."
+  - "Implementar reintentos con backoff exponencial, jitter y clasificación de errores reintentables."
+prerequisites: ["typescript.promises-task-completablefuture"]
+estimatedMinutes: 50
+tags:
+  ["abortcontroller", "timeouts", "concurrencia", "race conditions", "reintentos", "backoff", "c#", "java"]
+version: "1.0.0"
+comparesWith: ["csharp", "java"]
+references:
+  - title: "MDN — AbortController"
+    url: "https://developer.mozilla.org/en-US/docs/Web/API/AbortController"
+  - title: "MDN — AbortSignal.timeout()"
+    url: "https://developer.mozilla.org/en-US/docs/Web/API/AbortSignal/timeout_static"
+  - title: "MDN — AbortSignal.any()"
+    url: "https://developer.mozilla.org/en-US/docs/Web/API/AbortSignal/any_static"
+  - title: "Node.js — Unhandled rejections"
+    url: "https://nodejs.org/api/cli.html#--unhandled-rejectionsmode"
+  - title: "AWS Architecture Blog — Exponential Backoff And Jitter"
+    url: "https://aws.amazon.com/blogs/architecture/exponential-backoff-and-jitter/"
+  - title: ".NET — Task cancellation"
+    url: "https://learn.microsoft.com/en-us/dotnet/standard/parallel-programming/task-cancellation"
+interviewQuestions:
+  - question: "¿Cómo cancelarías una operación asíncrona en TypeScript?"
+    keyPoints:
+      - "Con AbortController: se crea un controller, se pasa controller.signal a la operación y se llama abort()."
+      - "fetch y muchas APIs de Node.js aceptan signal de forma nativa; el código propio debe escuchar el evento abort o chequear signal.aborted."
+      - "La señal se propaga como parámetro por todas las capas, igual que un CancellationToken en .NET."
+      - "Cancelar no deshace efectos ya producidos: hay que diseñar operaciones idempotentes o compensables."
+  - question: "Tenés que enviar 10.000 recordatorios a una API que permite 20 llamadas concurrentes. ¿Cómo lo harías?"
+    keyPoints:
+      - "No usar Promise.all sobre las 10.000: dispara todas a la vez y satura al proveedor y a la memoria."
+      - "Un pool de N workers que toman tareas de una cola compartida, o un limitador de concurrencia (semáforo)."
+      - "Promise.allSettled o recolección de resultados por tarea para no abortar el lote por un fallo."
+      - "Timeouts por llamada, reintentos con backoff para errores transitorios y respeto del Retry-After."
+  - question: "¿Puede haber race conditions en Node.js si es de un solo hilo?"
+    keyPoints:
+      - "Sí: entre dos await otro flujo puede ejecutar y cambiar el estado compartido."
+      - "Ejemplo típico: leer saldo, await, escribir saldo; dos requests concurrentes pierden una actualización."
+      - "Se resuelve con operaciones atómicas en la base (UPDATE condicional, transacciones, locks), idempotencia o serializando por clave."
+  - question: "¿Qué es el backoff exponencial con jitter y por qué hace falta el jitter?"
+    keyPoints:
+      - "Esperar cada vez más entre reintentos (base * 2^intento) con un tope máximo."
+      - "Sin jitter, muchos clientes que fallaron a la vez reintentan a la vez y generan picos sincronizados."
+      - "El jitter aleatoriza la espera y dispersa la carga."
+      - "Sólo se reintentan errores transitorios y operaciones idempotentes, con un número máximo de intentos."
+summary:
+  - "Una Promise no se puede cancelar: lo que se cancela es el trabajo, mediante un AbortSignal que el trabajo escucha."
+  - "AbortSignal.timeout(ms) da timeouts sin timers manuales; AbortSignal.any combina la señal del usuario con el timeout."
+  - "Toda llamada a red necesita un timeout: sin él, una dependencia lenta retiene recursos indefinidamente."
+  - "Promise.all sobre miles de tareas no limita nada: hace falta un pool o un semáforo de N."
+  - "Entre dos await el estado compartido puede cambiar: las race conditions existen aunque haya un solo hilo."
+  - "Reintentar sólo errores transitorios (red, 429, 5xx) y operaciones idempotentes, con backoff exponencial, tope y jitter."
+  - "Los rechazos no manejados terminan el proceso en Node.js: toda Promise debe tener quien la espere o la capture."
+---
+
+## ¿Qué problema resuelve?
+
+La lección anterior explicó qué es una Promise y cómo combinarlas. Con eso alcanza para escribir código que
+funciona **cuando todo sale bien**. En producción, una plataforma que llama a proveedores de mensajería, a modelos
+de lenguaje y a APIs de clientes enfrenta otra realidad:
+
+- El proveedor de SMS tarda 40 segundos en responder en lugar de 300 ms.
+- El usuario cerró la pestaña y la request ya no le importa a nadie, pero el servidor sigue trabajando.
+- Una campaña dispara 10.000 llamadas a la vez y el proveedor responde `429 Too Many Requests`.
+- Dos webhooks del mismo pago llegan casi juntos y el saldo queda mal.
+- Un error transitorio se reintenta inmediatamente, mil veces, y empeora la caída del proveedor.
+
+Esta lección cubre las herramientas para cada uno de esos problemas.
+
+## Cancelación con AbortController
+
+Una Promise **no se puede cancelar**: representa un resultado futuro, no el trabajo que lo produce. Lo que se
+cancela es **el trabajo**, y para eso JavaScript usa un mecanismo cooperativo: `AbortController` y `AbortSignal`.
+
+```ts
+const controller = new AbortController();
+
+const responsePromise = fetch("https://api.example.com/debts", { signal: controller.signal });
+
+controller.abort(); // fetch se interrumpe y la Promise se rechaza con un AbortError
+```
+
+- El **controller** es quien cancela; la **signal** es lo que se pasa a quien trabaja.
+- `fetch`, `setTimeout` de `node:timers/promises`, `fs/promises`, streams y la mayoría de los SDKs modernos aceptan
+  `signal`.
+- El código propio debe **cooperar**: chequear `signal.aborted`, llamar a `signal.throwIfAborted()` o escuchar el
+  evento `abort`.
+
+```ts
+/** Envía recordatorios hasta terminar o hasta que se cancele la señal. */
+async function sendReminders(customerIds: readonly string[], signal: AbortSignal): Promise<number> {
+  let sent = 0;
+  for (const customerId of customerIds) {
+    signal.throwIfAborted(); // corta entre iteraciones si se canceló
+    await notifier.send(customerId, { signal }); // y propaga la señal hacia abajo
+    sent++;
+  }
+  return sent;
+}
+```
+
+La señal se pasa **como parámetro por todas las capas**, del handler HTTP al cliente del proveedor. Es exactamente
+el patrón de `CancellationToken` en .NET.
+
+## Timeouts
+
+Una llamada de red sin timeout es un recurso que puede quedar retenido para siempre. `AbortSignal.timeout(ms)` crea
+una señal que se aborta sola:
+
+```ts
+const response = await fetch(url, { signal: AbortSignal.timeout(5_000) });
+```
+
+Para combinar "el cliente se fue" con "se agotó el tiempo", `AbortSignal.any` crea una señal que se aborta cuando
+cualquiera de las otras lo hace:
+
+```ts
+export async function GET(request: Request): Promise<Response> {
+  const signal = AbortSignal.any([request.signal, AbortSignal.timeout(8_000)]);
+  try {
+    const summary = await llmClient.summarize(conversationId, { signal });
+    return Response.json(summary);
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "TimeoutError") {
+      return Response.json({ error: "upstream_timeout" }, { status: 504 });
+    }
+    throw error;
+  }
+}
+```
+
+Cuando el timeout dispara, el error es un `DOMException` con `name === "TimeoutError"`; cuando se cancela
+manualmente, `name === "AbortError"`. Distinguirlos permite responder 504 en un caso y no hacer nada en el otro.
+
+<Callout type="warning" title="Promise.race no cancela al perdedor">
+  El patrón `Promise.race([operation, timeout(5000)])` devuelve a tiempo, pero la operación sigue corriendo en
+  segundo plano y consumiendo recursos. Con una señal, la operación realmente se detiene.
+</Callout>
+
+## Concurrencia limitada
+
+`Promise.all(items.map(send))` **no es concurrencia controlada**: dispara todas las operaciones en el mismo
+instante. Con 10.000 elementos, son 10.000 sockets, 10.000 respuestas en memoria y un proveedor que te bloquea.
+
+La solución es un **pool de workers**: N funciones async que toman tareas de una cola compartida hasta vaciarla.
+
+```ts
+/**
+ * Ejecuta `task` sobre cada elemento con como máximo `limit` operaciones simultáneas.
+ * Devuelve los resultados en el mismo orden que la entrada y no aborta el lote si una tarea falla.
+ */
+export async function mapWithConcurrency<T, R>(
+  items: readonly T[],
+  limit: number,
+  task: (item: T, index: number) => Promise<R>,
+): Promise<PromiseSettledResult<R>[]> {
+  const results: PromiseSettledResult<R>[] = new Array(items.length);
+  let nextIndex = 0;
+
+  async function worker(): Promise<void> {
+    while (nextIndex < items.length) {
+      const index = nextIndex++; // seguro: no hay await entre leer e incrementar
+      try {
+        results[index] = { status: "fulfilled", value: await task(items[index]!, index) };
+      } catch (reason) {
+        results[index] = { status: "rejected", reason };
+      }
+    }
+  }
+
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
+}
+```
+
+<MermaidDiagram
+  caption="Un pool de 3 workers procesa la cola: nunca hay más de 3 llamadas en vuelo."
+  chart={`
+flowchart LR
+  Q["Cola de tareas<br/>10.000 clientes"] --> W1["Worker 1"]
+  Q --> W2["Worker 2"]
+  Q --> W3["Worker 3"]
+  W1 --> P["Proveedor de SMS<br/>máximo 3 concurrentes"]
+  W2 --> P
+  W3 --> P
+  W1 --> R["Resultados por índice<br/>fulfilled o rejected"]
+  W2 --> R
+  W3 --> R
+`}
+/>
+
+Por qué funciona sin locks: JavaScript ejecuta un solo flujo a la vez y `nextIndex++` ocurre **sin un `await` en el
+medio**, así que dos workers nunca toman el mismo índice. Podés practicar esta implementación en el challenge
+[Limitador de concurrencia](/challenges/concurrency-limiter).
+
+Limitar la concurrencia no es lo mismo que limitar la **tasa** (requests por segundo). Si el proveedor impone
+"100 por minuto", hace falta un rate limiter (token bucket), tema del curso de System Design.
+
+## Race conditions con un solo hilo
+
+Node.js tiene un solo hilo de JavaScript, pero **entre dos `await` puede ejecutarse cualquier otro código**. Eso
+alcanza para producir race conditions clásicas:
+
+```ts
+// ❌ Lost update: dos pagos concurrentes de la misma deuda
+async function applyPayment(debtId: string, paidCents: number): Promise<void> {
+  const debt = await debtRepository.findById(debtId); // 1. lee saldo: 10.000
+  // ← acá puede ejecutarse otro applyPayment del mismo debtId y leer también 10.000
+  const newBalance = debt.balanceCents - paidCents;
+  await debtRepository.updateBalance(debtId, newBalance); // 2. escribe: el último pisa al primero
+}
+```
+
+<MermaidDiagram
+  caption="Dos flujos leen el mismo saldo antes de que cualquiera escriba: una de las dos actualizaciones se pierde."
+  chart={`
+sequenceDiagram
+  participant A as Webhook A (3.000)
+  participant DB as Base de datos
+  participant B as Webhook B (2.000)
+  A->>DB: SELECT balance (10.000)
+  B->>DB: SELECT balance (10.000)
+  A->>DB: UPDATE balance = 7.000
+  B->>DB: UPDATE balance = 8.000
+  Note over DB: El saldo correcto era 5.000
+`}
+/>
+
+Soluciones, de la más recomendable a la más local:
+
+1. **Operación atómica en la base:** `UPDATE debts SET balance_cents = balance_cents - $1 WHERE id = $2`. La base
+   serializa las escrituras.
+2. **Concurrencia optimista:** un campo `version`; el `UPDATE ... WHERE version = $v` falla si otro escribió antes y
+   se reintenta.
+3. **Idempotencia:** guardar el `paymentId` con una constraint única para que el mismo webhook no se aplique dos
+   veces.
+4. **Serializar por clave en memoria:** encadenar las operaciones del mismo `debtId`. Sólo funciona con **una única
+   instancia** del proceso; con varias réplicas, no protege nada.
+
+El challenge [Race condition en pagos](/challenges/payment-race-condition) reproduce este problema.
+
+## Reintentos con backoff exponencial y jitter
+
+Reintentar bien tiene cuatro reglas:
+
+1. **Sólo errores transitorios:** timeouts, errores de red, `429`, `502`, `503`, `504`. Un `400` o un `422` va a
+   fallar igual en el próximo intento.
+2. **Sólo operaciones idempotentes**, o con una _idempotency key_ que el servidor respete. Reintentar un cobro que
+   quizá se ejecutó puede cobrar dos veces.
+3. **Esperas crecientes con tope:** `base * 2^intento`, con un máximo.
+4. **Jitter:** aleatorizar la espera para que miles de clientes que fallaron juntos no reintenten juntos.
+
+```ts
+import { setTimeout as sleep } from "node:timers/promises";
+
+class RetryableError extends Error {
+  constructor(
+    message: string,
+    readonly retryAfterMs?: number,
+  ) {
+    super(message);
+    this.name = "RetryableError";
+  }
+}
+
+interface RetryOptions {
+  maxAttempts: number;
+  baseDelayMs: number;
+  maxDelayMs: number;
+  signal?: AbortSignal;
+}
+
+/** Reintenta sólo errores marcados como reintentables, con backoff exponencial y full jitter. */
+export async function withRetry<T>(
+  operation: (attempt: number) => Promise<T>,
+  options: RetryOptions,
+): Promise<T> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await operation(attempt);
+    } catch (error) {
+      const retryable = error instanceof RetryableError;
+      if (!retryable || attempt >= options.maxAttempts) throw error;
+
+      const exponential = Math.min(options.maxDelayMs, options.baseDelayMs * 2 ** (attempt - 1));
+      const delay = error.retryAfterMs ?? Math.random() * exponential; // respeta Retry-After si existe
+      await sleep(delay, undefined, { signal: options.signal }); // la espera también se cancela
+    }
+  }
+}
+```
+
+El simulador [Retry y backoff](/system-design/simulators/retry-backoff) muestra cómo cambia la carga sobre un
+servicio en recuperación con y sin jitter.
+
+## Rechazos no manejados
+
+Una Promise rechazada que nadie espera ni captura es un **unhandled rejection**. En Node.js moderno, eso **termina el
+proceso** por defecto.
+
+```ts
+// ❌ Se lanza y se olvida: si falla, el proceso puede caerse
+void auditLog.write(event);
+notifier.send(customerId); // sin await ni catch
+
+// ✅ Fire-and-forget explícito y capturado
+auditLog.write(event).catch((error) => logger.error({ error }, "audit_log_failed"));
+```
+
+La regla `@typescript-eslint/no-floating-promises` detecta Promises que no se esperan ni se capturan.
+
+## Comparación con C# y Java
+
+| Necesidad              | C#                                       | Java                                                 | TypeScript                                     |
+| ---------------------- | ---------------------------------------- | ---------------------------------------------------- | ---------------------------------------------- |
+| Cancelación            | `CancellationToken`                      | `Future.cancel`, interrupción, `StructuredTaskScope` | `AbortSignal`                                  |
+| Timeout                | `CancelAfter`, `WaitAsync(timeout)`      | `orTimeout`, `completeOnTimeout`                     | `AbortSignal.timeout`                          |
+| Combinar cancelaciones | `CreateLinkedTokenSource`                | Manual                                               | `AbortSignal.any`                              |
+| Limitar concurrencia   | `SemaphoreSlim`, `Parallel.ForEachAsync` | `Semaphore`, executors con N threads                 | Pool de workers o semáforo con Promises        |
+| Race conditions        | Hilos reales + `lock`                    | Hilos reales + `synchronized`                        | Entre `await`s, sin paralelismo de JS          |
+| Reintentos             | Polly                                    | Resilience4j                                         | Función propia o librería (p-retry, cockatiel) |
+
+La diferencia más importante: en C# y Java las race conditions pueden ocurrir **entre cualquier par de
+instrucciones**, porque hay hilos reales. En JavaScript sólo pueden ocurrir **en los puntos de `await`**. Eso hace
+el código más fácil de razonar, pero no elimina el problema.
+
+## Errores frecuentes
+
+- **Llamadas a red sin timeout.** Toda llamada saliente necesita un límite de tiempo.
+- **`Promise.all` sobre lotes grandes.** Usá un pool con límite.
+- **Cancelar sin propagar la señal.** Si la capa intermedia no pasa `signal` al cliente HTTP, la cancelación no
+  llega a ningún lado.
+- **Reintentar todo.** Un `400` reintentado tres veces son tres requests inútiles; un cobro no idempotente
+  reintentado puede ser un doble cobro.
+- **Backoff sin jitter.** Sincroniza a todos los clientes y produce picos justo cuando el servicio se recupera.
+- **Proteger datos compartidos con un mutex en memoria** en un servicio con varias réplicas.
+- **Promises flotantes.** Un rechazo no manejado puede tirar el proceso.
+
+## Ejercicio interactivo
+
+<KnowledgeCheck
+  id="typescript.async-control.q1"
+  question="Implementás un timeout con `Promise.race([callProvider(), rejectAfter(5000)])`. A los 5 segundos la carrera se resuelve con error. ¿Qué pasa con la llamada al proveedor?"
+  options={[
+    {
+      text: "Se cancela automáticamente.",
+      explanation: "Promise.race no cancela nada: sólo deja de esperar.",
+    },
+    {
+      text: "Sigue corriendo en segundo plano y consumiendo recursos.",
+      correct: true,
+      explanation:
+        "Correcto. Para detenerla hay que pasarle una AbortSignal, por ejemplo AbortSignal.timeout(5000).",
+    },
+    {
+      text: "Lanza un unhandled rejection que tira el proceso.",
+      explanation: "Promise.race maneja los rechazos de todas las Promises que recibe.",
+    },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="typescript.async-control.q2"
+  question="Un handler lee el saldo, hace `await` de una validación externa y después escribe `saldo - pago`. Corre en una sola instancia de Node.js. ¿Puede perder un pago si llegan dos webhooks juntos?"
+  options={[
+    {
+      text: "No, porque Node.js tiene un solo hilo.",
+      explanation: "Un solo hilo no impide que otro flujo se ejecute durante el await.",
+    },
+    {
+      text: "Sí: durante el await el otro webhook puede leer el mismo saldo y una de las escrituras pisa a la otra.",
+      correct: true,
+      explanation:
+        "Correcto. La solución robusta es una operación atómica o concurrencia optimista en la base, más idempotencia por paymentId.",
+    },
+    {
+      text: "Sólo si se usan worker threads.",
+      explanation: "La race condition ocurre sin ningún worker thread.",
+    },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="typescript.async-control.q3"
+  question="¿Cuál de estos errores conviene reintentar con backoff?"
+  options={[
+    {
+      text: "`422 Unprocessable Entity` por un campo inválido.",
+      explanation: "El mismo request va a fallar igual: no es transitorio.",
+    },
+    {
+      text: "`503 Service Unavailable` en una operación idempotente.",
+      correct: true,
+      explanation:
+        "Correcto. Es transitorio y la operación es segura de repetir. Si viene Retry-After, se respeta.",
+    },
+    { text: "`401 Unauthorized`.", explanation: "Hay que renovar credenciales, no reintentar lo mismo." },
+    {
+      text: "Un timeout en un cobro sin idempotency key.",
+      explanation: "Puede haberse ejecutado: reintentarlo arriesga un doble cobro.",
+    },
+  ]}
+/>

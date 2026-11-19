@@ -1,0 +1,431 @@
+---
+id: typescript.introduction
+moduleId: typescript.intro
+title: "Introducción a TypeScript: qué es, cómo se ejecuta y sus tipos básicos"
+description: "El punto de partida del curso: qué relación hay entre JavaScript y TypeScript, cómo se compila y ejecuta un programa, qué tipos básicos existen y cómo se escribe un primer programa tipado. Pensado para quien ya programa en C# o Java."
+difficulty: basic
+order: 1
+objectives:
+  - "Explicar qué es TypeScript y qué relación tiene con JavaScript, los motores y los runtimes."
+  - "Describir el camino de un archivo .ts hasta que se ejecuta: chequeo de tipos, emisión y runtime."
+  - "Configurar un proyecto con tsconfig y las opciones estrictas que conviene activar siempre."
+  - "Usar los tipos básicos: primitivos, arrays, tuplas, objetos, funciones, any, unknown y void."
+  - "Distinguir cuándo anotar un tipo y cuándo dejar que el compilador lo infiera."
+prerequisites: []
+estimatedMinutes: 40
+tags: ["typescript", "introducción", "tsconfig", "tipos básicos", "c#", "java"]
+version: "1.0.0"
+comparesWith: ["csharp", "java"]
+references:
+  - title: "TypeScript Handbook — The Basics"
+    url: "https://www.typescriptlang.org/docs/handbook/2/basic-types.html"
+  - title: "TypeScript Handbook — Everyday Types"
+    url: "https://www.typescriptlang.org/docs/handbook/2/everyday-types.html"
+  - title: "TypeScript for Java/C# Programmers"
+    url: "https://www.typescriptlang.org/docs/handbook/typescript-in-5-minutes-oop.html"
+  - title: "TSConfig Reference"
+    url: "https://www.typescriptlang.org/tsconfig/"
+  - title: "Node.js — Running TypeScript Natively"
+    url: "https://nodejs.org/en/learn/typescript/run-natively"
+  - title: "MDN — JavaScript data types and data structures"
+    url: "https://developer.mozilla.org/en-US/docs/Web/JavaScript/Guide/Data_structures"
+interviewQuestions:
+  - question: "¿Qué es TypeScript y qué ventajas aporta sobre JavaScript?"
+    keyPoints:
+      - "Es un superconjunto de JavaScript que agrega un sistema de tipos estático; todo JavaScript válido es TypeScript sintácticamente."
+      - "Los tipos se verifican al compilar y se borran: el código que se ejecuta es JavaScript."
+      - "Aporta detección temprana de errores, autocompletado y refactors seguros, y documenta contratos entre módulos."
+      - "No agrega validación en runtime: los datos externos siguen necesitando validación."
+  - question: "¿Qué opciones de tsconfig activarías siempre en un proyecto nuevo y por qué?"
+    keyPoints:
+      - "strict: activa strictNullChecks, noImplicitAny y el resto de los chequeos estrictos."
+      - "noUncheckedIndexedAccess: el acceso por índice puede devolver undefined."
+      - "exactOptionalPropertyTypes o noImplicitOverride según el equipo, para contratos más precisos."
+      - "module/moduleResolution acordes al runtime (por ejemplo NodeNext o bundler) y noEmit si compila otra herramienta."
+  - question: "¿Cuál es la diferencia entre any y unknown?"
+    keyPoints:
+      - "any desactiva el chequeo: se puede hacer cualquier cosa con el valor y se contagia."
+      - "unknown acepta cualquier valor pero obliga a hacer narrowing o validar antes de usarlo."
+      - "Para datos externos se usa unknown; any es una salida de emergencia que conviene prohibir con lint."
+summary:
+  - "TypeScript = JavaScript + un sistema de tipos estático que se borra al compilar."
+  - "Un motor (V8) ejecuta JavaScript; un runtime (Node.js, navegador, Deno, Bun) le agrega APIs como red o archivos."
+  - "El compilador hace dos trabajos independientes: verificar tipos y emitir JavaScript; otras herramientas pueden emitir."
+  - "strict en tsconfig es obligatorio en la práctica: sin strictNullChecks, null y undefined entran en cualquier tipo."
+  - "Hay un solo tipo numérico (number, doble precisión) más bigint; no existen int, long ni decimal."
+  - "Se anotan los contratos (parámetros, retornos públicos) y se deja inferir el resto."
+  - "unknown es el tipo correcto para lo que todavía no se verificó; any apaga el compilador."
+---
+
+## Qué vas a aprender en este curso
+
+Este curso te lleva de "sé programar en C# o Java" a "puedo diseñar, explicar y defender código TypeScript en
+producción". No vamos a explicar qué es un bucle ni una clase: vamos a explicar **qué cambia** respecto de lo que ya
+sabés, y por qué.
+
+El curso está ordenado así:
+
+| Módulo                    | Qué vas a poder hacer al terminarlo                                                           |
+| ------------------------- | --------------------------------------------------------------------------------------------- |
+| Introducción              | Leer y escribir TypeScript moderno: tipos básicos, funciones, objetos, clases y módulos.      |
+| Fundamentos avanzados     | Entender qué existe en runtime, modelar datos con interfaces, uniones y narrowing.            |
+| Sistema de tipos avanzado | Escribir genéricos, derivar tipos de otros tipos y diseñar APIs que validan datos externos.   |
+| Asincronía                | Usar Promises y async/await con control de concurrencia, cancelación, timeouts y reintentos.  |
+| Diseño y calidad          | Organizar módulos, manejar errores sin excepciones sorpresa, testear e invertir dependencias. |
+
+Esta primera lección responde tres preguntas: **qué es TypeScript**, **cómo se ejecuta un programa** y **cuáles son
+sus tipos básicos**. La siguiente cubre la sintaxis esencial de JavaScript moderno.
+
+## Qué es TypeScript
+
+**JavaScript** es el lenguaje que ejecutan los navegadores y, desde 2009, también los servidores con Node.js. Es
+dinámico: una variable puede contener un número y después un string, y los errores de tipos aparecen al ejecutar.
+
+**TypeScript** es un lenguaje creado por Microsoft (2012) que **agrega un sistema de tipos estático encima de
+JavaScript**. Dos ideas definen todo lo demás:
+
+1. **Es un superconjunto:** cualquier programa JavaScript es sintácticamente TypeScript. TypeScript sólo agrega
+   anotaciones (`: string`, `interface`, `<T>`...).
+2. **Los tipos se borran:** antes de ejecutar, las anotaciones se quitan y queda JavaScript puro. El compilador
+   verifica tu código, pero no cambia lo que hace.
+
+```ts
+// TypeScript
+function greet(name: string): string {
+  return `Hola, ${name}`;
+}
+
+greet(42); // ❌ Error de compilación: number no es asignable a string
+```
+
+```js
+// El JavaScript que realmente se ejecuta
+function greet(name) {
+  return `Hola, ${name}`;
+}
+```
+
+Si venís de C#, la sensación es parecida a escribir con el compilador de C# y Visual Studio: autocompletado,
+navegación y refactors seguros. La diferencia fundamental es que **en runtime no queda ninguna información de tipos**
+(lo profundizamos en la lección _Runtime vs sistema de tipos_).
+
+### Motores, runtimes y por qué importa la diferencia
+
+| Pieza        | Qué es                                                                   | Ejemplos                                           |
+| ------------ | ------------------------------------------------------------------------ | -------------------------------------------------- |
+| **Lenguaje** | La especificación del lenguaje (ECMAScript).                             | ES2024, ES2025                                     |
+| **Motor**    | Ejecuta JavaScript: parsea, interpreta y compila a código máquina (JIT). | V8 (Chrome, Node.js), SpiderMonkey, JavaScriptCore |
+| **Runtime**  | El motor más APIs del entorno: red, archivos, timers, DOM.               | Navegador, Node.js, Deno, Bun                      |
+
+`fetch`, `setTimeout` o `document` **no son parte del lenguaje**: los aporta el runtime. Por eso un mismo código
+TypeScript puede compilar y fallar en un entorno distinto (por ejemplo, usar `document` en el servidor). La
+configuración `lib` y los paquetes `@types/node` le dicen al compilador qué APIs existen en tu entorno.
+
+En la analogía con .NET: ECMAScript es el lenguaje C#, V8 es el JIT del CLR y Node.js es el runtime con su librería
+base. En Java: el lenguaje, la JVM (HotSpot) y el JDK.
+
+## Del archivo .ts a la ejecución
+
+<MermaidDiagram
+  caption="El chequeo de tipos y la emisión son independientes: un error de tipos no impide necesariamente emitir JavaScript."
+  chart={`
+flowchart LR
+  A["main.ts<br/>código + tipos"] --> B["Type checker<br/>tsc --noEmit"]
+  A --> C["Emisión o stripping<br/>tsc, esbuild, SWC, Node"]
+  B -->|"errores de tipos"| D["Editor y CI"]
+  C --> E["main.js<br/>sólo JavaScript"]
+  E --> F["Runtime<br/>Node.js o navegador"]
+  G["Datos externos<br/>HTTP, JSON, DB"] --> F
+`}
+/>
+
+En un proyecto real hay tres formas habituales de ejecutar TypeScript:
+
+1. **Compilar con `tsc` y ejecutar el JavaScript resultante.** Es el modelo clásico, equivalente a `dotnet build` o
+   `javac`.
+2. **Dejar que otra herramienta quite los tipos y ejecutar** (esbuild, SWC, `tsx`, o Node.js moderno, que ejecuta
+   archivos `.ts` quitando las anotaciones). En este modelo, `tsc --noEmit` se usa **sólo para verificar tipos**,
+   normalmente en el editor y en CI.
+3. **Un framework que integra todo**, como Next.js: compila con SWC y verifica tipos durante el build.
+
+```bash
+# Verificar tipos sin generar archivos (lo que corre en CI)
+pnpm tsc --noEmit
+
+# Node.js moderno ejecuta TypeScript quitando las anotaciones
+node src/main.ts
+```
+
+<Callout type="warning" title="Compilar no es lo mismo que verificar">
+  Si una herramienta sólo quita los tipos (esbuild, SWC, type stripping), un programa con errores de tipos
+  **se ejecuta igual**. Por eso el chequeo de tipos tiene que estar en CI como paso obligatorio. En este
+  proyecto lo hace `pnpm check` (typecheck, lint, tests y build).
+</Callout>
+
+### tsconfig.json: las opciones que importan
+
+El archivo `tsconfig.json` configura el compilador. Para un proyecto nuevo, este es un punto de partida razonable:
+
+```json
+{
+  "compilerOptions": {
+    "target": "ES2023",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "exactOptionalPropertyTypes": true,
+    "verbatimModuleSyntax": true,
+    "skipLibCheck": true,
+    "noEmit": true
+  },
+  "include": ["src"]
+}
+```
+
+| Opción                        | Qué hace                                                                                   |
+| ----------------------------- | ------------------------------------------------------------------------------------------ |
+| `strict`                      | Activa todos los chequeos estrictos. **Sin esto, `null` es asignable a cualquier tipo.**   |
+| `noUncheckedIndexedAccess`    | `items[0]` tiene tipo `Item \| undefined`: obliga a manejar el caso de índice inexistente. |
+| `exactOptionalPropertyTypes`  | Distingue "propiedad ausente" de "propiedad presente con `undefined`".                     |
+| `target`                      | Qué versión de JavaScript emitir (sintaxis moderna o transformada para entornos viejos).   |
+| `module` / `moduleResolution` | Cómo se resuelven los `import`: debe coincidir con el runtime o el bundler.                |
+| `noEmit`                      | No generar archivos: otra herramienta compila y `tsc` sólo verifica.                       |
+
+## Tipos básicos
+
+### Primitivos
+
+```ts
+const customerName: string = "Ana Pérez";
+const amountCents: number = 150_000; // separador numérico, igual que en C# y Java
+const isOverdue: boolean = true;
+const bigBalance: bigint = 9_007_199_254_740_993n; // enteros arbitrariamente grandes
+const notAssigned: undefined = undefined;
+const intentionallyEmpty: null = null;
+const uniqueKey: symbol = Symbol("debt");
+```
+
+Las diferencias con C# y Java que más sorprenden:
+
+- **Hay un solo tipo numérico, `number`**, que es un doble de 64 bits (IEEE-754). No hay `int`, `long`, `float` ni
+  `decimal`. Los enteros son exactos sólo hasta `Number.MAX_SAFE_INTEGER` (2^53 − 1). Para dinero se usan enteros en
+  centavos o una librería decimal.
+- **`bigint`** existe para enteros grandes, pero no se mezcla con `number` sin conversión explícita.
+- **Hay dos "vacíos": `undefined` y `null`.** `undefined` es lo que obtenés de una variable no inicializada, de una
+  propiedad que no existe o de una función sin `return`. `null` es un vacío asignado a propósito.
+- **`string` es inmutable y se compara por valor** con `===`, como en C#. No existe `char`: un carácter es un string
+  de largo 1.
+
+### Arrays, tuplas y objetos
+
+```ts
+const amounts: number[] = [1000, 2500, 4000];
+const sameThing: Array<number> = [1000, 2500, 4000]; // sintaxis genérica equivalente
+
+// Tupla: largo y tipo por posición fijos
+const range: [start: string, end: string] = ["2026-01-01", "2026-01-31"];
+
+// Tipo de objeto en línea
+const debt: { id: string; amountCents: number; paidAt?: string } = {
+  id: "debt_1",
+  amountCents: 150_000,
+};
+```
+
+Un objeto en JavaScript es una colección de propiedades, no una instancia de una clase. Podés crear un objeto con
+la forma correcta **sin declarar ninguna clase**: esa es la forma más común de modelar datos en TypeScript. Para
+darle nombre a una forma se usa `interface` o `type`:
+
+```ts
+interface Debt {
+  id: string;
+  amountCents: number;
+  paidAt?: string; // opcional: puede no estar
+}
+
+const debts: Debt[] = [{ id: "debt_1", amountCents: 150_000 }];
+```
+
+### Funciones
+
+```ts
+// Parámetros y retorno tipados; el parámetro con valor por defecto es opcional
+function formatAmount(amountCents: number, currency: string = "ARS"): string {
+  return `${(amountCents / 100).toFixed(2)} ${currency}`;
+}
+
+// Función que no devuelve nada útil
+function logDebt(debt: Debt): void {
+  console.log(debt.id);
+}
+
+// Tipo de una función, útil para callbacks
+type AmountFormatter = (amountCents: number) => string;
+const usd: AmountFormatter = (cents) => formatAmount(cents, "USD");
+```
+
+### any, unknown, void y never
+
+| Tipo      | Significado                                                                      | Cuándo aparece                                   |
+| --------- | -------------------------------------------------------------------------------- | ------------------------------------------------ |
+| `any`     | "No chequees nada". Se puede usar como cualquier cosa y se contagia.             | Código legado, `JSON.parse`, librerías sin tipos |
+| `unknown` | "Puede ser cualquier cosa, pero verificá antes de usarlo".                       | Datos externos, errores en `catch`               |
+| `void`    | La función no devuelve un valor útil.                                            | Retorno de funciones de efecto                   |
+| `never`   | No existe ningún valor posible: la función nunca retorna o el caso es imposible. | `throw`, chequeo exhaustivo                      |
+
+```ts
+const raw: unknown = JSON.parse('{"amountCents": 100}');
+
+raw.amountCents; // ❌ Error: 'raw' is of type 'unknown'
+
+if (typeof raw === "object" && raw !== null && "amountCents" in raw) {
+  console.log(raw.amountCents); // ✅ el compilador ya sabe que tiene esa propiedad
+}
+```
+
+## Anotar o inferir
+
+TypeScript **infiere** tipos igual que `var` en C# o en Java 10+, pero llega más lejos: infiere el retorno de las
+funciones y el tipo de los parámetros de los callbacks.
+
+```ts
+const total = 1500; // number
+const names = ["Ana", "Luis"]; // string[]
+const doubled = names.map((name) => name.length * 2); // number[]: 'name' se infiere como string
+
+function sum(values: number[]) {
+  return values.reduce((acc, value) => acc + value, 0); // retorno inferido: number
+}
+```
+
+La regla práctica que usan los equipos con experiencia:
+
+- **Anotá los contratos:** parámetros de funciones, retornos de funciones exportadas y propiedades de interfaces.
+  El tipo anotado es documentación y evita que un cambio interno cambie la API sin querer.
+- **Dejá inferir lo local:** variables, callbacks y retornos de funciones privadas pequeñas.
+- **Nunca anotes para "callar" al compilador.** Si tenés que escribir `as` o `any` para que compile, probablemente
+  el diseño o los datos tienen un problema.
+
+<FlowDiagram
+  steps={[
+    {
+      title: "¿Es un límite público?",
+      detail: "Parámetros, retornos exportados, propiedades de interfaces: anotá.",
+    },
+    { title: "¿Es un valor local?", detail: "Variables y callbacks: dejá inferir." },
+    {
+      title: "¿Viene de afuera?",
+      detail: "HTTP, JSON, DB, LLM: tipalo como unknown y validá.",
+      tone: "boundary",
+    },
+  ]}
+  caption="Anotar en los límites, inferir adentro, validar lo externo."
+/>
+
+## Comparación con C# y Java
+
+| Concepto         | C#                                   | Java                                  | TypeScript                                 |
+| ---------------- | ------------------------------------ | ------------------------------------- | ------------------------------------------ |
+| Qué se ejecuta   | IL en el CLR                         | Bytecode en la JVM                    | JavaScript en un motor (V8)                |
+| Tipos en runtime | Sí                                   | Sí (salvo argumentos genéricos)       | No                                         |
+| Números          | `int`, `long`, `double`, `decimal`   | `int`, `long`, `double`, `BigDecimal` | `number` (doble) y `bigint`                |
+| Nulabilidad      | Nullable reference types (`string?`) | `Optional<T>`, anotaciones            | `strictNullChecks`: `string \| null`       |
+| Inferencia local | `var`                                | `var` (Java 10+)                      | Siempre, incluidos retornos y callbacks    |
+| "Cualquier cosa" | `object`, `dynamic`                  | `Object`                              | `unknown` (seguro) y `any` (inseguro)      |
+| Modelar datos    | Clases, records                      | Clases, records                       | Interfaces y objetos literales, sin clases |
+| Compilación      | `dotnet build`                       | `javac` / Maven / Gradle              | `tsc`, o esbuild/SWC + `tsc --noEmit`      |
+
+<Callout type="tip" title="El cambio de mentalidad más importante">
+  En C# y Java el compilador y el runtime comparten el mismo modelo de tipos. En TypeScript **el compilador es
+  un verificador estático muy potente sobre un lenguaje dinámico**. Todo lo que hagas con tipos es para el
+  compilador y para tu equipo; al ejecutar, sólo quedan valores de JavaScript.
+</Callout>
+
+## Errores frecuentes
+
+- **Trabajar sin `strict`.** Proyectos viejos lo tienen apagado y `null` pasa por cualquier lado. Activarlo en un
+  proyecto existente se hace de forma incremental, pero en uno nuevo no es negociable.
+- **Usar `number` para dinero con decimales.** `0.1 + 0.2` es `0.30000000000000004`. Guardá centavos como enteros.
+- **Confundir `null` con `undefined`.** Elegí una convención (por ejemplo, `undefined` para "ausente" y `null` sólo
+  cuando una API externa lo usa) y respetala.
+- **Escribir tipos con mayúscula equivocada.** `String`, `Number` y `Boolean` son los objetos envoltorio; los tipos
+  correctos son `string`, `number` y `boolean`.
+- **Creer que el código compilado está validado.** Un `as Customer` sobre un JSON no ejecuta ninguna verificación.
+- **Asumir que la API existe en todos los runtimes.** `window` no existe en Node.js y `process` no existe en el
+  navegador.
+
+## Ejercicio interactivo
+
+<KnowledgeCheck
+  id="typescript.introduction.q1"
+  question="Un proyecto compila TypeScript con esbuild (que sólo quita los tipos) y no ejecuta `tsc` en CI. ¿Qué pasa si alguien introduce un error de tipos?"
+  options={[
+    {
+      text: "esbuild falla y el deploy se frena.",
+      explanation: "esbuild no verifica tipos: sólo borra las anotaciones y emite JavaScript.",
+    },
+    {
+      text: "El código se ejecuta igual; el error sólo se ve en el editor de quien lo escribió, si lo mira.",
+      correct: true,
+      explanation:
+        "Correcto. Emitir y verificar son trabajos independientes. Hace falta `tsc --noEmit` (o equivalente) como paso obligatorio de CI.",
+    },
+    {
+      text: "Node.js detecta el error de tipos al ejecutar.",
+      explanation: "En runtime no hay tipos: Node.js ejecuta JavaScript y no sabe nada de las anotaciones.",
+    },
+    {
+      text: "El navegador muestra un warning en la consola.",
+      explanation: "Los tipos no existen en runtime, así que ningún runtime puede advertir sobre ellos.",
+    },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="typescript.introduction.q2"
+  question="¿Qué tipo conviene usar para el resultado de `JSON.parse` sobre el body de un request?"
+  options={[
+    {
+      text: "`any`, porque es lo que devuelve `JSON.parse`.",
+      explanation:
+        "`any` desactiva el chequeo y se contagia a todo lo que toque. Es justo lo que hay que evitar.",
+    },
+    {
+      text: "El tipo esperado, por ejemplo `Customer`, con `as Customer`.",
+      explanation: "La aserción no verifica nada: el compilador confía en vos y el error aparece más tarde.",
+    },
+    {
+      text: "`unknown`, y validarlo antes de usarlo.",
+      correct: true,
+      explanation:
+        "Correcto. `unknown` obliga a verificar (narrowing o un esquema) antes de acceder a propiedades.",
+    },
+    {
+      text: "`object`, porque siempre es un objeto.",
+      explanation: "No necesariamente: JSON puede ser un número, un string, un array o `null`.",
+    },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="typescript.introduction.q3"
+  question="¿Qué imprime `console.log(0.1 + 0.2 === 0.3)` en TypeScript?"
+  options={[
+    {
+      text: "`true`",
+      explanation: "`number` es un doble IEEE-754: 0.1 + 0.2 da 0.30000000000000004.",
+    },
+    {
+      text: "`false`",
+      correct: true,
+      explanation:
+        "Correcto. Es el mismo comportamiento que `double` en C# o Java; lo distinto es que TypeScript no tiene `decimal`. Para dinero, enteros en centavos.",
+    },
+    {
+      text: "Error de compilación",
+      explanation: "Comparar dos `number` es válido; el problema es de representación numérica, no de tipos.",
+    },
+  ]}
+/>

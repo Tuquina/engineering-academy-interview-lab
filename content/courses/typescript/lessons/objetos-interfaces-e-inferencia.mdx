@@ -1,0 +1,381 @@
+---
+id: typescript.objects-interfaces-inference
+moduleId: typescript.fundamentals
+title: "Modelar datos: interfaces, type aliases, literales e inferencia"
+description: "Cómo describir la forma de los datos en TypeScript: interface frente a type, propiedades opcionales y readonly, index signatures, literal types, as const, satisfies y cómo razona la inferencia (widening)."
+difficulty: intermediate
+order: 2
+objectives:
+  - "Elegir entre interface y type según el caso y explicar sus diferencias reales."
+  - "Usar propiedades opcionales, readonly e index signatures con sus garantías y límites."
+  - "Explicar literal types, widening y cómo as const y satisfies cambian lo que se infiere."
+  - "Tipar funciones como valores, incluidos callbacks y sobrecargas."
+prerequisites: ["typescript.runtime-vs-type-system"]
+estimatedMinutes: 40
+tags: ["interface", "type", "readonly", "literal types", "satisfies", "inferencia", "c#", "java"]
+version: "1.0.0"
+comparesWith: ["csharp", "java"]
+references:
+  - title: "TypeScript Handbook — Object Types"
+    url: "https://www.typescriptlang.org/docs/handbook/2/objects.html"
+  - title: "TypeScript Handbook — Everyday Types: Type Aliases and Interfaces"
+    url: "https://www.typescriptlang.org/docs/handbook/2/everyday-types.html#differences-between-type-aliases-and-interfaces"
+  - title: "TypeScript Handbook — Type Inference"
+    url: "https://www.typescriptlang.org/docs/handbook/type-inference.html"
+  - title: "TypeScript 4.9 — The satisfies Operator"
+    url: "https://www.typescriptlang.org/docs/handbook/release-notes/typescript-4-9.html#the-satisfies-operator"
+  - title: "TypeScript Handbook — More on Functions"
+    url: "https://www.typescriptlang.org/docs/handbook/2/functions.html"
+interviewQuestions:
+  - question: "¿Cuándo usarías type y cuándo interface?"
+    keyPoints:
+      - "Ambos describen formas de objetos y en la mayoría de los casos son intercambiables."
+      - "interface se puede extender con extends y admite declaration merging (útil para ampliar tipos de librerías)."
+      - "type puede representar uniones, tuplas, primitivos y tipos derivados (mapped, conditional), que interface no puede."
+      - "Una convención razonable: interface para contratos de objetos y clases, type para uniones y composición; lo importante es ser consistente."
+  - question: "¿Qué hace el operador satisfies y en qué se diferencia de una anotación o de as?"
+    keyPoints:
+      - "satisfies verifica que un valor cumple un tipo sin cambiar el tipo inferido del valor."
+      - "Una anotación (const x: T) ensancha el valor a T y se pierden los literales concretos."
+      - "as no verifica: afirma, y puede ocultar errores."
+      - "Caso típico: objetos de configuración o mapas de rutas donde querés validación y autocompletado de las claves concretas."
+  - question: "¿Qué garantiza readonly en TypeScript?"
+    keyPoints:
+      - "Impide reasignar la propiedad a través de ese tipo, sólo en compilación."
+      - "No congela el objeto en runtime (para eso Object.freeze) y es superficial."
+      - "Otra referencia con un tipo sin readonly puede mutar el mismo objeto."
+summary:
+  - "interface y type describen formas; interface se extiende y fusiona, type expresa uniones y tipos derivados."
+  - "Una propiedad opcional (?) puede faltar; con exactOptionalPropertyTypes se distingue de valer undefined."
+  - "readonly es una restricción de compilación y superficial; ReadonlyArray impide mutar arrays."
+  - "Los literal types ('pending', 42) son tipos con un solo valor; combinados en uniones reemplazan a los enums."
+  - "let y las propiedades de objetos se ensanchan (widening) a string o number; const y as const conservan los literales."
+  - "satisfies valida contra un tipo sin perder la precisión de la inferencia."
+  - "Los index signatures y Record modelan diccionarios; con noUncheckedIndexedAccess el acceso devuelve T | undefined."
+---
+
+## ¿Qué problema resuelve?
+
+En C# o Java, para pasar datos entre capas se crea una clase o un `record`: `CustomerDto`, `DebtResponse`. En
+TypeScript casi nunca se hace eso. Los datos son **objetos simples** (vienen de JSON, de la base de datos, de un
+formulario) y lo que se necesita es **describir su forma** para que el compilador ayude.
+
+Modelar bien esas formas tiene consecuencias directas: un estado de deuda tipado como `string` acepta `"pagado"`,
+`"Paid"` o `"pyd"`; tipado como `"pending" | "promised" | "paid"`, el compilador rechaza cualquier otro valor y el
+editor autocompleta los válidos. Esta lección cubre las herramientas para lograrlo.
+
+## interface y type
+
+```ts
+// interface: describe la forma de un objeto
+interface Customer {
+  id: string;
+  name: string;
+  email?: string;
+}
+
+// type alias: le da nombre a cualquier tipo
+type CustomerId = string;
+type DebtStatus = "pending" | "promised" | "paid";
+type Money = { amountCents: number; currency: "ARS" | "USD" };
+```
+
+Para objetos, ambos sirven y son casi equivalentes. Las diferencias reales:
+
+| Capacidad                                    | `interface` |       `type`        |
+| -------------------------------------------- | :---------: | :-----------------: |
+| Describir objetos                            |     Sí      |         Sí          |
+| Extender (`extends`) / componer (`&`)        |     Sí      |         Sí          |
+| Uniones (`A \| B`), tuplas, primitivos       |     No      |         Sí          |
+| Tipos derivados (mapped, conditional)        |     No      |         Sí          |
+| Declaration merging (se reabre y amplía)     |     Sí      |         No          |
+| Una clase puede implementarlo (`implements`) |     Sí      | Sí, si es un objeto |
+
+```ts
+interface Auditable {
+  createdAt: string;
+  updatedAt: string;
+}
+
+// Extender con interface
+interface Debt extends Auditable {
+  id: string;
+  status: DebtStatus;
+}
+
+// Componer con type (intersection)
+type DebtWithCustomer = Debt & { customer: Customer };
+```
+
+**Declaration merging** permite ampliar un tipo declarado en otro lugar, por ejemplo para agregar propiedades a un
+tipo de una librería:
+
+```ts
+declare global {
+  interface Window {
+    analytics?: { track(event: string): void };
+  }
+}
+```
+
+<Callout type="tip" title="Una convención práctica">
+  `interface` para contratos de objetos (DTOs, puertos, props) y `type` para uniones, alias y tipos derivados.
+  Más importante que la regla elegida es que todo el equipo la siga.
+</Callout>
+
+## Propiedades opcionales y readonly
+
+```ts
+interface PaymentPromise {
+  readonly id: string; // no se puede reasignar a través de este tipo
+  debtId: string;
+  promisedFor: string;
+  note?: string; // puede no estar
+}
+
+const promise: PaymentPromise = { id: "pp_1", debtId: "debt_1", promisedFor: "2026-12-01" };
+promise.note = "Llamar a la mañana"; // ✅
+promise.id = "pp_2"; // ❌ Cannot assign to 'id' because it is a read-only property
+```
+
+Tres matices importantes:
+
+1. **`readonly` sólo existe en compilación.** En runtime el objeto es mutable. Para congelarlo hace falta
+   `Object.freeze`, que además es superficial.
+2. **Es superficial:** `readonly customer: Customer` impide reasignar `customer`, pero no `customer.name`.
+3. **Para arrays** se usa `readonly Debt[]` o `ReadonlyArray<Debt>`, que quita `push`, `sort` y el resto de los
+   métodos que mutan. Es una buena práctica en parámetros: documenta que la función no modifica lo que recibe.
+
+```ts
+function totalOf(debts: readonly Debt[]): number {
+  debts.push(); // ❌ Property 'push' does not exist on type 'readonly Debt[]'
+  return debts.length;
+}
+```
+
+Con `exactOptionalPropertyTypes`, `note?: string` significa "puede faltar", y asignar explícitamente
+`note: undefined` es un error. Sin esa opción, ambos casos son iguales. La distinción importa cuando "ausente" y
+"vacío" tienen significados distintos, por ejemplo en un `PATCH` donde `undefined` es "no cambiar".
+
+## Diccionarios: index signatures y Record
+
+```ts
+// Index signature: cualquier clave string
+interface BalanceByCustomer {
+  [customerId: string]: number;
+}
+
+// Record: forma abreviada, muy usada
+type BalanceMap = Record<string, number>;
+
+// Record con claves finitas: obliga a definir todas
+const statusLabel: Record<DebtStatus, string> = {
+  pending: "Pendiente",
+  promised: "Con promesa de pago",
+  paid: "Pagada",
+}; // si falta una clave o sobra otra, error de compilación
+
+const balances: BalanceMap = {};
+const balance = balances["cus_1"]; // number | undefined con noUncheckedIndexedAccess
+```
+
+Para diccionarios dinámicos con muchas inserciones y borrados, `Map<string, number>` es mejor opción: tiene
+`has`, `size`, iteración ordenada y no mezcla claves con propiedades heredadas.
+
+## Literal types y widening
+
+Un **literal type** es un tipo que admite un solo valor: `"paid"`, `42`, `true`. Por sí solos parecen inútiles; en
+uniones son la forma idiomática de modelar conjuntos cerrados de valores (lo que en C# o Java sería un `enum`):
+
+```ts
+type Channel = "sms" | "email" | "whatsapp";
+type HttpSuccess = 200 | 201 | 204;
+
+function send(channel: Channel, message: string) {}
+
+send("sms", "Hola"); // ✅
+send("fax", "Hola"); // ❌ '"fax"' is not assignable to parameter of type 'Channel'
+```
+
+¿Qué tipo infiere el compilador para un valor literal? Depende de si puede cambiar:
+
+```ts
+const a = "sms"; // tipo: "sms"  (const no puede cambiar, se conserva el literal)
+let b = "sms"; // tipo: string (let puede reasignarse: se "ensancha")
+
+const config = { channel: "sms", retries: 3 };
+// tipo: { channel: string; retries: number }: las propiedades son mutables, se ensanchan
+
+send(config.channel, "Hola"); // ❌ string no es asignable a Channel
+```
+
+Ese ensanchamiento se llama **widening**. Hay tres formas de evitarlo, con significados distintos:
+
+```ts
+// 1. as const: todo pasa a ser literal y readonly
+const config1 = { channel: "sms", retries: 3 } as const;
+// { readonly channel: "sms"; readonly retries: 3 }
+
+// 2. Anotación: el valor se verifica contra el tipo, pero el tipo de la variable ES el anotado
+interface ReminderConfig {
+  channel: Channel;
+  retries: number;
+}
+const config2: ReminderConfig = { channel: "sms", retries: 3 };
+// config2.channel es Channel, no "sms"
+
+// 3. satisfies: verifica contra el tipo y conserva lo inferido
+const config3 = { channel: "sms", retries: 3 } satisfies ReminderConfig;
+// config3.channel es "sms"; un typo como "smss" sería un error
+```
+
+<MermaidDiagram
+  caption="Tres formas de tipar un literal de configuración y qué tipo queda en cada caso."
+  chart={`
+flowchart LR
+  V["Objeto literal<br/>channel: 'sms'"] --> A["Sin nada<br/>channel: string"]
+  V --> B["as const<br/>channel: 'sms' readonly"]
+  V --> C["Anotación ReminderConfig<br/>channel: Channel"]
+  V --> D["satisfies ReminderConfig<br/>channel: 'sms' y verificado"]
+`}
+/>
+
+`satisfies` brilla en objetos de configuración, mapas de rutas o tablas de traducciones: querés que el compilador
+**verifique** la estructura sin **perder** el detalle de las claves concretas.
+
+```ts
+const routes = {
+  debts: "/debts",
+  promises: "/promises",
+} satisfies Record<string, `/${string}`>;
+
+routes.debts; // tipo "/debts": autocompletado de claves concretas
+routes.payments; // ❌ no existe: con una anotación Record<string, ...> habría compilado
+```
+
+## Enums: por qué se usan menos
+
+TypeScript tiene `enum`, pero la mayoría de los equipos prefiere uniones de literales:
+
+```ts
+enum DebtStatusEnum {
+  Pending = "pending",
+  Paid = "paid",
+}
+
+type DebtStatusUnion = "pending" | "paid";
+const DEBT_STATUSES = ["pending", "paid"] as const; // si además necesitás iterar los valores
+type DebtStatusFromArray = (typeof DEBT_STATUSES)[number]; // "pending" | "paid"
+```
+
+Razones: un `enum` genera código en runtime (no es borrable), los enums numéricos aceptan cualquier número y los
+valores de un JSON (`"paid"`) no son asignables a un enum sin conversión. La unión de literales no tiene ninguno de
+esos problemas.
+
+## Funciones como tipos
+
+```ts
+// Tipo de función
+type Formatter = (amountCents: number, currency: string) => string;
+
+// Método en una interface: dos sintaxis
+interface Notifier {
+  send(to: string, message: string): Promise<void>; // sintaxis de método
+  onError: (error: unknown) => void; // sintaxis de propiedad
+}
+
+// Sobrecargas: varias firmas, una implementación
+function parseAmount(value: string): number;
+function parseAmount(value: number): number;
+function parseAmount(value: string | number): number {
+  return typeof value === "number" ? value : Number.parseInt(value, 10);
+}
+```
+
+Las sobrecargas existen, pero se usan poco: una unión en el parámetro o dos funciones con nombres distintos suelen
+ser más claras. Una sola implementación recibe todas las variantes, porque en runtime no hay dispatch por tipo.
+
+## Comparación con C# y Java
+
+| Necesidad                      | C#                         | Java                       | TypeScript                      |
+| ------------------------------ | -------------------------- | -------------------------- | ------------------------------- |
+| DTO / forma de datos           | `record`, clase            | `record`, clase            | `interface` o `type`, sin clase |
+| Conjunto cerrado de valores    | `enum`                     | `enum`                     | Unión de literales              |
+| Propiedad inmutable            | `init`, `readonly`         | `final`                    | `readonly` (sólo compilación)   |
+| Diccionario                    | `Dictionary<K,V>`          | `Map<K,V>`                 | `Record<K,V>` o `Map<K,V>`      |
+| Ampliar un tipo de librería    | Métodos de extensión       | No                         | Declaration merging             |
+| Verificar sin perder precisión | No hay equivalente directo | No hay equivalente directo | `satisfies`                     |
+
+## Errores frecuentes
+
+- **Tipar estados como `string`.** Perdés autocompletado y verificación. Usá uniones de literales.
+- **Creer que `readonly` protege en runtime.** Es un contrato del compilador; los datos se pueden mutar desde otra
+  referencia o desde JavaScript.
+- **Usar `as const` para todo.** Convierte todo en readonly y literal; está bien para constantes, no para objetos que
+  después vas a modificar.
+- **Anotar configuraciones con `Record<string, X>`.** Perdés la verificación de claves concretas; usá `satisfies`.
+- **Confiar en que una propiedad de un index signature existe.** Sin `noUncheckedIndexedAccess`, `balances[id]` se
+  tipa como `number` aunque la clave no exista.
+- **Usar enums numéricos.** `enum Level { Low, High }` acepta `Level = 99` sin error.
+
+## Ejercicio interactivo
+
+<KnowledgeCheck
+  id="typescript.objects-interfaces-inference.q1"
+  question="Con `const config = { channel: 'sms' }` y una función `send(channel: Channel)`, donde `Channel = 'sms' | 'email'`, ¿por qué `send(config.channel)` no compila?"
+  options={[
+    {
+      text: "Porque config es const y no se puede leer.",
+      explanation: "Leer una propiedad de una constante es válido.",
+    },
+    {
+      text: "Porque la propiedad se ensancha a string: un objeto es mutable y channel podría cambiar.",
+      correct: true,
+      explanation:
+        "Correcto. Se resuelve con `as const`, con `satisfies` contra un tipo que use Channel, o anotando el objeto.",
+    },
+    {
+      text: "Porque falta importar Channel.",
+      explanation: "Es un problema de inferencia (widening), no de imports.",
+    },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="typescript.objects-interfaces-inference.q2"
+  question="¿Qué hace `satisfies` que no hace una anotación de tipo?"
+  options={[
+    {
+      text: "Valida en runtime que el objeto cumple el tipo.",
+      explanation: "Como todo lo de tipos, satisfies desaparece al compilar: no ejecuta nada.",
+    },
+    {
+      text: "Verifica el valor contra el tipo, pero conserva el tipo inferido más preciso del valor.",
+      correct: true,
+      explanation:
+        "Correcto. Con una anotación, el tipo de la variable pasa a ser el anotado y se pierden los literales y las claves concretas.",
+    },
+    {
+      text: "Permite asignar valores incompatibles sin error.",
+      explanation: "Eso describe a `as`. satisfies reporta errores si el valor no cumple el tipo.",
+    },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="typescript.objects-interfaces-inference.q3"
+  question="¿Qué capacidad tiene `type` que `interface` no tiene?"
+  options={[
+    { text: "Describir objetos con propiedades opcionales.", explanation: "Ambos pueden." },
+    {
+      text: "Ser implementado por una clase.",
+      explanation: "Las clases pueden implementar interfaces y también types de objeto.",
+    },
+    {
+      text: "Representar una unión como `'pending' | 'paid'`.",
+      correct: true,
+      explanation: "Correcto. Uniones, tuplas, primitivos y tipos derivados sólo se expresan con type.",
+    },
+    { text: "Extender otro tipo.", explanation: "interface usa extends; type usa intersecciones (&)." },
+  ]}
+/>

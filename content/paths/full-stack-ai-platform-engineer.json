@@ -9,13 +9,14 @@
     {
       "id": "fsai.typescript-foundations",
       "title": "TypeScript con mentalidad de backend tipado",
-      "description": "Reajustar el modelo mental que traés de C# y Java: qué garantiza el compilador y qué no existe en runtime.",
+      "description": "Aprender el lenguaje desde su introducción y reajustar el modelo mental que traés de C# y Java: qué garantiza el compilador y qué no existe en runtime.",
       "goals": [
+        "Leer y escribir TypeScript moderno: tipos, funciones, objetos, clases y módulos",
         "Explicar type erasure y tipado estructural comparándolos con C# y Java",
         "Validar datos externos en los límites del sistema en lugar de confiar en los tipos"
       ],
       "items": [
-        { "kind": "lesson", "lessonId": "typescript.runtime-vs-type-system" },
+        { "kind": "lesson", "lessonId": "typescript.introduction" },
         { "kind": "course", "courseId": "typescript" }
       ]
     },

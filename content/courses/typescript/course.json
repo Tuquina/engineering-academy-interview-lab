@@ -10,6 +10,25 @@
   "tags": ["typescript", "tipos", "asincronía"],
   "modules": [
     {
+      "id": "typescript.intro",
+      "slug": "introduccion",
+      "title": "Introducción",
+      "description": "Qué es TypeScript, cómo se ejecuta y la sintaxis esencial de JavaScript moderno, explicada para quien ya programa en C# o Java.",
+      "order": 0,
+      "topics": [
+        "Qué es TypeScript y qué problema resuelve",
+        "JavaScript, motores y runtimes",
+        "Compilar y ejecutar: tsc, tsconfig y type stripping",
+        "Tipos primitivos, arrays, tuplas y objetos",
+        "Anotaciones frente a inferencia",
+        "Variables, igualdad y valores truthy/falsy",
+        "Funciones, arrow functions y this",
+        "Destructuring, spread, optional chaining y nullish coalescing",
+        "Arrays y sus métodos funcionales",
+        "Clases y módulos ES"
+      ]
+    },
+    {
       "id": "typescript.fundamentals",
       "slug": "fundamentos-avanzados",
       "title": "Fundamentos avanzados",

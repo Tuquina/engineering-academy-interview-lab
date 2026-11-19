@@ -1,0 +1,399 @@
+---
+id: typescript.design-errors-testing
+moduleId: typescript.design-quality
+title: "Diseño en TypeScript: módulos, funciones puras, inversión de dependencias, Result y testing"
+description: "Cómo se organiza y se mantiene un código TypeScript profesional: módulos con límites claros, funciones puras e inmutabilidad, dependency inversion sin contenedores pesados, errores esperables con un tipo Result, tests con Vitest y los anti-patterns más comunes al venir de C# o Java."
+difficulty: intermediate
+order: 1
+objectives:
+  - "Organizar módulos por funcionalidad con una API pública explícita y sin dependencias circulares."
+  - "Separar lógica pura de efectos para que el núcleo sea fácil de testear."
+  - "Invertir dependencias con interfaces y funciones, componiendo en un único punto."
+  - "Modelar errores esperables con un tipo Result y reservar las excepciones para lo inesperado."
+  - "Escribir tests unitarios con Vitest usando fakes en lugar de mocks frágiles."
+  - "Reconocer anti-patterns frecuentes al trasladar hábitos de C# y Java."
+prerequisites: ["typescript.type-safe-apis"]
+estimatedMinutes: 45
+tags: ["diseño", "módulos", "result", "testing", "vitest", "inversión de dependencias", "c#", "java"]
+version: "1.0.0"
+comparesWith: ["csharp", "java"]
+references:
+  - title: "Vitest — Getting Started"
+    url: "https://vitest.dev/guide/"
+  - title: "Vitest — Mocking"
+    url: "https://vitest.dev/guide/mocking.html"
+  - title: "TypeScript Handbook — Modules"
+    url: "https://www.typescriptlang.org/docs/handbook/2/modules.html"
+  - title: "Martin Fowler — Mocks Aren't Stubs"
+    url: "https://martinfowler.com/articles/mocksArentStubs.html"
+  - title: "typescript-eslint — Recommended configs"
+    url: "https://typescript-eslint.io/users/configs/"
+interviewQuestions:
+  - question: "¿Cuándo usarías excepciones y cuándo un tipo Result?"
+    keyPoints:
+      - "Result para errores esperables del dominio que el llamador debe manejar (saldo insuficiente, promesa inválida)."
+      - "Excepciones para fallas inesperadas o de infraestructura que no se pueden manejar localmente."
+      - "Result hace visible el error en la firma y el compilador obliga a manejarlo; TypeScript no tiene excepciones chequeadas."
+      - "No mezclar: una función que devuelve Result no debería lanzar por errores de negocio."
+  - question: "¿Cómo aplicás inversión de dependencias en TypeScript sin un framework de DI?"
+    keyPoints:
+      - "El caso de uso depende de una interface (puerto) definida junto al dominio, no de la implementación."
+      - "Las dependencias se reciben por constructor o como parámetros de una función fábrica."
+      - "Un composition root crea las implementaciones concretas y las conecta en un único lugar."
+      - "En tests se pasan fakes en memoria que implementan la misma interface."
+  - question: "¿Qué diferencia hay entre un mock y un fake, y cuál preferís?"
+    keyPoints:
+      - "Un mock verifica interacciones (que se llamó a X con Y); un fake es una implementación simple y funcional."
+      - "Los tests con mocks se acoplan a la implementación y se rompen con refactors."
+      - "Los fakes permiten testear comportamiento observable; los mocks se reservan para efectos que no se pueden observar de otra forma."
+summary:
+  - "Organizá por funcionalidad, con una API pública explícita por módulo y sin ciclos entre módulos."
+  - "Las funciones puras (misma entrada, misma salida, sin efectos) concentran la lógica y se testean sin infraestructura."
+  - "Los efectos (red, DB, reloj, aleatoriedad) se inyectan, incluido el reloj."
+  - "Dependency inversion: el núcleo define interfaces; la infraestructura las implementa; un composition root conecta."
+  - "Result<T, E> como discriminated union hace explícitos los errores esperables."
+  - "Las excepciones quedan para lo inesperado; en el límite se traducen a respuestas (4xx/5xx)."
+  - "Preferí fakes en memoria a mocks de cada método: los tests sobreviven a los refactors."
+  - "No traigas el ecosistema de C#/Java por inercia: clases para todo, DI con decoradores y getters/setters triviales."
+---
+
+## ¿Qué problema resuelve?
+
+Las lecciones anteriores cubrieron el lenguaje. Esta cubre **cómo se diseña** con él. Quien viene de C# o Java
+suele hacer una de dos cosas: replicar todo el andamiaje del ecosistema (`IDebtService`, `DebtServiceImpl`,
+contenedores de DI con decoradores, clases para todo) o, al revés, abandonar toda estructura porque "en JavaScript
+se hace así". Ninguna de las dos escala.
+
+El objetivo es un código donde **la lógica de negocio sea pura y testeable**, **los efectos estén en los bordes** y
+**los errores esperables sean visibles en los tipos**.
+
+## Organización de módulos
+
+Organizá por **funcionalidad** (lo que el sistema hace), no por tipo técnico:
+
+```text
+src/
+  modules/
+    debts/
+      domain/          entidades, reglas puras, tipos
+      application/     casos de uso; definen los puertos que necesitan
+      infrastructure/  implementaciones: Postgres, HTTP, colas
+      index.ts         API pública del módulo
+    payments/
+    notifications/
+  infrastructure/
+    composition/       crea y conecta las implementaciones
+```
+
+Reglas que mantienen esto sano:
+
+- **API pública explícita:** otros módulos importan desde `modules/debts` (su `index.ts`), no desde archivos
+  internos.
+- **Dependencias hacia el dominio:** `domain` no importa nada de `infrastructure`; `infrastructure` sí importa del
+  dominio.
+- **Sin ciclos:** si `debts` importa de `payments` y `payments` de `debts`, falta un concepto o un evento en el
+  medio. Herramientas como `dependency-cruiser` o reglas de lint lo verifican.
+- **Cuidado con los barrels gigantes:** un `index.ts` que reexporta todo un proyecto empeora los tiempos de build y
+  favorece los ciclos. Un barrel por módulo, con lo que es realmente público, está bien.
+
+Este mismo proyecto usa esa estructura (ver `src/modules`) y un test de arquitectura verifica la dirección de las
+dependencias.
+
+## Funciones puras e inmutabilidad
+
+Una **función pura** devuelve siempre lo mismo para la misma entrada y no produce efectos (no lee el reloj, no
+escribe en la base, no muta sus argumentos).
+
+```ts
+// ❌ Impura: lee el reloj, muta el argumento y escribe en la base
+async function registerPromise(debt: Debt, promisedFor: string): Promise<void> {
+  if (new Date(promisedFor) < new Date()) throw new Error("Fecha pasada");
+  debt.status = "promised";
+  debt.promisedFor = promisedFor;
+  await db.debts.update(debt);
+}
+
+// ✅ Núcleo puro: recibe el "ahora" y devuelve un estado nuevo
+type PromiseError = { kind: "date_in_past" } | { kind: "already_paid" };
+
+function promisePayment(
+  debt: Debt,
+  promisedFor: string,
+  now: Date,
+): Result<Extract<Debt, { status: "promised" }>, PromiseError> {
+  if (debt.status === "paid") return err({ kind: "already_paid" });
+  if (new Date(promisedFor) < now) return err({ kind: "date_in_past" });
+  return ok({ ...debt, status: "promised", promisedFor });
+}
+```
+
+La versión pura se testea con una línea, sin base de datos ni fechas falsas globales. El caso de uso que la llama
+se encarga de los efectos: leer la deuda, obtener la hora, persistir el resultado.
+
+<MermaidDiagram
+  caption="Núcleo funcional, cáscara imperativa: la lógica pura en el centro y los efectos en el borde."
+  chart={`
+flowchart LR
+  H["Handler HTTP"] --> U["Caso de uso<br/>orquesta efectos"]
+  U -->|"lee"| R["Repositorio<br/>puerto"]
+  U -->|"now()"| CL["Reloj<br/>puerto"]
+  U --> P["promisePayment<br/>función pura"]
+  P -->|"Result"| U
+  U -->|"guarda"| R
+  R -.->|"implementa"| DB["PostgresDebtRepository"]
+`}
+/>
+
+Para no mutar, se usan copias (`{ ...debt, status }`), `readonly` en los tipos y métodos no mutantes (`toSorted`,
+`map`, `filter`). La inmutabilidad no es dogma: dentro de una función, mutar una variable local es perfectamente
+razonable; lo que se evita es mutar **lo que recibiste o lo compartido**.
+
+## Inversión de dependencias sin framework
+
+El caso de uso define **qué necesita** con interfaces; la infraestructura las implementa; un único lugar las conecta.
+
+```ts
+// application/ports.ts: el caso de uso define lo que necesita
+export interface DebtRepository {
+  findById(id: DebtId): Promise<Debt | undefined>;
+  save(debt: Debt): Promise<void>;
+}
+
+export interface Clock {
+  now(): Date;
+}
+
+// application/promise-payment.ts
+export class PromisePaymentUseCase {
+  constructor(
+    private readonly debts: DebtRepository,
+    private readonly clock: Clock,
+  ) {}
+
+  async execute(input: {
+    debtId: DebtId;
+    promisedFor: string;
+  }): Promise<Result<void, PromiseError | { kind: "not_found" }>> {
+    const debt = await this.debts.findById(input.debtId);
+    if (!debt) return err({ kind: "not_found" });
+
+    const result = promisePayment(debt, input.promisedFor, this.clock.now());
+    if (!result.ok) return result;
+
+    await this.debts.save(result.value);
+    return ok(undefined);
+  }
+}
+
+// infrastructure/composition/debts.ts: el composition root
+export function createDebtModule(db: Database) {
+  return {
+    promisePayment: new PromisePaymentUseCase(new PostgresDebtRepository(db), { now: () => new Date() }),
+  };
+}
+```
+
+No hacen falta decoradores ni contenedores: el constructor **es** la inyección. Si preferís un estilo funcional,
+una función fábrica (`createPromisePayment({ debts, clock })`) que devuelve una función cumple el mismo rol.
+
+## Errores esperables: el tipo Result
+
+TypeScript no tiene excepciones chequeadas: **nada en la firma dice qué puede lanzar una función**. Para errores
+que son parte del negocio (y que el llamador **tiene** que manejar), un tipo `Result` los hace visibles:
+
+```ts
+export type Result<T, E> = { ok: true; value: T } | { ok: false; error: E };
+
+export const ok = <T>(value: T): Result<T, never> => ({ ok: true, value });
+export const err = <E>(error: E): Result<never, E> => ({ ok: false, error });
+```
+
+```ts
+const result = await promisePaymentUseCase.execute({ debtId, promisedFor });
+
+if (!result.ok) {
+  switch (result.error.kind) {
+    case "not_found":
+      return Response.json({ error: "debt_not_found" }, { status: 404 });
+    case "already_paid":
+      return Response.json({ error: "debt_already_paid" }, { status: 409 });
+    case "date_in_past":
+      return Response.json({ error: "promised_date_in_past" }, { status: 422 });
+  }
+}
+return new Response(null, { status: 204 });
+```
+
+| Situación                                    | Mecanismo                               |
+| -------------------------------------------- | --------------------------------------- |
+| Regla de negocio no cumplida (saldo, estado) | `Result` con un error tipado            |
+| Dato de entrada inválido                     | Parseo en el límite (esquema) → 4xx     |
+| Falla de infraestructura (DB caída, timeout) | Excepción; se captura en el borde → 5xx |
+| Bug (estado imposible, invariante rota)      | Excepción; se registra y se alerta      |
+
+Practicá esta técnica en el challenge [Tipo Result](/challenges/result-type).
+
+## Testing con Vitest
+
+Vitest es el runner estándar en proyectos con Vite o TypeScript moderno; su API es compatible con Jest.
+
+```ts
+import { describe, expect, it } from "vitest";
+
+describe("promisePayment", () => {
+  const now = new Date("2026-11-19T10:00:00Z");
+  const pending: Debt = { id: "debt_1" as DebtId, status: "pending", amountCents: 10_000 };
+
+  it("registra la promesa si la fecha es futura", () => {
+    const result = promisePayment(pending, "2026-12-01", now);
+    expect(result).toEqual({
+      ok: true,
+      value: { ...pending, status: "promised", promisedFor: "2026-12-01" },
+    });
+  });
+
+  it("rechaza fechas pasadas", () => {
+    expect(promisePayment(pending, "2026-11-01", now)).toEqual({
+      ok: false,
+      error: { kind: "date_in_past" },
+    });
+  });
+});
+```
+
+Para el caso de uso, en lugar de mockear cada método, se usa un **fake en memoria** que implementa el puerto:
+
+```ts
+class InMemoryDebtRepository implements DebtRepository {
+  readonly items = new Map<string, Debt>();
+  async findById(id: DebtId) {
+    return this.items.get(id);
+  }
+  async save(debt: Debt) {
+    this.items.set(debt.id, debt);
+  }
+}
+
+it("persiste la deuda con la promesa", async () => {
+  const debts = new InMemoryDebtRepository();
+  debts.items.set("debt_1", pending);
+  const useCase = new PromisePaymentUseCase(debts, { now: () => now });
+
+  await useCase.execute({ debtId: "debt_1" as DebtId, promisedFor: "2026-12-01" });
+
+  expect(debts.items.get("debt_1")?.status).toBe("promised"); // se verifica el estado, no las llamadas
+});
+```
+
+El test verifica **comportamiento observable** (el estado final), no **cómo** se llegó (qué métodos se llamaron).
+Si mañana el caso de uso hace una consulta menos, el test sigue pasando. Los mocks (`vi.fn()`, `vi.spyOn`) se
+reservan para efectos que no se pueden observar de otra forma, como "se envió un email".
+
+<Callout type="tip" title="La pirámide en TypeScript">
+  Muchos tests unitarios del núcleo puro (milisegundos), algunos de integración contra una base real o
+  embebida (en este proyecto, PGlite) y pocos end-to-end con Playwright para los flujos críticos.
+</Callout>
+
+## Refactoring y anti-patterns
+
+El sistema de tipos es la mejor red de seguridad para refactorizar: renombrar, extraer funciones o cambiar una
+unión produce errores en todos los lugares afectados. Algunos anti-patterns frecuentes al venir de C# o Java:
+
+| Anti-pattern                                                   | Por qué molesta en TypeScript                | Alternativa                                |
+| -------------------------------------------------------------- | -------------------------------------------- | ------------------------------------------ |
+| `IDebtService` + `DebtServiceImpl` con una sola implementación | Ceremonia sin beneficio                      | Interface sólo donde hay un puerto real    |
+| Clases sólo con métodos estáticos                              | Un módulo ya agrupa funciones                | Funciones exportadas                       |
+| Getters y setters triviales                                    | Ruido; las propiedades ya son accesibles     | Propiedades `readonly` o públicas          |
+| DTO = entidad = fila de la base                                | Acopla API, dominio y persistencia           | Tipos por capa con mapeo en los límites    |
+| `any` "temporal"                                               | Se contagia y nunca se saca                  | `unknown` + validación                     |
+| Excepciones para el flujo normal                               | Invisibles en la firma                       | `Result` para errores esperables           |
+| Mocks de todo                                                  | Tests frágiles que repiten la implementación | Fakes en memoria y tests de comportamiento |
+
+### Optimización
+
+Optimizá con mediciones, no por intuición. En TypeScript los costos reales suelen estar en la I/O (consultas N+1,
+llamadas secuenciales que podían ser concurrentes, falta de caché) y no en la diferencia entre `for` y `map`. En el
+compilador, los tipos recursivos profundos y los barrels gigantes son los que alargan los tiempos de build.
+
+## Comparación con C# y Java
+
+| Tema                      | C#                                         | Java                   | TypeScript                                     |
+| ------------------------- | ------------------------------------------ | ---------------------- | ---------------------------------------------- |
+| Unidad de organización    | Proyecto, namespace                        | Módulo, package        | Módulo ES (archivo) y carpetas por feature     |
+| Inyección de dependencias | Contenedor integrado (MS.DI)               | Spring                 | Constructor/fábricas + composition root        |
+| Errores esperables        | Excepciones o `OneOf`/`Result` (librerías) | Excepciones chequeadas | `Result` como discriminated union              |
+| Tests                     | xUnit/NUnit + Moq                          | JUnit + Mockito        | Vitest/Jest + fakes; `vi.fn` cuando hace falta |
+| Inmutabilidad             | `record`, `init`, `ImmutableList`          | `record`, `List.of`    | `readonly`, spread, `as const`                 |
+
+## Errores frecuentes
+
+- **Lógica de negocio en el handler HTTP o en el componente.** No se puede testear sin levantar todo.
+- **Leer `new Date()` o `Math.random()` dentro del dominio.** Inyectá el reloj y la fuente de aleatoriedad.
+- **Funciones que a veces devuelven Result y a veces lanzan** por errores de negocio.
+- **Tests que verifican llamadas internas** en lugar de resultados.
+- **Ciclos entre módulos** resueltos con imports dinámicos o "hacks" en lugar de revisar los límites.
+- **Copiar la arquitectura de un proyecto Java grande** a un servicio de 2.000 líneas.
+
+## Ejercicio interactivo
+
+<KnowledgeCheck
+  id="typescript.design-errors-testing.q1"
+  question="Un caso de uso puede fallar porque la deuda ya está pagada. ¿Cómo conviene representarlo en TypeScript?"
+  options={[
+    {
+      text: "Lanzando `new Error('already paid')`.",
+      explanation: "Funciona, pero el error es invisible en la firma y el compilador no obliga a manejarlo.",
+    },
+    {
+      text: "Devolviendo un `Result` con un error `{ kind: 'already_paid' }`.",
+      correct: true,
+      explanation:
+        "Correcto. Es un error esperable del negocio: la firma lo declara y el switch sobre kind es exhaustivo.",
+    },
+    {
+      text: "Devolviendo `null`.",
+      explanation: "`null` no dice por qué falló; con varios motivos de error se vuelve ambiguo.",
+    },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="typescript.design-errors-testing.q2"
+  question="¿Por qué conviene que `promisePayment` reciba `now: Date` como parámetro en lugar de llamar a `new Date()`?"
+  options={[
+    {
+      text: "Por performance: crear fechas es costoso.",
+      explanation: "El costo es despreciable; el motivo es el diseño.",
+    },
+    {
+      text: "Para que sea pura: los tests controlan el tiempo sin trucos globales y el resultado es reproducible.",
+      correct: true,
+      explanation: "Correcto. El reloj es un efecto; se inyecta desde el caso de uso (o un puerto Clock).",
+    },
+    {
+      text: "Porque `new Date()` no funciona en Node.js.",
+      explanation: "Funciona; el problema es que hace a la función impura.",
+    },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="typescript.design-errors-testing.q3"
+  question="Refactorizás un caso de uso para que haga una consulta menos a la base, sin cambiar su comportamiento. ¿Qué tests deberían romperse?"
+  options={[
+    {
+      text: "Los que verifican que se llamó a `findById` exactamente dos veces.",
+      explanation: "Esos tests se rompen, y es justamente el problema: verifican la implementación.",
+    },
+    {
+      text: "Ninguno: si el comportamiento observable no cambió, los tests bien escritos siguen pasando.",
+      correct: true,
+      explanation:
+        "Correcto. Tests de comportamiento con fakes sobreviven a los refactors; los de interacciones no.",
+    },
+    {
+      text: "Todos, porque cambió el código.",
+      explanation: "Un buen test protege el comportamiento, no las líneas de código.",
+    },
+  ]}
+/>

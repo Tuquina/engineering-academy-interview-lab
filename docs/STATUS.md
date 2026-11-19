@@ -219,6 +219,37 @@ entrevista rápida con su registro y recomendación, y el live coding con tests 
 - El live coding parte del borrador guardado del challenge si existe (se puede reiniciar con "Reiniciar").
 - Las entrevistas no graban audio: responder en voz alta queda a cargo del usuario.
 
+## Fase 4.5 — Teoría de los cursos · 🚧 en curso
+
+Fase agregada a pedido del usuario (ADR-0008): cursos completos de introducción y teoría, entendibles desde cero
+para alguien que ya programa. Cada curso suma un módulo **Introducción** (qué es, cómo se usa, sintaxis básica y
+mapa del curso) y lecciones que cubren el temario de cada módulo con teoría, diagramas, código, comparación con
+C# y Java, errores frecuentes, knowledge checks y preguntas de entrevista.
+
+| Curso                    | Lecciones | Estado     |
+| ------------------------ | --------- | ---------- |
+| TypeScript               | 11        | ✅ Tanda 1 |
+| Node.js                  | 1         | Pendiente  |
+| React                    | 0         | Pendiente  |
+| Next.js                  | 0         | Pendiente  |
+| LLMs y agentes de IA     | 0         | Pendiente  |
+| PostgreSQL               | 0         | Pendiente  |
+| Redis                    | 0         | Pendiente  |
+| Arquitectura de software | 0         | Pendiente  |
+| System Design            | 0         | Pendiente  |
+
+### Implementado y verificado
+
+- **TypeScript (11 lecciones):** introducción al lenguaje y su ecosistema (motores, runtimes, `tsc`, `tsconfig`,
+  tipos básicos), JavaScript moderno esencial (alcance, igualdad, `this`, destructuring, métodos de arrays, clases,
+  módulos, excepciones), runtime vs tipos, interfaces e inferencia (`satisfies`, widening), uniones y narrowing
+  (discriminated unions, `never`), genéricos, tipos derivados (mapped, conditional, `infer`, template literals),
+  APIs type-safe (branded types, Zod, DTOs, `process.env`), Promises, control de la asincronía (cancelación,
+  timeouts, pool de concurrencia, race conditions, reintentos con jitter) y diseño (módulos, funciones puras,
+  inversión de dependencias, `Result`, Vitest con fakes).
+- **Verificación de diagramas:** `tests/content/lesson-diagrams.test.ts` parsea con Mermaid todos los diagramas de
+  lecciones y cheatsheets; un diagrama roto falla el test en lugar de mostrarse como código en el navegador.
+
 ## Próximas fases
 
 | Fase                                                                          | Estado     |
@@ -226,19 +257,20 @@ entrevista rápida con su registro y recomendación, y el live coding con tests 
 | 2 — Aprendizaje                                                               | Completada |
 | 3 — Laboratorios (editor, Sandpack, SQL Playground con PGlite, challenges)    | Completada |
 | 4 — Arquitectura y entrevistas (System Design Studio, Interview Arena)        | Completada |
+| 4.5 — Teoría de los cursos (ADR-0008)                                         | En curso   |
 | 5 — Agentes IA (configuración, tool calling, memoria, evals)                  | Pendiente  |
 | 6 — Persistencia y administración (PostgreSQL, auth, contenido personalizado) | Pendiente  |
 | 7 — Producción (CI/CD, Vercel)                                                | Pendiente  |
 
 ### Contenido pendiente respecto del objetivo inicial (§35)
 
-| Elemento                    | Actual                                      | Objetivo |
-| --------------------------- | ------------------------------------------- | -------- |
-| Lecciones sustantivas       | 3                                           | 40       |
-| Challenges                  | 11 + 4 de arquitectura (+ 6 ejercicios SQL) | 25       |
-| Preguntas de evaluación     | 9 knowledge checks + 27 del Interview Arena | 60       |
-| Flashcards                  | 32                                          | 30 ✅    |
-| Diagramas                   | 13 (10 interactivos + 1 flujo + 2 Mermaid)  | 12 ✅    |
-| Simuladores o laboratorios  | 9 (3 laboratorios + 6 simuladores)          | 5 ✅     |
-| Escenarios de System Design | 5 (4 del Studio + rate limiting)            | 5 ✅     |
-| Ruta de 7 días operativa    | No                                          | 1        |
+| Elemento                    | Actual                                       | Objetivo |
+| --------------------------- | -------------------------------------------- | -------- |
+| Lecciones sustantivas       | 12                                           | 40       |
+| Challenges                  | 11 + 4 de arquitectura (+ 6 ejercicios SQL)  | 25       |
+| Preguntas de evaluación     | 36 knowledge checks + 27 del Interview Arena | 60 ✅    |
+| Flashcards                  | 32                                           | 30 ✅    |
+| Diagramas                   | 13 (10 interactivos + 1 flujo + 2 Mermaid)   | 12 ✅    |
+| Simuladores o laboratorios  | 9 (3 laboratorios + 6 simuladores)           | 5 ✅     |
+| Escenarios de System Design | 5 (4 del Studio + rate limiting)             | 5 ✅     |
+| Ruta de 7 días operativa    | No                                           | 1        |

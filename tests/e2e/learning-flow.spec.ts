@@ -1,6 +1,8 @@
 import { expect, test } from "@playwright/test";
 
 const LESSON_URL = "/courses/typescript/runtime-vs-sistema-de-tipos";
+/** Primera lección de la ruta activa: la introducción del curso de TypeScript (ADR-0008). */
+const FIRST_LESSON_URL = "/courses/typescript/introduccion-a-typescript";
 
 test.describe("flujo de aprendizaje (modo invitado)", () => {
   test("el dashboard recomienda la primera lección de la ruta activa", async ({ page }) => {
@@ -8,7 +10,7 @@ test.describe("flujo de aprendizaje (modo invitado)", () => {
     await expect(page.getByRole("heading", { level: 1, name: "Dashboard" })).toBeVisible();
     await expect(page.getByRole("link", { name: /Continuar estudiando/ })).toHaveAttribute(
       "href",
-      LESSON_URL,
+      FIRST_LESSON_URL,
     );
     await expect(page.getByRole("link", { name: /Practicar para entrevista/ })).toHaveAttribute(
       "href",
@@ -23,17 +25,17 @@ test.describe("flujo de aprendizaje (modo invitado)", () => {
   test("entrar en la ruta, completar la lección y ver el progreso reflejado", async ({ page }) => {
     await page.goto("/paths/full-stack-ai-platform-engineer");
     await page
-      .getByRole("link", { name: /Runtime vs sistema de tipos/ })
+      .getByRole("link", { name: /Introducción a TypeScript/ })
       .first()
       .click();
-    await expect(page).toHaveURL(LESSON_URL);
-    await expect(page.getByRole("heading", { level: 1 })).toContainText("Runtime vs sistema de tipos");
+    await expect(page).toHaveURL(FIRST_LESSON_URL);
+    await expect(page.getByRole("heading", { level: 1 })).toContainText("Introducción a TypeScript");
     // Los controles interactivos requieren que React haya hidratado la página.
     await page.waitForLoadState("networkidle");
 
     // Responder un knowledge check.
     const firstCheck = page.locator("section", { hasText: "Knowledge check" }).first();
-    await firstCheck.getByLabel(/PaymentReceivedEventSchema\.parse/).check();
+    await firstCheck.getByLabel(/El código se ejecuta igual/).check();
     await firstCheck.getByRole("button", { name: "Comprobar" }).click();
     await expect(firstCheck.getByRole("status")).toHaveText("¡Correcto!");
 
@@ -44,7 +46,7 @@ test.describe("flujo de aprendizaje (modo invitado)", () => {
     await page.goto("/");
     await expect(page.getByRole("link", { name: /Continuar estudiando/ })).toHaveAttribute(
       "href",
-      "/courses/typescript/promises-task-completablefuture",
+      "/courses/typescript/javascript-moderno-esencial",
     );
     const pathProgress = page.getByRole("progressbar", { name: "Progreso de la ruta activa" });
     await expect(pathProgress).not.toHaveAttribute("aria-valuenow", "0");
