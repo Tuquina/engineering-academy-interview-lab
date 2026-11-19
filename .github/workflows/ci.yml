@@ -17,7 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: pnpm check en el contenedor de desarrollo
         run: docker compose run --rm --no-deps app sh -c "pnpm install --frozen-lockfile && pnpm format:check && pnpm check"
 
@@ -27,13 +27,13 @@ jobs:
     needs: check
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: Playwright contra el build de producción
         run: docker compose --profile e2e run --rm e2e
       - name: Logs del servidor si falla
         if: failure()
         run: docker compose --profile e2e logs web-e2e --tail 200
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v5
         if: failure()
         with:
           name: playwright-report

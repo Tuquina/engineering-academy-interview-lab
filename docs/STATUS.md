@@ -451,6 +451,30 @@ Medido contra el build de producción, no contra el servidor de desarrollo:
 - Pendiente: Zod (~110 KB sin comprimir) sigue en el bundle común porque los stores validan `localStorage`; migrar a
   `zod/mini` lo reduciría, a costa de tocar todos los esquemas.
 
+## Fase 7 — Producción · ✅ completada (2026-11-19)
+
+Decisiones en [ADR-0011](adr/0011-production-on-vercel-and-supabase.md); operación en
+[guides/deploying-to-vercel.md](guides/deploying-to-vercel.md).
+
+Implementado y verificado:
+
+- [x] Despliegue en Vercel (región `gru1`) desde GitHub (`Tuquina/engineering-academy-interview-lab`); cada push a
+      `main` publica a producción y los pull requests generan previews en modo invitado.
+- [x] PostgreSQL 17 en Supabase (`sa-east-1`) con rol propio `eal_app`; migraciones aplicadas en cada build.
+- [x] RLS en todas las tablas (verificado en Supabase: `anon` sin privilegios) y test que lo exige.
+- [x] Límite de intentos de login y registro compartido en la base (`auth_attempts`), con tests de concurrencia.
+- [x] Primera cuenta reservada al email de `ADMIN_EMAILS`.
+- [x] CI en GitHub Actions: formato, typecheck, lint, tests, build y E2E con los contenedores de Docker.
+- [x] Revisión de performance (sección anterior) y documentación de despliegue y variables.
+
+Pendiente o limitado:
+
+- El CI no bloquea el despliegue: Vercel publica cada push a `main`. Para bloquear habría que proteger la rama y
+  trabajar con pull requests.
+- Supabase Free pausa el proyecto tras una semana sin uso (se reanuda desde su panel).
+- TLS hacia la base sin validar la CA de Supabase; límites del proveedor LLM real en memoria por instancia.
+- Sin dominio propio ni PWA instalable; el inicio de sesión con GitHub requiere crear una OAuth App.
+
 ## Próximas fases
 
 | Fase                                                                          | Estado     |
@@ -461,7 +485,7 @@ Medido contra el build de producción, no contra el servidor de desarrollo:
 | 4.5 — Teoría de los cursos (ADR-0008)                                         | Completada |
 | 5 — Agentes IA (configuración, tool calling, memoria, evals, mentor)          | Completada |
 | 6 — Persistencia y administración (PostgreSQL, auth, contenido personalizado) | Completada |
-| 7 — Producción (CI/CD, Vercel)                                                | Pendiente  |
+| 7 — Producción (CI/CD, Vercel)                                                | Completada |
 
 ### Contenido pendiente respecto del objetivo inicial (§35)
 

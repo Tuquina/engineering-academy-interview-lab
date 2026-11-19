@@ -1804,17 +1804,15 @@ errores frecuentes, knowledge checks y preguntas de entrevista.
 
 **Resultado:** plataforma persistente y extensible.
 
-### Fase 7 — Producción
-
-- [ ] Tests completos.
-- [ ] Validaciones.
-- [ ] Revisión de performance.
-- [ ] Documentación.
-- [ ] Configuración Vercel.
-- [ ] Variables de entorno.
-- [ ] Migraciones.
-- [ ] CI/CD.
-- [ ] Despliegue.
+- [x] Tests completos.
+- [x] Validaciones.
+- [x] Revisión de performance.
+- [x] Documentación.
+- [x] Configuración Vercel.
+- [x] Variables de entorno.
+- [x] Migraciones.
+- [x] CI/CD.
+- [x] Despliegue.
 
 **Resultado:** aplicación desplegable y mantenible.
 

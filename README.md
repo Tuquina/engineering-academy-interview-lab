@@ -90,5 +90,7 @@ docs/                       especificación, arquitectura, ADRs y guías
 
 ## Despliegue
 
-Pendiente para la última fase (Vercel). El proyecto ya es un único Next.js sin procesos persistentes y con las páginas
-de contenido pre-generadas, compatible con Vercel Functions.
+Producción en **Vercel** (región São Paulo) con **PostgreSQL de Supabase**: cada push a `main` aplica las migraciones
+y publica; GitHub Actions corre `pnpm check` y los E2E con los mismos contenedores que en local. Guía completa,
+variables y operación: [docs/guides/deploying-to-vercel.md](docs/guides/deploying-to-vercel.md) ·
+[ADR-0011](docs/adr/0011-production-on-vercel-and-supabase.md).

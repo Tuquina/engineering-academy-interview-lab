@@ -50,4 +50,5 @@ No correr `pnpm build` en el contenedor mientras `app` está levantado: comparte
 - Fase 5 — Agentes IA: **completada** (AI Agents Lab, evals y AI Study Mentor opcional; ver docs/adr/0009).
 - Fase 6 — Persistencia y administración: **completada** (PostgreSQL local, cuentas, sincronización, administración de
   contenido; ver docs/adr/0010).
-- Siguiente: **Fase 7 — Producción** (último paso: despliegue en Vercel).
+- Fase 7 — Producción: **completada** (Vercel + Supabase, CI en GitHub Actions; ver docs/adr/0011 y
+  docs/guides/deploying-to-vercel.md). Cada push a `main` despliega a producción y migra la base.
