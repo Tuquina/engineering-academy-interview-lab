@@ -46,4 +46,5 @@ No correr `pnpm build` en el contenedor mientras `app` está levantado: comparte
 - Fase 3 — Laboratorios: **completada** (ver docs/STATUS.md y docs/adr/0006).
 - Fase 4 — Arquitectura y entrevistas: **completada** (ver docs/STATUS.md y docs/adr/0007).
 - Fase 4.5 — Teoría de los cursos: **completada** (agregada por el usuario; 60 lecciones en 9 cursos; ver docs/adr/0008).
-- Siguiente: **Fase 5 — Agentes IA**.
+- Fase 5 — Agentes IA: **completada** (AI Agents Lab, evals y AI Study Mentor opcional; ver docs/adr/0009).
+- Siguiente: **Fase 6 — Persistencia y administración**.

@@ -22,6 +22,7 @@
     "check": "pnpm typecheck && pnpm lint && pnpm test && pnpm build"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "1.8.0",
     "@codesandbox/sandpack-react": "2.20.0",
     "@electric-sql/pglite": "0.5.16",
     "@monaco-editor/react": "4.7.0",

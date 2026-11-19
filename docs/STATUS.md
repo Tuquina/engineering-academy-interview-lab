@@ -305,6 +305,76 @@ build de producción. Los detalles dependientes de versión se verificaron contr
   documentación oficial para valores vigentes.
 - Todavía no hay una ruta de preparación de 7 días (§35).
 
+## Fase 5 — Agentes IA · ✅ completada (2026-11-19)
+
+Decisiones en [ADR-0009](adr/0009-agent-lab-providers-and-evals.md). Módulos `agent-lab` y `mentor`.
+
+### Implementado y verificado
+
+- **AI Agents Lab** (`/agents`): agentes guardados en el navegador, con un agente de ejemplo (v1 publicada con fallas
+  de cumplimiento, v2 mejorada) y "Restaurar ejemplo".
+- **Configuración** (§16.3): identidad, tono, voz (propiedad versionada, sin síntesis de audio), system prompt con
+  variables `{{nombre}}` validadas, objetivo, reglas, herramientas permitidas, políticas (presentación como IA, plazo
+  de promesa, cuotas, descuento, horario, escalamiento ante disputas, frases prohibidas), memoria (largo plazo y
+  ventana de corto plazo), modelo (proveedor, modelo permitido, variabilidad simulada, pasos, timeout, reintentos,
+  fallback) y escenarios de evaluación. Vista del system prompt final.
+- **Versionado**: versiones inmutables numeradas, diff campo a campo entre versiones o contra el borrador, publicar
+  con quality gate, rollback (sin gate) e historial de publicaciones.
+- **Playground**: conversación con elección de versión, cliente, fecha simulada y semilla; trazas por turno (pasos del
+  modelo, latencia, intentos, fallback, herramientas, mensajes en contexto, memoria enviada); panel con estado del
+  negocio, memoria de largo plazo e historial de eventos. "Nueva conversación" conserva memoria y estado.
+- **Loop de herramientas** (`runAgentTurn`): timeout por intento, reintentos con backoff sólo para errores
+  transitorios, fallback al proveedor local, límite de pasos, corte ante `max_tokens` en medio de un `tool_use` y ante
+  `refusal`.
+- **Tool Calling Simulator** (§16.4, `/agents/tools`): las 8 herramientas con JSON editable; muestra argumentos,
+  validación del esquema, resultado, errores, estado anterior y posterior, cambios y tiempo. Tres barreras:
+  habilitación, esquema Zod y reglas de negocio (incluida la de operar sólo sobre el cliente de la conversación).
+- **Proveedor local determinista**: reglas explícitas de intención y plantillas por tono; no lee el system prompt y lo
+  dice en un aviso permanente. La variabilidad con semilla simula redacciones distintas y errores típicos.
+- **Memoria** (§16.5, `/agents/memory`): demo día 1 → 16 (promesa, afirmación de pago sin respaldo, campaña bloqueada,
+  recordatorio en la franja preferida, promesa vencida y memoria desactualizada). Memoria conversacional, estado del
+  negocio e historial separados; hechos con fecha, vencimiento y reemplazo; contradicciones resueltas a favor del
+  sistema de registro.
+- **Evals** (§16.6 y §16.7, `/agents/evals`): golden dataset de 13 casos (5 críticos) y casos propios; verificaciones
+  deterministas, semánticas heurísticas y LLM as Judge, siempre rotuladas; repeticiones con semilla pareada entre A y
+  B; tasa con intervalo de Wilson; casos inestables; comparación que sólo declara mejora o regresión si los
+  intervalos no se superponen; latencia p50/p95 medida; costo estimado sólo con tokens reales; quality gate
+  configurable; historial de corridas para ver drift y regresiones de prompt; detalle por repetición.
+- **Proveedor real opcional**: `@anthropic-ai/sdk` 1.8.0 detrás de `/api/agent-lab/generate` y
+  `/api/agent-lab/judge`. Herramientas `strict`, reenvío sin cambios del contenido del modelo, juez con salida
+  estructurada. Endpoints protegidos (503 sin key, mismo origen, tamaño, límite por minuto y presupuesto diario).
+- **AI Study Mentor** (§30, `/mentor` y en cada lección): 9 modos (explicar, dudas de la lección, preguntas de
+  seguimiento, pistas, explicar errores, simular entrevista, comparar alternativas, proponer ejercicios, revisar
+  código); enseña antes de revelar soluciones; el contexto de la lección y el progreso sólo se envían si se marcan.
+  Sin key se muestra deshabilitado con la explicación de cómo activarlo.
+- Las lecciones de tool calling, memoria, evaluaciones y versionado enlazan a cada laboratorio.
+
+### Verificación
+
+- `tsc` estricto y ESLint sin errores; **206 tests** unitarios en 32 archivos (24 nuevos del laboratorio: herramientas y
+  políticas, versionado y quality gate, estadística de Wilson y comparación, memoria y elegibilidad, loop con
+  reintentos y fallback, suite completa con v1 y v2; más el adaptador de Anthropic con un cliente falso, la protección
+  de endpoints y el mentor). El test de arquitectura cubre los módulos nuevos.
+- Test de regresión del proveedor local: la v2 de ejemplo con variabilidad 0 aprueba los 13 casos del golden dataset y
+  la v1 falla los casos críticos de cumplimiento.
+- Build de producción: 155 páginas; las rutas `/api/*` son dinámicas.
+- **E2E** (build de producción nuevo): 44 pasan, 18 omitidos a propósito en móvil. Nuevos: playground con
+  herramientas y aviso de simulación, versión nueva bloqueada por el quality gate, rechazo por esquema en el
+  simulador, decisión de memoria del día 5 y comparación v1 contra v2 en el Eval Playground.
+- Revisión manual en el servidor de desarrollo: hub, playground, memoria, evals, simulador y mentor deshabilitado sin
+  key en una lección.
+
+### Limitaciones conocidas
+
+- El comportamiento con un modelo real **no se probó contra la API** (no hay key en el entorno de desarrollo): el
+  adaptador se verificó con un cliente falso y con los tipos del SDK.
+- El proveedor local entiende sólo las frases que cubren sus reglas; con mensajes fuera de ese repertorio responde
+  con una ayuda genérica. Los casos propios pensados para un LLM pueden fallar con él.
+- Los límites de uso del servidor viven en memoria del proceso: con varias instancias cada una cuenta por separado.
+- Agentes, evaluaciones y casos propios viven en `localStorage` (modo invitado); la sincronización llega en la Fase 6.
+- El playground y el simulador no persisten la conversación ni el mundo al recargar (sí los agentes y las
+  evaluaciones).
+
 ## Próximas fases
 
 | Fase                                                                          | Estado     |
@@ -313,19 +383,19 @@ build de producción. Los detalles dependientes de versión se verificaron contr
 | 3 — Laboratorios (editor, Sandpack, SQL Playground con PGlite, challenges)    | Completada |
 | 4 — Arquitectura y entrevistas (System Design Studio, Interview Arena)        | Completada |
 | 4.5 — Teoría de los cursos (ADR-0008)                                         | Completada |
-| 5 — Agentes IA (configuración, tool calling, memoria, evals)                  | Pendiente  |
+| 5 — Agentes IA (configuración, tool calling, memoria, evals, mentor)          | Completada |
 | 6 — Persistencia y administración (PostgreSQL, auth, contenido personalizado) | Pendiente  |
 | 7 — Producción (CI/CD, Vercel)                                                | Pendiente  |
 
 ### Contenido pendiente respecto del objetivo inicial (§35)
 
-| Elemento                    | Actual                                        | Objetivo |
-| --------------------------- | --------------------------------------------- | -------- |
-| Lecciones sustantivas       | 60                                            | 40 ✅    |
-| Challenges                  | 11 + 4 de arquitectura (+ 6 ejercicios SQL)   | 25       |
-| Preguntas de evaluación     | 180 knowledge checks + 27 del Interview Arena | 60 ✅    |
-| Flashcards                  | 32                                            | 30 ✅    |
-| Diagramas                   | 13 (10 interactivos + 1 flujo + 2 Mermaid)    | 12 ✅    |
-| Simuladores o laboratorios  | 9 (3 laboratorios + 6 simuladores)            | 5 ✅     |
-| Escenarios de System Design | 5 (4 del Studio + rate limiting)              | 5 ✅     |
-| Ruta de 7 días operativa    | No                                            | 1        |
+| Elemento                    | Actual                                                    | Objetivo |
+| --------------------------- | --------------------------------------------------------- | -------- |
+| Lecciones sustantivas       | 60                                                        | 40 ✅    |
+| Challenges                  | 11 + 4 de arquitectura (+ 6 ejercicios SQL)               | 25       |
+| Preguntas de evaluación     | 180 knowledge checks + 27 del Interview Arena             | 60 ✅    |
+| Flashcards                  | 32                                                        | 30 ✅    |
+| Diagramas                   | 13 (10 interactivos + 1 flujo + 2 Mermaid)                | 12 ✅    |
+| Simuladores o laboratorios  | 13 (3 laboratorios + 6 simuladores + 4 del AI Agents Lab) | 5 ✅     |
+| Escenarios de System Design | 5 (4 del Studio + rate limiting)                          | 5 ✅     |
+| Ruta de 7 días operativa    | No                                                        | 1        |

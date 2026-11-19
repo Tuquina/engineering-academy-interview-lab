@@ -17,6 +17,7 @@ import { renderLessonBody } from "@/modules/learning/presentation/mdx/render-les
 import { LessonContextProvider } from "@/modules/learning/presentation/lesson/lesson-context";
 import { BookmarkButton } from "@/modules/notebook/presentation/bookmark-button";
 import { LessonNotes } from "@/modules/notebook/presentation/lesson-notes";
+import { MentorPanel } from "@/modules/mentor/presentation/mentor-panel";
 import { LessonProgressControls } from "@/modules/progress/presentation/lesson-progress-controls";
 import {
   ReadingPositionTracker,
@@ -120,6 +121,15 @@ export default async function LessonPage({ params }: LessonPageProps) {
           <LessonSummary points={lesson.summary} />
           <LessonReferences references={lesson.references} />
           <LessonNotes lessonId={lesson.id} />
+          <MentorPanel
+            lesson={{
+              lessonId: lesson.id,
+              title: lesson.title,
+              description: lesson.description,
+              objectives: lesson.objectives,
+              summary: lesson.summary,
+            }}
+          />
           <LessonProgressControls lessonId={lesson.id} />
 
           <nav aria-label="Lecciones del curso" className="grid gap-3 sm:grid-cols-2">

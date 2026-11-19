@@ -1781,13 +1781,13 @@ errores frecuentes, knowledge checks y preguntas de entrevista.
 
 ### Fase 5 — Agentes IA
 
-- [ ] Agent configuration.
-- [ ] Versionado.
-- [ ] Tool calling simulado.
-- [ ] Memory.
-- [ ] Evals.
-- [ ] Comparación de agentes.
-- [ ] AI Study Mentor opcional.
+- [x] Agent configuration.
+- [x] Versionado.
+- [x] Tool calling simulado.
+- [x] Memory.
+- [x] Evals.
+- [x] Comparación de agentes.
+- [x] AI Study Mentor opcional (ADR-0009).
 
 **Resultado:** laboratorio de ingeniería de agentes.
 

@@ -15,7 +15,7 @@ prerequisites: ["llm-agents.guardrails-observability"]
 estimatedMinutes: 45
 tags:
   ["memoria", "contexto", "compaction", "estado de negocio", "event sourcing", "información contradictoria"]
-version: "1.0.0"
+version: "1.0.1"
 comparesWith: []
 references:
   - title: "Anthropic — Effective context engineering for AI agents"
@@ -194,6 +194,11 @@ ${memories.map((m) => `- ${m.fact} (dicho el ${m.date}, conversación ${m.conver
 ```
 
 El challenge [Memoria conversacional](/challenges/conversation-memory) practica parte de este diseño.
+
+<Callout type="tip" title="Practicalo en el AI Agents Lab">
+  La [demostración de memoria](/agents/memory) recorre del día 1 al 16: promesa, afirmación sin pago, campaña
+  bloqueada por la promesa activa, recordatorio en la franja preferida y memoria desactualizada.
+</Callout>
 
 ## Errores frecuentes
 

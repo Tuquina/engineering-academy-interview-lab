@@ -6,6 +6,11 @@
       "runtimeExecutable": "docker",
       "runtimeArgs": ["compose", "up", "app"],
       "port": 3000
+    },
+    {
+      "name": "app (ya levantada)",
+      "url": "http://localhost:3000",
+      "port": 3000
     }
   ]
 }

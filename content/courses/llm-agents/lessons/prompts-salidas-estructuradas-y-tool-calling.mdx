@@ -14,7 +14,7 @@ objectives:
 prerequisites: ["llm-agents.tokens-context"]
 estimatedMinutes: 50
 tags: ["prompt engineering", "system prompt", "structured outputs", "json schema", "tool calling", "zod"]
-version: "1.0.0"
+version: "1.0.1"
 comparesWith: []
 references:
   - title: "Anthropic — Build with Claude (overview)"
@@ -282,6 +282,12 @@ async function executeTool(name: string, input: unknown, session: ConversationSe
   }
 }
 ```
+
+<Callout type="tip" title="Practicalo en el AI Agents Lab">
+  En el [Tool Calling Simulator](/agents/tools) podés invocar las herramientas de cobranza con argumentos
+  inválidos, fuera de política o de otro cliente y ver qué barrera rechaza cada llamada; en el playground de
+  cada agente, el loop completo con sus trazas.
+</Callout>
 
 ## Errores frecuentes
 

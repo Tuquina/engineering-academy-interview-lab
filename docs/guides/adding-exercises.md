@@ -140,3 +140,22 @@ Un archivo TypeScript con dos comentarios iniciales:
 ```
 
 Aparecen en el selector "Cargar un ejemplo" de `/lab`. Los tests de contenido verifican que compilen.
+
+## 7. Casos de evaluación del AI Agents Lab
+
+El golden dataset está en `src/modules/agent-lab/domain/eval-suite.ts` (los casos propios se crean desde la interfaz
+del Eval Playground y viven en `localStorage`). Cada caso define el cliente, los mensajes de la persona y las
+verificaciones:
+
+- **Preferí verificaciones deterministas**: `tool_called` (con `argsInclude` para fijar argumentos), `tool_not_called`,
+  `state` (promesa registrada, escalamiento, no contactar, pago aplicado), `no_foreign_customer_access`,
+  `max_tool_calls`, `avoids_forbidden_phrases`, `discloses_ai`.
+- `mentions` es una **heurística semántica**: busca un concepto de `CONCEPTS` (conjuntos de sinónimos sobre texto sin
+  acentos). Para un concepto nuevo, agregalo a `CONCEPTS` con sus patrones.
+- `judge` (LLM as Judge) sólo se ejecuta con un proveedor real; con el local queda como omitida, nunca aprobada.
+- Marcá `critical: true` sólo lo que nunca puede fallar (seguridad, cumplimiento): el quality gate exige el 100 % de
+  las repeticiones.
+
+El test `agent-runner.test.ts` exige que la v2 de ejemplo con variabilidad 0 apruebe todo el dataset: si agregás un
+caso que el proveedor local no puede resolver con sus reglas (`local-intents.ts`), ajustá las reglas o documentá por
+qué el caso queda para un modelo real.

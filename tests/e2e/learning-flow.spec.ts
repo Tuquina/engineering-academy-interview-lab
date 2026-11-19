@@ -84,8 +84,9 @@ test.describe("flujo de aprendizaje (modo invitado)", () => {
     }
     const nav = page.getByRole("navigation", { name: "Navegación principal" }).last();
     await expect(nav.getByRole("link", { name: "Biblioteca" })).toBeVisible();
-    // AI Agents Lab llega en la Fase 5: se ve, pero no es un enlace.
-    await expect(nav.getByRole("link", { name: /AI Agents Lab/ })).toHaveCount(0);
-    await expect(nav.getByText("AI Agents Lab")).toBeVisible();
+    // La administración de contenido llega en la Fase 6: se ve, pero no es un enlace.
+    await expect(nav.getByRole("link", { name: /Administración de contenido/ })).toHaveCount(0);
+    await expect(nav.getByText("Administración de contenido")).toBeVisible();
+    await expect(nav.getByRole("link", { name: /AI Agents Lab/ })).toBeVisible();
   });
 });

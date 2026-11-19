@@ -1,3 +1,5 @@
+import { EMPTY_AGENT_LAB, type AgentLabState } from "@/modules/agent-lab/domain/agent-lab-state";
+import { createLocalAgentLabStore } from "@/modules/agent-lab/infrastructure/local-storage-agent-lab-store";
 import { EMPTY_PRACTICE, type PracticeState } from "@/modules/exercises/domain/practice";
 import { createLocalPracticeStore } from "@/modules/exercises/infrastructure/local-storage-practice-store";
 import { EMPTY_INTERVIEWS, type InterviewsState } from "@/modules/interviews/domain/history";
@@ -24,6 +26,7 @@ export interface ClientStores {
   readonly practice: ExternalStore<PracticeState>;
   readonly studio: ExternalStore<StudioState>;
   readonly interviews: ExternalStore<InterviewsState>;
+  readonly agentLab: ExternalStore<AgentLabState>;
 }
 
 let browserStores: ClientStores | null = null;
@@ -45,6 +48,7 @@ export function getClientStores(): ClientStores {
       practice: createServerSnapshotStore(EMPTY_PRACTICE),
       studio: createServerSnapshotStore(EMPTY_STUDIO),
       interviews: createServerSnapshotStore(EMPTY_INTERVIEWS),
+      agentLab: createServerSnapshotStore(EMPTY_AGENT_LAB),
     };
   }
   if (!browserStores) {
@@ -57,6 +61,7 @@ export function getClientStores(): ClientStores {
       practice: createLocalPracticeStore(storage, window),
       studio: createLocalStudioStore(storage, window),
       interviews: createLocalInterviewsStore(storage, window),
+      agentLab: createLocalAgentLabStore(storage, window),
     };
   }
   return browserStores;

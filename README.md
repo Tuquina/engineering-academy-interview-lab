@@ -13,8 +13,16 @@ Engineering**: TypeScript, Node.js, React, Next.js, arquitectura, System Design,
 Sólo **Docker** (con Docker Compose). No hace falta instalar Node.js ni pnpm en el equipo: todo el toolchain corre en
 contenedores ([ADR-0001](docs/adr/0001-docker-only-local-toolchain.md)).
 
-No hay variables de entorno obligatorias todavía: la Fase 1 funciona sin servicios externos (modo invitado con
-progreso en `localStorage`). El archivo `.env.example` se agregará cuando una fase lo necesite (PostgreSQL, auth, LLM).
+No hay variables de entorno obligatorias: todo funciona sin servicios externos (modo invitado con progreso en
+`localStorage`) y el AI Agents Lab usa un proveedor local determinista que no necesita API key.
+
+### Modelo real opcional (AI Agents Lab y AI Study Mentor)
+
+Para usar un LLM real, copiá `.env.example` como `.env` (está en `.gitignore`), completá `ANTHROPIC_API_KEY` y
+reiniciá el contenedor (`docker compose up app`). La key sólo la lee el servidor: el navegador llama a Route Handlers
+propios (`/api/agent-lab/*`, `/api/mentor`), protegidos con límite por minuto, presupuesto diario, mismo origen y
+validación de tamaño. Sin key, esas funciones se muestran deshabilitadas y explican cómo activarlas
+([ADR-0009](docs/adr/0009-agent-lab-providers-and-evals.md)).
 
 ## Uso local
 
