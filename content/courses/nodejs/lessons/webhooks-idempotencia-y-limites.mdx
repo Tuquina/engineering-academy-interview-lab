@@ -1,0 +1,344 @@
+---
+id: nodejs.webhooks-idempotency
+moduleId: nodejs.backend
+title: "Webhooks, idempotencia, rate limiting y timeouts"
+description: "Cómo recibir eventos de terceros sin perderlos ni procesarlos dos veces, cómo hacer que un POST crítico sea seguro de reintentar, y cómo proteger la API y sus dependencias con rate limiting y timeouts. Con firmas HMAC, idempotency keys y procesamiento asíncrono."
+difficulty: advanced
+order: 3
+objectives:
+  - "Verificar la autenticidad de un webhook con una firma HMAC y protección contra replay."
+  - "Diseñar un receptor de webhooks que responde rápido y procesa de forma asíncrona y deduplicada."
+  - "Implementar Idempotency-Key para que un POST se pueda reintentar sin efectos duplicados."
+  - "Explicar los algoritmos de rate limiting y dónde aplicarlos."
+  - "Definir presupuestos de timeout coherentes entre capas."
+prerequisites: ["nodejs.http-apis", "typescript.async-control"]
+estimatedMinutes: 45
+tags: ["webhooks", "idempotencia", "hmac", "rate limiting", "timeouts", "at-least-once", "c#", "java"]
+version: "1.0.0"
+comparesWith: ["csharp", "java"]
+references:
+  - title: "Stripe Docs — Receive webhook events (signatures and retries)"
+    url: "https://docs.stripe.com/webhooks"
+  - title: "Stripe API — Idempotent requests"
+    url: "https://docs.stripe.com/api/idempotent_requests"
+  - title: "IETF draft — The Idempotency-Key HTTP Header Field"
+    url: "https://datatracker.ietf.org/doc/draft-ietf-httpapi-idempotency-key-header/"
+  - title: "Standard Webhooks — Specification"
+    url: "https://www.standardwebhooks.com/"
+  - title: "Node.js — crypto.timingSafeEqual"
+    url: "https://nodejs.org/api/crypto.html#cryptotimingsafeequala-b"
+  - title: "MDN — 429 Too Many Requests"
+    url: "https://developer.mozilla.org/en-US/docs/Web/HTTP/Status/429"
+interviewQuestions:
+  - question: "¿Cómo diseñarías un endpoint que recibe webhooks de un proveedor de pagos?"
+    keyPoints:
+      - "Verificar la firma HMAC sobre el body crudo, con comparación de tiempo constante y tolerancia de timestamp contra replay."
+      - "Persistir el evento con su ID único (constraint) y responder 2xx rápido."
+      - "Procesar de forma asíncrona (cola o tabla de eventos) con reintentos; el procesamiento es idempotente."
+      - "Asumir entrega al menos una vez y desorden: no confiar en el orden de llegada; usar timestamps o versiones."
+  - question: "¿Cómo funciona una Idempotency-Key?"
+    keyPoints:
+      - "El cliente genera una clave única por operación lógica y la envía en un header."
+      - "El servidor guarda la clave con el resultado; ante un reintento con la misma clave devuelve el resultado guardado sin repetir el efecto."
+      - "Se reserva la clave de forma atómica antes de ejecutar, para que dos requests concurrentes no ejecuten ambas."
+      - "Se valida que el body coincida con el original y la clave expira después de un tiempo."
+  - question: "¿Qué algoritmos de rate limiting conocés y cuáles son sus diferencias?"
+    keyPoints:
+      - "Ventana fija: simple, pero permite el doble del límite en el borde entre ventanas."
+      - "Ventana deslizante (log o contador ponderado): más precisa."
+      - "Token bucket: permite ráfagas controladas hasta la capacidad y una tasa sostenida."
+      - "Con varias réplicas el estado debe ser compartido (Redis) y la respuesta es 429 con Retry-After."
+summary:
+  - "Los webhooks llegan al menos una vez, a veces duplicados y desordenados: el receptor debe ser idempotente."
+  - "Firma HMAC sobre el body crudo + timestamp + comparación de tiempo constante = autenticidad y anti-replay."
+  - "Responder rápido (2xx tras persistir) y procesar después evita timeouts y reintentos innecesarios del emisor."
+  - "Una constraint única sobre el ID del evento es la forma más simple y robusta de deduplicar."
+  - "Idempotency-Key: reservar la clave atómicamente, ejecutar, guardar el resultado y devolverlo ante reintentos."
+  - "Rate limiting protege a la API y a sus dependencias; con varias réplicas el contador vive en Redis."
+  - "Cada llamada saliente tiene timeout, y los timeouts internos son menores que los externos."
+---
+
+## ¿Qué problema resuelve?
+
+El proveedor de pagos avisa con un webhook cada vez que un deudor paga. Ese webhook es la única fuente que actualiza
+el saldo y detiene los recordatorios. Si se pierde, el sistema sigue cobrando a alguien que ya pagó. Si se procesa
+dos veces, el saldo queda mal. Y el proveedor **va a reintentar** cada vez que tu endpoint tarde demasiado o
+devuelva un error, así que los duplicados no son una rareza: son el caso normal.
+
+El mismo problema existe en la otra dirección: cuando tu frontend o un agente llama `POST /payments` y la conexión
+se corta antes de la respuesta, ¿se cobró o no? ¿Es seguro reintentar?
+
+## Garantías de entrega: al menos una vez
+
+Casi todos los sistemas de webhooks y colas ofrecen entrega **al menos una vez** (_at-least-once_): un evento puede
+llegar más de una vez, y no necesariamente en orden. "Exactamente una vez" de punta a punta no se puede garantizar
+a través de una red; lo que sí se puede es **procesamiento efectivamente una vez**, combinando reintentos con un
+receptor **idempotente**.
+
+<MermaidDiagram
+  caption="El proveedor reintenta si no recibe un 2xx a tiempo; el receptor deduplica por ID de evento."
+  chart={`
+sequenceDiagram
+  participant P as Proveedor de pagos
+  participant API as Endpoint de webhooks
+  participant DB as Base de datos
+  participant W as Worker
+  P->>API: POST /webhooks/payments (evt_1, firma)
+  API->>API: verificar firma y timestamp
+  API->>DB: INSERT evento evt_1 (id único)
+  API-->>P: 200 OK
+  P->>API: reintento evt_1 (la respuesta se perdió)
+  API->>DB: INSERT evt_1: ya existe
+  API-->>P: 200 OK (duplicado ignorado)
+  W->>DB: tomar eventos pendientes
+  W->>DB: aplicar pago y marcar procesado
+`}
+/>
+
+## Verificar la firma
+
+Cualquiera puede hacer un POST a tu endpoint público. El proveedor firma cada webhook con un secreto compartido
+(HMAC), normalmente sobre `timestamp + "." + body`:
+
+```ts
+import { createHmac, timingSafeEqual } from "node:crypto";
+
+const TOLERANCE_SECONDS = 300;
+
+/** Verifica la firma HMAC-SHA256 del webhook y rechaza eventos viejos (replay). */
+export function verifyWebhookSignature(
+  rawBody: string,
+  signatureHeader: string,
+  timestamp: string,
+  secret: string,
+): boolean {
+  const age = Math.abs(Date.now() / 1000 - Number(timestamp));
+  if (!Number.isFinite(age) || age > TOLERANCE_SECONDS) return false;
+
+  const expected = createHmac("sha256", secret).update(`${timestamp}.${rawBody}`).digest();
+  const received = Buffer.from(signatureHeader, "hex");
+  return received.length === expected.length && timingSafeEqual(received, expected);
+}
+```
+
+Tres detalles que se preguntan en entrevistas:
+
+1. **Body crudo:** la firma se calcula sobre los bytes exactos recibidos. Si primero parseás el JSON y lo volvés a
+   serializar, cambian espacios u orden y la firma no coincide. Hay que leer el body como texto antes de parsearlo.
+2. **Comparación de tiempo constante:** `===` termina en el primer carácter distinto; midiendo tiempos, un atacante
+   puede adivinar la firma byte a byte. `timingSafeEqual` tarda siempre lo mismo.
+3. **Timestamp:** sin él, alguien que capturó un webhook válido puede reenviarlo (_replay_) indefinidamente.
+
+## Responder rápido, procesar después
+
+Los proveedores esperan la respuesta pocos segundos. Si tu endpoint aplica el pago, recalcula el scoring y envía un
+email antes de responder, cualquier lentitud dispara reintentos y duplica trabajo.
+
+```ts
+export async function POST(request: Request): Promise<Response> {
+  const rawBody = await request.text();
+  const valid = verifyWebhookSignature(
+    rawBody,
+    request.headers.get("x-signature") ?? "",
+    request.headers.get("x-timestamp") ?? "",
+    env.PAYMENTS_WEBHOOK_SECRET,
+  );
+  if (!valid) return problem(401, "invalid_signature");
+
+  const event = PaymentEventSchema.parse(JSON.parse(rawBody));
+
+  // INSERT ... ON CONFLICT (provider_event_id) DO NOTHING: deduplica de forma atómica
+  await webhookEvents.saveIfNew({
+    providerEventId: event.id,
+    type: event.type,
+    payload: event,
+    status: "pending",
+  });
+
+  return new Response(null, { status: 200 }); // el worker lo procesa después
+}
+```
+
+Un worker toma los eventos `pending`, los procesa dentro de una transacción y los marca `processed`. Si falla, el
+evento queda para un reintento posterior; si falla muchas veces, va a una cola de errores (_dead letter_) para
+revisión. El procesamiento también debe ser idempotente: "aplicar el pago `pay_9`" debe chequear si ese pago ya se
+aplicó.
+
+<Callout type="warning" title="Orden de llegada">
+  Un `payment.refunded` puede llegar antes que el `payment.succeeded` correspondiente. No asumas orden: usá el
+  timestamp o la versión del evento, o consultá el estado actual al proveedor antes de actuar.
+</Callout>
+
+Practicá este diseño en el challenge [Webhook idempotente](/challenges/idempotent-webhook) y en el desafío de
+arquitectura [Webhooks confiables](/system-design/challenges/reliable-webhooks).
+
+## Idempotency-Key para tus propios POST
+
+Para operaciones que no deben duplicarse (cobrar, enviar un mensaje, crear un acuerdo de pago), el cliente envía
+una clave única por **operación lógica**. Si reintenta, envía **la misma clave**:
+
+```text
+POST /payment-plans
+Idempotency-Key: 6f1c2a9e-8b7d-4c1e-9f3a-2d5e7b8c9a01
+```
+
+<FlowDiagram
+  steps={[
+    {
+      title: "Reservar la clave",
+      detail: "INSERT atómico (clave, hash del body, estado in_progress). Si ya existe, ir al paso 4.",
+      tone: "boundary",
+    },
+    { title: "Ejecutar", detail: "Crear el plan de pagos." },
+    {
+      title: "Guardar el resultado",
+      detail: "Status y body de la respuesta asociados a la clave.",
+      tone: "runtime",
+    },
+    {
+      title: "Reintento",
+      detail:
+        "Misma clave: devolver la respuesta guardada; si sigue in_progress, 409; si el body difiere, 422.",
+    },
+  ]}
+  caption="La reserva atómica impide que dos requests concurrentes con la misma clave ejecuten ambas."
+/>
+
+```ts
+export async function withIdempotency(
+  key: string,
+  requestHash: string,
+  execute: () => Promise<StoredResponse>,
+): Promise<StoredResponse> {
+  const reserved = await idempotencyStore.reserve(key, requestHash); // INSERT ... ON CONFLICT DO NOTHING
+  if (!reserved) {
+    const existing = await idempotencyStore.get(key);
+    if (existing?.requestHash !== requestHash)
+      return { status: 422, body: { error: "idempotency_key_reused" } };
+    if (existing.status === "in_progress") return { status: 409, body: { error: "request_in_progress" } };
+    return existing.response!; // mismo resultado que la primera vez, sin repetir el efecto
+  }
+  const response = await execute();
+  await idempotencyStore.complete(key, response);
+  return response;
+}
+```
+
+Las claves expiran (por ejemplo, a las 24 horas) y se asocian al usuario o tenant para que nadie pueda leer la
+respuesta de otro usando su clave.
+
+## Rate limiting
+
+Limitar cuántas requests acepta la API protege contra abuso, picos y clientes defectuosos, y protege a las
+**dependencias** (la base, el proveedor de LLM con su propia cuota).
+
+| Algoritmo          | Idea                                                        | Comportamiento                              |
+| ------------------ | ----------------------------------------------------------- | ------------------------------------------- |
+| Ventana fija       | Contador por ventana de N segundos                          | Simple; permite hasta el doble en el borde  |
+| Ventana deslizante | Cuenta en los últimos N segundos (log o contador ponderado) | Más precisa                                 |
+| Token bucket       | Fichas que se recargan a tasa constante, hasta un máximo    | Permite ráfagas cortas y una tasa sostenida |
+| Leaky bucket       | Cola que se vacía a tasa constante                          | Suaviza el tráfico de salida                |
+
+El simulador [Rate limiting](/system-design/simulators/rate-limiting) muestra la ráfaga en el borde de la ventana
+fija frente a la deslizante.
+
+Decisiones prácticas:
+
+- **Clave del límite:** por usuario, por tenant, por IP, por API key, o por endpoint sensible (login, envío de SMS).
+- **Estado compartido:** con varias réplicas, un contador en memoria limita por réplica, no globalmente. Se usa
+  Redis con operaciones atómicas (curso de Redis).
+- **Respuesta:** `429 Too Many Requests` con `Retry-After`, y opcionalmente cabeceras `RateLimit-*` que informan
+  el límite y lo que queda.
+- **Hacia afuera también:** si el proveedor de SMS acepta 100 requests por segundo, tu cliente necesita un limitador
+  de salida, no sólo reintentos.
+
+## Timeouts coherentes
+
+Toda llamada a una dependencia necesita un timeout, y los timeouts deben formar un **presupuesto** coherente:
+
+```text
+Cliente → API: 30 s
+  API → LLM: 20 s
+  API → base de datos: 2 s por consulta
+  API → proveedor de SMS: 5 s
+```
+
+Si la API espera al LLM 60 segundos pero el balanceador corta a los 30, el cliente recibe un error mientras la API
+sigue trabajando para nadie. Regla: **los timeouts internos son menores que los externos**, y la cancelación se
+propaga (con `AbortSignal`, lección de control de la asincronía).
+
+## Comparación con C# y Java
+
+| Concepto                | .NET                                                    | Java / Spring                                            | Node.js                                     |
+| ----------------------- | ------------------------------------------------------- | -------------------------------------------------------- | ------------------------------------------- |
+| HMAC                    | `HMACSHA256`, `CryptographicOperations.FixedTimeEquals` | `Mac.getInstance("HmacSHA256")`, `MessageDigest.isEqual` | `createHmac`, `timingSafeEqual`             |
+| Rate limiting           | `Microsoft.AspNetCore.RateLimiting`                     | Bucket4j, Resilience4j RateLimiter                       | Plugins (Fastify rate-limit) o Redis propio |
+| Timeouts y resiliencia  | Polly, `HttpClient.Timeout`                             | Resilience4j, timeouts de WebClient                      | `AbortSignal.timeout`, cockatiel            |
+| Procesamiento asíncrono | Hosted services, MassTransit                            | `@Async`, Spring Cloud Stream                            | Workers con BullMQ, colas gestionadas       |
+
+## Errores frecuentes
+
+- **Verificar la firma sobre el JSON re-serializado** en lugar del body crudo.
+- **Comparar firmas con `===`.**
+- **Procesar todo antes de responder** al webhook.
+- **Deduplicar con un `SELECT` previo** en lugar de una constraint única: dos requests concurrentes pasan ambas el
+  chequeo.
+- **Asumir orden** entre eventos.
+- **Idempotency-Key sin reserva atómica**, o sin validar que el body sea el mismo.
+- **Rate limiting en memoria con varias réplicas.**
+- **Llamadas salientes sin timeout.**
+
+## Ejercicio interactivo
+
+<KnowledgeCheck
+  id="nodejs.webhooks-idempotency.q1"
+  question="Para evitar procesar dos veces el mismo webhook, un desarrollador hace `SELECT` del ID del evento y, si no existe, lo inserta y lo procesa. ¿Qué problema tiene?"
+  options={[
+    {
+      text: "Ninguno, es la forma estándar.",
+      explanation: "Entre el SELECT y el INSERT otra request puede hacer lo mismo.",
+    },
+    {
+      text: "Dos entregas concurrentes del mismo evento pueden pasar ambas el SELECT y procesarse dos veces.",
+      correct: true,
+      explanation:
+        "Correcto. Hace falta una operación atómica: una constraint única con INSERT ... ON CONFLICT DO NOTHING.",
+    },
+    {
+      text: "Es lento por el SELECT.",
+      explanation: "El problema principal es de corrección, no de performance.",
+    },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="nodejs.webhooks-idempotency.q2"
+  question="¿Por qué se calcula la firma HMAC sobre el body crudo y no sobre `JSON.stringify(JSON.parse(body))`?"
+  options={[
+    { text: "Por performance.", explanation: "La razón es de corrección." },
+    {
+      text: "Porque re-serializar puede cambiar espacios, orden o escapes y la firma no coincidiría con la del emisor.",
+      correct: true,
+      explanation: "Correcto. La firma se calcula sobre los bytes exactos que envió el proveedor.",
+    },
+    {
+      text: "Porque JSON.parse elimina la firma del body.",
+      explanation: "La firma suele venir en un header, no en el body.",
+    },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="nodejs.webhooks-idempotency.q3"
+  question="Tu API corre en 6 réplicas y cada una limita a 100 requests por minuto por usuario con un contador en memoria. ¿Cuál es el límite real?"
+  options={[
+    { text: "100 por minuto.", explanation: "Cada réplica cuenta por separado." },
+    {
+      text: "Hasta 600 por minuto, según cómo reparta el balanceador.",
+      correct: true,
+      explanation:
+        "Correcto. Para un límite global, el contador debe estar en un almacén compartido como Redis.",
+    },
+    { text: "17 por minuto.", explanation: "Las réplicas no se reparten el límite automáticamente." },
+  ]}
+/>

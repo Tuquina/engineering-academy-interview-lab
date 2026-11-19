@@ -1,0 +1,351 @@
+---
+id: nodejs.auth-security
+moduleId: nodejs.backend
+title: "Autenticación, autorización y seguridad de una API"
+description: "Quién sos y qué podés hacer: sesiones frente a tokens, JWT y sus trampas, OAuth 2.0 y OpenID Connect, hash de contraseñas, autorización por roles y por recurso, aislamiento multi-tenant y las defensas básicas de OWASP para una API Node.js."
+difficulty: intermediate
+order: 2
+objectives:
+  - "Distinguir autenticación de autorización y elegir entre sesiones y tokens."
+  - "Explicar cómo funciona un JWT, qué verifica y cuáles son sus riesgos."
+  - "Describir los flujos de OAuth 2.0 y OpenID Connect más usados."
+  - "Almacenar contraseñas con un algoritmo de hash adecuado."
+  - "Implementar autorización por rol y por recurso, con aislamiento entre tenants."
+  - "Aplicar defensas básicas: secretos, CORS, CSRF, cabeceras y validación."
+prerequisites: ["nodejs.http-apis"]
+estimatedMinutes: 45
+tags: ["autenticación", "autorización", "jwt", "oauth", "oidc", "multi-tenant", "owasp", "c#", "java"]
+version: "1.0.0"
+comparesWith: ["csharp", "java"]
+references:
+  - title: "OWASP — API Security Top 10 (2023)"
+    url: "https://owasp.org/API-Security/editions/2023/en/0x11-t10/"
+  - title: "OWASP Cheat Sheet — Password Storage"
+    url: "https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html"
+  - title: "OWASP Cheat Sheet — JSON Web Token"
+    url: "https://cheatsheetseries.owasp.org/cheatsheets/JSON_Web_Token_for_Java_Cheat_Sheet.html"
+  - title: "RFC 8725 — JSON Web Token Best Current Practices"
+    url: "https://www.rfc-editor.org/rfc/rfc8725"
+  - title: "OpenID Connect Core 1.0"
+    url: "https://openid.net/specs/openid-connect-core-1_0.html"
+  - title: "OAuth 2.0 Security Best Current Practice (RFC 9700)"
+    url: "https://www.rfc-editor.org/rfc/rfc9700"
+interviewQuestions:
+  - question: "¿Qué diferencia hay entre autenticación y autorización?"
+    keyPoints:
+      - "Autenticación: verificar la identidad (quién sos). Autorización: decidir si esa identidad puede hacer algo (qué podés hacer)."
+      - "401 indica falta de autenticación; 403, falta de permiso."
+      - "La autorización se chequea por recurso y en el servidor, nunca sólo en el frontend."
+  - question: "¿Qué ventajas y riesgos tiene usar JWT?"
+    keyPoints:
+      - "Ventaja: se verifican sin consultar un almacén, con la firma; útiles entre servicios."
+      - "Riesgo: no se pueden revocar antes de expirar sin una lista de bloqueo; por eso se usan expiraciones cortas y refresh tokens."
+      - "Hay que validar firma, algoritmo esperado, exp, iss y aud; nunca aceptar alg none."
+      - "El payload sólo está codificado, no cifrado: no poner datos sensibles."
+  - question: "¿Cómo evitarías que un tenant acceda a datos de otro en una plataforma multi-tenant?"
+    keyPoints:
+      - "Derivar el tenantId de la identidad autenticada, nunca de un parámetro que manda el cliente."
+      - "Filtrar todas las consultas por tenant en la capa de datos (repositorios que lo exigen, Row Level Security en PostgreSQL)."
+      - "Chequear la pertenencia del recurso antes de devolverlo (evitar BOLA/IDOR), respondiendo 404."
+      - "Tests que intentan acceder a recursos de otro tenant."
+summary:
+  - "Autenticar es verificar identidad; autorizar es decidir permisos por acción y por recurso."
+  - "Sesiones con cookie: estado en el servidor, revocables. Tokens: sin estado, difíciles de revocar."
+  - "Un JWT es header.payload.firma en base64url: firmado, no cifrado. Validar firma, alg, exp, iss y aud."
+  - "OAuth 2.0 delega autorización; OpenID Connect agrega identidad (ID token) encima."
+  - "Contraseñas: argon2id, scrypt o bcrypt con sal; nunca SHA-256 directo ni cifrado reversible."
+  - "La falla más común en APIs es BOLA: no verificar que el recurso pedido pertenece al usuario o tenant."
+  - "El tenant sale de la identidad autenticada, no del request; se aplica en la capa de datos."
+  - "Secretos fuera del repositorio, cabeceras de seguridad, CORS restrictivo y validación de toda entrada."
+---
+
+## ¿Qué problema resuelve?
+
+Una plataforma de cobranzas maneja datos personales y financieros de miles de deudores, para varias empresas
+clientes (tenants). Un solo error de autorización (un endpoint que devuelve la deuda `debt_123` sin chequear a qué
+empresa pertenece) es una filtración de datos. La lista de riesgos de seguridad de APIs de OWASP pone ese error en
+el **primer lugar**: _Broken Object Level Authorization_.
+
+Esta lección cubre los conceptos que se esperan de un backend senior: cómo se establece la identidad, cómo se
+decide qué puede hacer cada uno y cómo se aíslan los datos entre clientes.
+
+## Autenticación y autorización
+
+| Concepto          | Pregunta           | Falla típica                            | Status                          |
+| ----------------- | ------------------ | --------------------------------------- | ------------------------------- |
+| **Autenticación** | ¿Quién sos?        | Token ausente, vencido o inválido       | `401`                           |
+| **Autorización**  | ¿Podés hacer esto? | Sin permiso para la acción o el recurso | `403` (o `404` para no revelar) |
+
+## Sesiones frente a tokens
+
+<MermaidDiagram
+  caption="Sesión: el servidor guarda el estado. Token: el estado viaja firmado en cada request."
+  chart={`
+sequenceDiagram
+  participant B as Navegador
+  participant API as API
+  participant S as Almacén de sesiones
+  Note over B,S: Sesión con cookie
+  B->>API: POST /login (credenciales)
+  API->>S: crear sesión
+  API-->>B: Set-Cookie: sid (HttpOnly, Secure)
+  B->>API: GET /debts (cookie sid)
+  API->>S: buscar sesión
+  Note over B,API: Token (JWT)
+  B->>API: POST /login (credenciales)
+  API-->>B: access token firmado
+  B->>API: GET /debts (Authorization: Bearer token)
+  API->>API: verificar firma y expiración
+`}
+/>
+
+| Aspecto    | Sesión con cookie                    | Token (JWT)                                                  |
+| ---------- | ------------------------------------ | ------------------------------------------------------------ |
+| Estado     | En el servidor (Redis, base)         | En el token, firmado                                         |
+| Revocación | Inmediata: se borra la sesión        | Difícil: vale hasta que expira                               |
+| Escalado   | Requiere un almacén compartido       | Cualquier instancia verifica con la clave                    |
+| Uso típico | Aplicaciones web propias (navegador) | APIs entre servicios, apps móviles, terceros                 |
+| Riesgos    | CSRF (mitigado con SameSite)         | Robo de token, almacenamiento en localStorage expuesto a XSS |
+
+Para una aplicación web propia, las **sesiones con cookies `HttpOnly`, `Secure` y `SameSite`** siguen siendo la
+opción más segura y simple. Los tokens brillan entre servicios y con clientes que no son navegadores.
+
+## JWT por dentro
+
+Un JWT tiene tres partes en base64url separadas por puntos: `header.payload.signature`.
+
+```json
+{ "alg": "RS256", "typ": "JWT", "kid": "2026-11" }
+```
+
+```json
+{
+  "sub": "usr_42",
+  "tenant_id": "tnt_acme",
+  "roles": ["collections_agent"],
+  "iss": "https://auth.example.com",
+  "aud": "collections-api",
+  "exp": 1795070000
+}
+```
+
+La firma garantiza que nadie modificó el contenido, **pero el payload no está cifrado**: cualquiera puede leerlo.
+
+```ts
+import { createRemoteJWKSet, jwtVerify } from "jose";
+
+const jwks = createRemoteJWKSet(new URL("https://auth.example.com/.well-known/jwks.json"));
+
+export async function authenticate(request: Request): Promise<AuthenticatedUser | null> {
+  const header = request.headers.get("authorization");
+  if (!header?.startsWith("Bearer ")) return null;
+  try {
+    const { payload } = await jwtVerify(header.slice(7), jwks, {
+      issuer: "https://auth.example.com",
+      audience: "collections-api",
+      algorithms: ["RS256"], // nunca aceptar el algoritmo que diga el token
+    });
+    return AuthenticatedUserSchema.parse(payload); // los claims también son datos externos
+  } catch {
+    return null;
+  }
+}
+```
+
+Reglas para JWT:
+
+- **Validar todo:** firma, algoritmo esperado, `exp`, `iss` y `aud`. Una librería mantenida (`jose`) lo hace bien.
+- **Access tokens cortos** (minutos) y **refresh tokens** para renovarlos; los refresh tokens se guardan del lado
+  del servidor y se pueden revocar.
+- **Nada sensible en el payload.**
+- **Firmas asimétricas** (RS256, ES256) cuando muchos servicios verifican: sólo el emisor tiene la clave privada.
+
+## OAuth 2.0 y OpenID Connect
+
+- **OAuth 2.0** es un protocolo de **autorización delegada**: una aplicación obtiene un _access token_ para actuar
+  sobre recursos de un usuario sin conocer su contraseña.
+- **OpenID Connect (OIDC)** agrega **identidad** encima de OAuth: un _ID token_ que dice quién es el usuario. Es lo
+  que usás al "iniciar sesión con Google" o con el proveedor corporativo.
+
+| Flujo                     | Cuándo                                                          |
+| ------------------------- | --------------------------------------------------------------- |
+| Authorization Code + PKCE | Usuarios humanos en apps web, SPA y móviles                     |
+| Client Credentials        | Servicio a servicio, sin usuario (un worker que llama a la API) |
+| Device Code               | Dispositivos sin teclado                                        |
+
+Los flujos _implicit_ y _password_ están desaconsejados. En la práctica, la autenticación de usuarios se delega a
+un proveedor de identidad (Auth0, Entra ID, Keycloak, Cognito, Clerk) y la API **sólo verifica tokens**.
+
+## Contraseñas
+
+Si el sistema guarda contraseñas propias, se guardan con un **hash lento, con sal**, diseñado para eso:
+
+```ts
+import { hash, verify } from "@node-rs/argon2";
+
+const passwordHash = await hash(password); // argon2id, con sal aleatoria incluida en el resultado
+const valid = await verify(passwordHash, attempt);
+```
+
+- **Sí:** argon2id (recomendado por OWASP), scrypt, bcrypt.
+- **No:** SHA-256 o MD5 directos (demasiado rápidos: permiten miles de millones de intentos por segundo con GPU),
+  ni cifrado reversible.
+- Comparar secretos (tokens, firmas) con **comparación de tiempo constante** (`crypto.timingSafeEqual`).
+
+## Autorización
+
+### Por rol (RBAC) y por atributos (ABAC)
+
+```ts
+const PERMISSIONS = {
+  admin: ["campaign:create", "campaign:cancel", "debt:read", "debt:write", "agent:configure"],
+  supervisor: ["campaign:create", "debt:read", "debt:write"],
+  collections_agent: ["debt:read"],
+} as const satisfies Record<Role, readonly Permission[]>;
+
+export function can(user: AuthenticatedUser, permission: Permission): boolean {
+  return user.roles.some((role) => (PERMISSIONS[role] as readonly Permission[]).includes(permission));
+}
+```
+
+RBAC responde "¿este rol puede hacer esta acción?". Muchas reglas reales dependen además de **atributos**: "un
+supervisor puede aprobar quitas de hasta el 20 %", "un agente sólo ve las deudas de su cartera". Eso es ABAC, y
+esas reglas viven en el **dominio o el caso de uso**, no en el middleware.
+
+### Por recurso: el error número uno
+
+```ts
+// ❌ BOLA / IDOR: cualquier usuario autenticado puede leer cualquier deuda cambiando el ID
+export async function GET(request: Request, { params }: { params: Promise<{ debtId: string }> }) {
+  const user = await authenticate(request);
+  if (!user) return problem(401, "unauthenticated");
+  const debt = await debts.findById((await params).debtId);
+  return Response.json(debt);
+}
+
+// ✅ La consulta incluye el tenant de la identidad: un recurso de otro tenant "no existe"
+const debt = await debts.findById(user.tenantId, (await params).debtId);
+if (!debt) return problem(404, "debt_not_found");
+```
+
+## Aislamiento multi-tenant
+
+<FlowDiagram
+  steps={[
+    {
+      title: "Token verificado",
+      detail: "El tenantId sale de los claims, nunca de un parámetro del cliente.",
+      tone: "boundary",
+    },
+    { title: "Contexto de la request", detail: "Se propaga al caso de uso como parte del actor." },
+    { title: "Repositorio", detail: "Toda consulta exige tenantId; no hay métodos sin él." },
+    { title: "Base de datos", detail: "Row Level Security como segunda barrera.", tone: "runtime" },
+  ]}
+  caption="Defensa en profundidad: el tenant se aplica en varias capas."
+/>
+
+- El **tenant se deriva de la identidad**. Un header `X-Tenant-Id` que manda el cliente es un pedido, no un hecho:
+  sólo se acepta si el usuario pertenece a ese tenant.
+- Los repositorios **exigen** el tenant en su firma, así es imposible olvidarlo.
+- **Row Level Security** de PostgreSQL agrega una barrera en la base (curso de PostgreSQL).
+- Los logs, cachés y colas también llevan el tenant: una clave de caché sin tenant puede mezclar datos.
+
+## Defensas básicas de una API
+
+| Riesgo                               | Defensa                                                 |
+| ------------------------------------ | ------------------------------------------------------- |
+| Secretos en el repositorio           | Variables de entorno o un gestor de secretos; rotación  |
+| Inyección (SQL, comandos)            | Consultas parametrizadas, nunca concatenar input        |
+| Datos excesivos en respuestas        | DTOs explícitos; nunca serializar la entidad completa   |
+| Mass assignment                      | Esquemas que aceptan sólo los campos permitidos         |
+| Abuso y fuerza bruta                 | Rate limiting por usuario, IP y endpoint sensible       |
+| CORS demasiado abierto               | Lista explícita de orígenes; nunca `*` con credenciales |
+| CSRF con cookies                     | `SameSite=Lax/Strict` y tokens anti-CSRF en formularios |
+| SSRF (URLs provistas por el usuario) | Lista de destinos permitidos para webhooks y descargas  |
+| Dependencias vulnerables             | Lockfile, auditoría y actualizaciones regulares         |
+
+## Comparación con C# y Java
+
+| Concepto            | ASP.NET Core                         | Spring Boot                           | Node.js                                         |
+| ------------------- | ------------------------------------ | ------------------------------------- | ----------------------------------------------- |
+| Autenticación       | `AddAuthentication().AddJwtBearer()` | Spring Security + Resource Server     | Middleware propio con `jose`, Passport, Auth.js |
+| Autorización        | Policies, `[Authorize(Roles = ...)]` | `@PreAuthorize`, method security      | Funciones `can()`, chequeos en casos de uso     |
+| Hash de contraseñas | `PasswordHasher` (PBKDF2)            | `BCryptPasswordEncoder`, Argon2       | argon2, bcrypt, `crypto.scrypt`                 |
+| Identidad           | ASP.NET Identity, Entra ID           | Spring Authorization Server, Keycloak | Proveedor externo + verificación de tokens      |
+
+En .NET y Spring la seguridad viene integrada y configurada por convención. En Node.js se arma con piezas, lo que
+da flexibilidad y también más formas de equivocarse: conviene usar librerías mantenidas y no implementar
+criptografía propia.
+
+## Errores frecuentes
+
+- **Chequear permisos sólo en el frontend.** Cualquiera puede llamar a la API directamente.
+- **Tomar el tenant o el userId del body.** La identidad sale del token o la sesión.
+- **Aceptar el `alg` del token** o no validar `aud` e `iss`.
+- **Guardar tokens en `localStorage`** en aplicaciones expuestas a XSS.
+- **Hashear contraseñas con SHA-256.**
+- **Responder 403 a recursos de otro tenant**, revelando que existen; 404 es más seguro.
+- **Loguear tokens, contraseñas o datos personales completos.**
+
+## Ejercicio interactivo
+
+<KnowledgeCheck
+  id="nodejs.auth-security.q1"
+  question="Un endpoint `GET /debts/:id` verifica el token pero busca la deuda sólo por ID. ¿Qué vulnerabilidad tiene?"
+  options={[
+    {
+      text: "Ninguna: el usuario está autenticado.",
+      explanation: "Autenticado no significa autorizado para ese recurso.",
+    },
+    {
+      text: "Broken Object Level Authorization: cambiando el ID se leen deudas de otros usuarios o tenants.",
+      correct: true,
+      explanation:
+        "Correcto. La consulta debe filtrar por el tenant (y la cartera) de la identidad, y responder 404 si no corresponde.",
+    },
+    {
+      text: "Inyección SQL.",
+      explanation: "Con consultas parametrizadas no hay inyección; el problema es de autorización.",
+    },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="nodejs.auth-security.q2"
+  question="¿Qué afirmación sobre el payload de un JWT firmado con RS256 es correcta?"
+  options={[
+    {
+      text: "Está cifrado: sólo el servidor puede leerlo.",
+      explanation: "Sólo está codificado en base64url; cualquiera lo lee.",
+    },
+    {
+      text: "Cualquiera puede leerlo, pero no modificarlo sin invalidar la firma.",
+      correct: true,
+      explanation: "Correcto. Por eso no se ponen datos sensibles en el payload.",
+    },
+    {
+      text: "Se puede revocar inmediatamente borrándolo del servidor.",
+      explanation: "Un JWT no vive en el servidor: vale hasta que expira, salvo una lista de bloqueo.",
+    },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="nodejs.auth-security.q3"
+  question="¿Cuál es la forma correcta de guardar contraseñas de usuarios?"
+  options={[
+    {
+      text: "Cifradas con AES y una clave en las variables de entorno.",
+      explanation: "El cifrado es reversible: si se filtra la clave, se filtran todas.",
+    },
+    {
+      text: "Con SHA-256 y una sal.",
+      explanation: "SHA-256 es demasiado rápido: facilita ataques de fuerza bruta.",
+    },
+    {
+      text: "Con argon2id, scrypt o bcrypt, que son lentos a propósito e incluyen sal.",
+      correct: true,
+      explanation: "Correcto. OWASP recomienda argon2id como primera opción.",
+    },
+  ]}
+/>

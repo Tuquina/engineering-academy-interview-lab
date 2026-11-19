@@ -229,7 +229,7 @@ C# y Java, errores frecuentes, knowledge checks y preguntas de entrevista.
 | Curso                    | Lecciones | Estado     |
 | ------------------------ | --------- | ---------- |
 | TypeScript               | 11        | ✅ Tanda 1 |
-| Node.js                  | 1         | Pendiente  |
+| Node.js                  | 9         | ✅ Tanda 2 |
 | React                    | 0         | Pendiente  |
 | Next.js                  | 0         | Pendiente  |
 | LLMs y agentes de IA     | 0         | Pendiente  |
@@ -240,6 +240,12 @@ C# y Java, errores frecuentes, knowledge checks y preguntas de entrevista.
 
 ### Implementado y verificado
 
+- **Node.js (9 lecciones):** introducción (qué es, LTS, Docker, `package.json`, npm y pnpm, ESM y CommonJS,
+  `process`, módulos del núcleo, servidor con `node:http` y frameworks), event loop, streams y backpressure,
+  thread pool, worker threads y memoria (GC, fugas), APIs por capas (REST, Problem Details, middleware,
+  versionado), autenticación y autorización (sesiones, JWT, OIDC, contraseñas, BOLA, multi-tenant), webhooks,
+  idempotency keys, rate limiting y timeouts, observabilidad (Pino, `AsyncLocalStorage`, OpenTelemetry) y tests
+  de integración, y performance (load testing, profiling, N+1, pooling, caché, escalado horizontal).
 - **TypeScript (11 lecciones):** introducción al lenguaje y su ecosistema (motores, runtimes, `tsc`, `tsconfig`,
   tipos básicos), JavaScript moderno esencial (alcance, igualdad, `this`, destructuring, métodos de arrays, clases,
   módulos, excepciones), runtime vs tipos, interfaces e inferencia (`satisfies`, widening), uniones y narrowing
@@ -266,9 +272,9 @@ C# y Java, errores frecuentes, knowledge checks y preguntas de entrevista.
 
 | Elemento                    | Actual                                       | Objetivo |
 | --------------------------- | -------------------------------------------- | -------- |
-| Lecciones sustantivas       | 12                                           | 40       |
+| Lecciones sustantivas       | 20                                           | 40       |
 | Challenges                  | 11 + 4 de arquitectura (+ 6 ejercicios SQL)  | 25       |
-| Preguntas de evaluación     | 36 knowledge checks + 27 del Interview Arena | 60 ✅    |
+| Preguntas de evaluación     | 60 knowledge checks + 27 del Interview Arena | 60 ✅    |
 | Flashcards                  | 32                                           | 30 ✅    |
 | Diagramas                   | 13 (10 interactivos + 1 flujo + 2 Mermaid)   | 12 ✅    |
 | Simuladores o laboratorios  | 9 (3 laboratorios + 6 simuladores)           | 5 ✅     |

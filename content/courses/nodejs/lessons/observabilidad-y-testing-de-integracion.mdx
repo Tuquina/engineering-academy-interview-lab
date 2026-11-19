@@ -1,0 +1,337 @@
+---
+id: nodejs.observability-testing
+moduleId: nodejs.backend
+title: "Observabilidad y testing de integración: logs estructurados, correlation IDs, métricas, trazas y tests reales"
+description: "Cómo saber qué está pasando en producción y cómo probar que una API funciona de verdad: logging estructurado con niveles y redacción de datos sensibles, correlation IDs con AsyncLocalStorage, métricas y trazas con OpenTelemetry, y tests de integración contra una base real."
+difficulty: intermediate
+order: 4
+objectives:
+  - "Escribir logs estructurados útiles, con niveles correctos y sin datos sensibles."
+  - "Propagar un correlation ID por toda la request con AsyncLocalStorage."
+  - "Distinguir logs, métricas y trazas y saber qué pregunta responde cada uno."
+  - "Instrumentar un servicio con OpenTelemetry y entender el contexto de trazas."
+  - "Escribir tests de integración contra dependencias reales y decidir qué cubrir con cada tipo de test."
+prerequisites: ["nodejs.http-apis"]
+estimatedMinutes: 40
+tags:
+  [
+    "observabilidad",
+    "logging",
+    "correlation id",
+    "opentelemetry",
+    "métricas",
+    "testing de integración",
+    "c#",
+    "java",
+  ]
+version: "1.0.0"
+comparesWith: ["csharp", "java"]
+references:
+  - title: "Node.js — Asynchronous context tracking (AsyncLocalStorage)"
+    url: "https://nodejs.org/api/async_context.html"
+  - title: "OpenTelemetry — JavaScript"
+    url: "https://opentelemetry.io/docs/languages/js/"
+  - title: "W3C — Trace Context"
+    url: "https://www.w3.org/TR/trace-context/"
+  - title: "Pino — documentación"
+    url: "https://getpino.io/"
+  - title: "Google SRE Book — Monitoring Distributed Systems"
+    url: "https://sre.google/sre-book/monitoring-distributed-systems/"
+  - title: "Testcontainers for Node.js"
+    url: "https://node.testcontainers.org/"
+interviewQuestions:
+  - question: "¿Qué diferencia hay entre logs, métricas y trazas?"
+    keyPoints:
+      - "Logs: eventos discretos con contexto, para investigar qué pasó en un caso concreto."
+      - "Métricas: valores numéricos agregados en el tiempo (tasa, errores, latencia), baratos y buenos para alertar."
+      - "Trazas: el recorrido de una request entre servicios con la duración de cada tramo, para encontrar dónde se va el tiempo."
+      - "Se correlacionan con IDs comunes (trace ID / correlation ID)."
+  - question: "¿Cómo propagarías un correlation ID en Node.js sin pasarlo por parámetro a cada función?"
+    keyPoints:
+      - "AsyncLocalStorage guarda un contexto que sobrevive a través de awaits y callbacks de la misma request."
+      - "Un middleware lo crea al inicio de la request (leyendo x-request-id o traceparent) y el logger lo lee."
+      - "Se propaga hacia afuera en los headers de las llamadas salientes y en los mensajes de colas."
+  - question: "¿Qué cubrirías con tests de integración y qué con unitarios?"
+    keyPoints:
+      - "Unitarios: reglas de dominio y casos de uso con fakes, rápidos y numerosos."
+      - "Integración: adaptadores contra dependencias reales (SQL, constraints, transacciones, serialización)."
+      - "Pocos end-to-end para los flujos críticos."
+      - "Los mocks de la base no detectan errores de SQL ni de concurrencia."
+summary:
+  - "Los logs se escriben como JSON estructurado, con niveles, contexto y sin datos sensibles."
+  - "AsyncLocalStorage propaga el contexto de la request (correlation ID, tenant) a través de los awaits."
+  - "Métricas para alertar (RED: rate, errors, duration), trazas para encontrar el tramo lento, logs para el detalle."
+  - "OpenTelemetry es el estándar abierto para instrumentar; Trace Context (traceparent) propaga entre servicios."
+  - "Se alerta sobre síntomas que afectan a usuarios (latencia, errores), no sobre cada causa posible."
+  - "Los tests de integración usan dependencias reales (contenedores o motores embebidos) para verificar SQL y constraints."
+---
+
+## ¿Qué problema resuelve?
+
+Un supervisor reporta: "a algunos deudores les llegaron dos recordatorios ayer a la tarde". Para responder hace
+falta saber qué requests llegaron, qué decidió el agente, qué devolvió el proveedor de SMS y en qué orden. Si los
+logs son líneas sueltas como `console.log("enviado")`, sin cliente, sin campaña y sin forma de unir los pasos de
+una misma request, la investigación es imposible.
+
+La **observabilidad** es la capacidad de responder preguntas sobre el sistema en producción sin desplegar código
+nuevo. Y los **tests de integración** son la forma de detectar antes de producción los errores que los tests
+unitarios con mocks no pueden ver.
+
+## Logging estructurado
+
+Un log estructurado es un **objeto JSON** con campos consistentes, no un string. Se puede filtrar, agregar y
+buscar:
+
+```ts
+import pino from "pino";
+
+export const logger = pino({
+  level: env.LOG_LEVEL, // "info" en producción, "debug" en desarrollo
+  redact: ["req.headers.authorization", "*.phone", "*.email", "*.documentNumber"], // datos sensibles
+});
+
+logger.info(
+  { campaignId, customerId, channel: "sms", providerMessageId, durationMs: 182 },
+  "reminder_sent", // mensaje corto y estable: un nombre de evento, no una frase con datos interpolados
+);
+```
+
+```json
+{
+  "level": 30,
+  "time": 1795070000000,
+  "requestId": "9f2c...",
+  "tenantId": "tnt_acme",
+  "campaignId": "cmp_7",
+  "customerId": "cus_42",
+  "channel": "sms",
+  "durationMs": 182,
+  "msg": "reminder_sent"
+}
+```
+
+| Nivel   | Cuándo                                                                          |
+| ------- | ------------------------------------------------------------------------------- |
+| `error` | Algo falló y requiere atención (un evento no se pudo procesar tras reintentos). |
+| `warn`  | Situación anómala pero manejada (reintento, degradación, input sospechoso).     |
+| `info`  | Eventos de negocio relevantes (campaña iniciada, pago aplicado).                |
+| `debug` | Detalle para desarrollo; apagado en producción.                                 |
+
+Reglas: **nunca loguear secretos ni datos personales completos** (tokens, contraseñas, teléfonos, documentos); los
+mensajes son **nombres de eventos estables**; los datos van en campos; y los errores se loguean con su stack y
+`cause`.
+
+## Correlation IDs con AsyncLocalStorage
+
+Para unir todos los logs de una request hace falta un **ID común**. Pasarlo como parámetro a cada función es
+inviable. `AsyncLocalStorage` guarda un contexto que **sobrevive a través de los `await`** de la misma ejecución,
+similar a `AsyncLocal<T>` en .NET o al MDC de los loggers de Java:
+
+```ts
+import { AsyncLocalStorage } from "node:async_hooks";
+import { randomUUID } from "node:crypto";
+
+interface RequestContext {
+  requestId: string;
+  tenantId?: string;
+}
+
+export const requestContext = new AsyncLocalStorage<RequestContext>();
+
+/** Middleware: crea el contexto al inicio de cada request. */
+export function withRequestContext(handler: (request: Request) => Promise<Response>) {
+  return (request: Request) => {
+    const requestId = request.headers.get("x-request-id") ?? randomUUID();
+    return requestContext.run({ requestId }, () => handler(request));
+  };
+}
+
+/** Logger que agrega el contexto automáticamente a cada línea. */
+export const log = () => logger.child(requestContext.getStore() ?? {});
+```
+
+```ts
+// En cualquier capa, sin recibir el ID por parámetro:
+log().info({ debtId }, "payment_applied");
+```
+
+El ID también se propaga **hacia afuera**: en el header de las llamadas a otros servicios y en los metadatos de los
+mensajes de colas, para que el worker que procesa el evento loguee con el mismo ID.
+
+## Los tres pilares: logs, métricas y trazas
+
+<MermaidDiagram
+  caption="Cada señal responde una pregunta distinta; los IDs comunes permiten saltar de una a otra."
+  chart={`
+flowchart LR
+  M["Métricas<br/>¿Hay un problema?<br/>tasa de errores, p95"] -->|"alerta y período"| T["Trazas<br/>¿Dónde está el problema?<br/>tramo lento o fallido"]
+  T -->|"trace ID"| L["Logs<br/>¿Qué pasó exactamente?<br/>detalle del evento"]
+`}
+/>
+
+| Señal    | Qué es                                        | Pregunta que responde                      | Costo            |
+| -------- | --------------------------------------------- | ------------------------------------------ | ---------------- |
+| Métricas | Números agregados en el tiempo                | ¿Está sano el sistema? ¿Empeoró?           | Bajo             |
+| Trazas   | Árbol de spans de una request entre servicios | ¿Dónde se fue el tiempo? ¿Qué tramo falló? | Medio (muestreo) |
+| Logs     | Eventos individuales con contexto             | ¿Qué pasó en este caso concreto?           | Alto en volumen  |
+
+### Métricas que importan
+
+Para cada servicio, el método **RED**: **R**ate (requests por segundo), **E**rrors (tasa de errores) y **D**uration
+(latencia en percentiles: p50, p95, p99; nunca sólo el promedio, que esconde la cola). Para recursos (CPU, memoria,
+pool de conexiones, event loop lag), el método USE: utilización, saturación y errores. Y **métricas de negocio**:
+mensajes enviados por canal, promesas de pago registradas, costo de tokens de LLM por tenant.
+
+**Se alerta sobre síntomas** que afectan a usuarios (latencia p95 por encima del objetivo, tasa de errores) y no
+sobre cada causa posible (CPU al 80 %), que generan ruido.
+
+### Trazas distribuidas con OpenTelemetry
+
+Una **traza** es el recorrido de una request: un árbol de **spans** (tramos con inicio, duración y atributos).
+**OpenTelemetry** es el estándar abierto para generar logs, métricas y trazas, independiente del proveedor
+(Datadog, Grafana, Honeycomb, New Relic...). Su instrumentación automática para Node.js crea spans para HTTP, `pg`,
+Redis y otras librerías sin tocar el código:
+
+```ts
+import { trace } from "@opentelemetry/api";
+
+const tracer = trace.getTracer("collections-api");
+
+export async function runCampaignStep(campaignId: string) {
+  return tracer.startActiveSpan("campaign.step", async (span) => {
+    span.setAttribute("campaign.id", campaignId);
+    try {
+      return await executeStep(campaignId); // los spans de HTTP y DB quedan como hijos
+    } catch (error) {
+      span.recordException(error as Error);
+      throw error;
+    } finally {
+      span.end();
+    }
+  });
+}
+```
+
+El contexto viaja entre servicios en el header estándar `traceparent` (W3C Trace Context), así una traza puede
+cruzar la API, la cola y el worker.
+
+## Testing de integración
+
+Un test unitario con un repositorio falso no puede detectar un SQL inválido, una constraint que falta, un índice
+único que no existe o un comportamiento distinto bajo concurrencia. Para eso están los **tests de integración**:
+prueban los adaptadores contra **la dependencia real**.
+
+```ts
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import { PostgreSqlContainer, type StartedPostgreSqlContainer } from "@testcontainers/postgresql";
+
+describe("PostgresWebhookEventStore", () => {
+  let container: StartedPostgreSqlContainer;
+  let store: PostgresWebhookEventStore;
+
+  beforeAll(async () => {
+    container = await new PostgreSqlContainer("postgres:17-alpine").start(); // base real y desechable
+    const db = await connectAndMigrate(container.getConnectionUri());
+    store = new PostgresWebhookEventStore(db);
+  }, 60_000);
+
+  afterAll(() => container.stop());
+  beforeEach(() => store.truncateForTests());
+
+  it("ignora un evento duplicado aunque lleguen dos a la vez", async () => {
+    const event = { providerEventId: "evt_1", type: "payment.succeeded", payload: {} };
+    const results = await Promise.all([store.saveIfNew(event), store.saveIfNew(event)]);
+    expect(results.filter(Boolean)).toHaveLength(1); // sólo uno se insertó: la constraint funciona
+  });
+});
+```
+
+Opciones para la dependencia real:
+
+- **Testcontainers:** levanta contenedores desechables (PostgreSQL, Redis) desde el test.
+- **Motores embebidos:** este proyecto usa **PGlite** (PostgreSQL compilado a WebAssembly) en su SQL Lab, útil
+  también para tests rápidos.
+- **Base compartida de CI** con un esquema por ejecución.
+
+<Callout type="tip" title="Qué cubrir con cada tipo de test">
+  Unitarios: reglas de dominio y casos de uso con fakes (muchos y rápidos). Integración: cada adaptador contra
+  su dependencia real y los handlers HTTP con su validación (algunos). End-to-end: los flujos críticos
+  completos (pocos).
+</Callout>
+
+## Comparación con C# y Java
+
+| Concepto             | .NET                                     | Java                               | Node.js                          |
+| -------------------- | ---------------------------------------- | ---------------------------------- | -------------------------------- |
+| Logging estructurado | `ILogger` + Serilog                      | SLF4J + Logback (JSON encoder)     | Pino, Winston                    |
+| Contexto por request | `AsyncLocal<T>`, scopes de `ILogger`     | MDC (ThreadLocal), scoped values   | `AsyncLocalStorage`              |
+| Telemetría           | OpenTelemetry .NET (`Activity`)          | OpenTelemetry Java agent           | OpenTelemetry JS                 |
+| Tests de integración | `WebApplicationFactory` + Testcontainers | `@SpringBootTest` + Testcontainers | Vitest + Testcontainers / PGlite |
+
+## Errores frecuentes
+
+- **`console.log` con strings interpolados** en lugar de logs estructurados.
+- **Loguear datos personales o tokens.** Los logs se copian a muchos sistemas y personas.
+- **Sin correlation ID**: imposible seguir una request entre logs.
+- **Mirar sólo el promedio de latencia.** El p99 es lo que sufren los usuarios más afectados.
+- **Alertar sobre todo**: las alertas que nadie atiende entrenan a ignorarlas.
+- **Mockear la base en todos los tests**: los errores de SQL y de constraints llegan a producción.
+
+## Ejercicio interactivo
+
+<KnowledgeCheck
+  id="nodejs.observability-testing.q1"
+  question="La latencia promedio de la API es de 120 ms y no cambió, pero hay quejas de lentitud. ¿Qué métrica deberías mirar?"
+  options={[
+    { text: "El promedio por minuto.", explanation: "El promedio esconde la cola de la distribución." },
+    {
+      text: "Los percentiles altos (p95, p99) de la latencia.",
+      correct: true,
+      explanation: "Correcto. Un p99 de 8 segundos puede convivir con un promedio estable de 120 ms.",
+    },
+    {
+      text: "El uso de CPU.",
+      explanation: "Puede ser una causa, pero primero hay que confirmar el síntoma con percentiles.",
+    },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="nodejs.observability-testing.q2"
+  question="¿Qué permite AsyncLocalStorage?"
+  options={[
+    {
+      text: "Guardar datos en el navegador.",
+      explanation: "Eso es localStorage; AsyncLocalStorage es de Node.js.",
+    },
+    {
+      text: "Mantener un contexto (como el correlation ID) disponible en todos los awaits y callbacks de una misma request.",
+      correct: true,
+      explanation: "Correcto. Es el equivalente a AsyncLocal en .NET o al MDC de Java.",
+    },
+    {
+      text: "Compartir memoria entre worker threads.",
+      explanation: "Para eso existen SharedArrayBuffer y los mensajes entre workers.",
+    },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="nodejs.observability-testing.q3"
+  question="Un repositorio deduplica webhooks con una constraint única. ¿Qué test verifica de verdad que funciona?"
+  options={[
+    {
+      text: "Un unitario con un mock que devuelve false la segunda vez.",
+      explanation: "El mock prueba el mock, no la constraint.",
+    },
+    {
+      text: "Un test de integración contra PostgreSQL real que inserta el mismo evento dos veces en paralelo.",
+      correct: true,
+      explanation: "Correcto. Sólo la base real verifica la constraint y el comportamiento concurrente.",
+    },
+    {
+      text: "Un test end-to-end del navegador.",
+      explanation: "Es demasiado lejano y lento para verificar un detalle del adaptador.",
+    },
+  ]}
+/>

@@ -1,0 +1,342 @@
+---
+id: nodejs.performance-scaling
+moduleId: nodejs.performance
+title: "Performance y escalabilidad en Node.js: medir, encontrar el cuello de botella y escalar"
+description: "Un método para mejorar la performance sin adivinar: definir objetivos, medir con load testing y profiling, y atacar las causas más comunes en Node.js: bloqueos del event loop, consultas N+1, falta de pooling, llamadas secuenciales, ausencia de caché y memoria. Cierra con escalabilidad horizontal y servicios sin estado."
+difficulty: advanced
+order: 1
+objectives:
+  - "Definir objetivos de performance con percentiles y throughput antes de optimizar."
+  - "Planificar un load test y leer sus resultados."
+  - "Perfilar CPU y diagnosticar event loop lag."
+  - "Corregir consultas N+1, configurar connection pooling y paralelizar I/O independiente."
+  - "Aplicar caché con criterios de invalidación y costo."
+  - "Diseñar servicios sin estado que escalen horizontalmente."
+prerequisites: ["nodejs.workers-memory", "nodejs.observability-testing"]
+estimatedMinutes: 45
+tags:
+  [
+    "performance",
+    "profiling",
+    "load testing",
+    "n+1",
+    "connection pooling",
+    "caché",
+    "escalabilidad",
+    "c#",
+    "java",
+  ]
+version: "1.0.0"
+comparesWith: ["csharp", "java"]
+references:
+  - title: "Node.js — Profiling Node.js Applications"
+    url: "https://nodejs.org/en/learn/getting-started/profiling"
+  - title: "Node.js — Flame Graphs"
+    url: "https://nodejs.org/en/learn/diagnostics/flame-graphs"
+  - title: "Node.js — perf_hooks.monitorEventLoopDelay"
+    url: "https://nodejs.org/api/perf_hooks.html#perf_hooksmonitoreventloopdelayoptions"
+  - title: "Grafana k6 — documentación"
+    url: "https://grafana.com/docs/k6/latest/"
+  - title: "node-postgres — Pooling"
+    url: "https://node-postgres.com/features/pooling"
+  - title: "The Twelve-Factor App — Processes"
+    url: "https://12factor.net/processes"
+interviewQuestions:
+  - question: "Una API Node.js se volvió lenta. ¿Cómo lo investigarías?"
+    keyPoints:
+      - "Confirmar el síntoma con métricas: qué endpoints, qué percentiles, desde cuándo, correlación con deploys o carga."
+      - "Mirar trazas para ver en qué tramo se va el tiempo: base de datos, servicios externos o CPU propia."
+      - "Revisar event loop lag y CPU (profiling) si el tiempo está en el proceso, y el pool de conexiones si hay esperas."
+      - "Reproducir con un load test, aplicar un cambio por vez y medir de nuevo."
+  - question: "¿Qué es el problema N+1 y cómo se resuelve?"
+    keyPoints:
+      - "Una consulta trae N filas y luego se hace una consulta adicional por cada una."
+      - "La latencia crece linealmente con N y satura el pool de conexiones."
+      - "Se resuelve con un JOIN, una consulta con WHERE id = ANY($1) o batching (DataLoader)."
+  - question: "¿Qué hace falta para que un servicio escale horizontalmente?"
+    keyPoints:
+      - "Que no guarde estado en memoria del proceso entre requests: sesiones, cachés críticas y locks van a almacenes compartidos."
+      - "Cualquier réplica puede atender cualquier request detrás del balanceador."
+      - "Apagado ordenado, health checks y configuración por entorno."
+      - "Las dependencias compartidas (base, Redis, proveedores) también deben soportar la carga: el cuello de botella se mueve."
+summary:
+  - "Primero objetivos (p95, throughput, error rate), después medición, y recién después optimización."
+  - "Un load test realista define escenarios, ramp-up y criterios de éxito; se corre contra un entorno parecido a producción."
+  - "Profiling de CPU (--cpu-prof, flame graphs) muestra qué funciones consumen el tiempo del hilo."
+  - "La mayoría de los problemas de performance de un backend están en la I/O: N+1, consultas sin índice, llamadas secuenciales."
+  - "Un pool de conexiones acotado y bien dimensionado evita saturar la base; el tamaño total es réplicas × pool."
+  - "Caché sólo con estrategia de invalidación, TTL y límite; protege contra stampede."
+  - "Servicios sin estado + balanceador = escalado horizontal; el estado va a la base, Redis o colas."
+---
+
+## ¿Qué problema resuelve?
+
+"La API está lenta" es la queja más común y la peor abordada. La reacción típica es optimizar lo que parece lento
+(cambiar `forEach` por `for`, agregar caché a todo, subir el tamaño de la instancia) sin evidencia. A veces mejora
+por casualidad; casi siempre agrega complejidad sin resolver la causa.
+
+Esta lección propone un método y repasa las causas reales más frecuentes en servicios Node.js.
+
+## El método: objetivo, medición, hipótesis, cambio
+
+<FlowDiagram
+  steps={[
+    { title: "Objetivo", detail: "p95 menor a 300 ms con 500 req/s y error rate menor a 0,1 %." },
+    { title: "Medición", detail: "Load test y métricas de producción: dónde estamos hoy." },
+    { title: "Diagnóstico", detail: "Trazas y profiling: en qué tramo se va el tiempo.", tone: "boundary" },
+    { title: "Un cambio", detail: "El de mayor impacto esperado." },
+    { title: "Medir de nuevo", detail: "¿Mejoró el objetivo? Si no, revertir.", tone: "runtime" },
+  ]}
+  caption="Sin objetivo y sin medición no hay forma de saber si una optimización sirvió."
+/>
+
+Los objetivos se expresan en **percentiles** (el promedio esconde a los usuarios afectados), **throughput** (requests
+por segundo sostenidas) y **tasa de errores** bajo esa carga.
+
+## Load testing
+
+Un load test genera tráfico controlado para ver cómo responde el sistema. Herramientas habituales: **k6** (scripts
+en JavaScript), autocannon (benchmarks HTTP simples en Node.js), Gatling o JMeter.
+
+```js
+// k6: escenario de carga sobre el listado de deudas
+import http from "k6/http";
+import { check } from "k6";
+
+export const options = {
+  stages: [
+    { duration: "1m", target: 100 }, // ramp-up a 100 usuarios virtuales
+    { duration: "5m", target: 100 }, // carga sostenida
+    { duration: "1m", target: 0 },
+  ],
+  thresholds: {
+    http_req_duration: ["p(95)<300"], // criterio de éxito
+    http_req_failed: ["rate<0.001"],
+  },
+};
+
+export default function () {
+  const response = http.get(`${__ENV.BASE_URL}/customers/cus_42/debts`, {
+    headers: { authorization: `Bearer ${__ENV.TOKEN}` },
+  });
+  check(response, { "status 200": (r) => r.status === 200 });
+}
+```
+
+| Tipo de prueba | Objetivo                                                   |
+| -------------- | ---------------------------------------------------------- |
+| Load           | Comportamiento con la carga esperada                       |
+| Stress         | Dónde y cómo se rompe al superar la capacidad              |
+| Spike          | Reacción a picos bruscos (el inicio de una campaña masiva) |
+| Soak           | Estabilidad durante horas: fugas de memoria, conexiones    |
+
+Reglas: entorno parecido a producción (mismos límites de CPU y memoria, datos de volumen realista), el generador de
+carga en otra máquina, y **observar el sistema durante la prueba** (métricas y trazas), no sólo el resumen final.
+
+## Profiling de CPU y event loop
+
+Si las trazas muestran que el tiempo se va **dentro del proceso** (no esperando I/O), hay que perfilar:
+
+```bash
+# Genera un perfil de CPU al terminar el proceso; se abre en Chrome DevTools
+node --cpu-prof dist/main.js
+
+# Inspector para perfilar en vivo con Chrome DevTools (no exponer el puerto en producción)
+node --inspect=0.0.0.0:9229 dist/main.js
+```
+
+Un **flame graph** muestra las funciones por el tiempo de CPU que consumen: las barras anchas son los candidatos.
+Causas típicas en backends: serializar o parsear JSON enormes, regex con backtracking catastrófico, validaciones
+repetidas dentro de bucles, criptografía síncrona, logging excesivo y transformaciones de grandes colecciones.
+
+El **event loop lag** (lección del event loop) indica que el hilo está ocupado: si sube junto con la latencia, el
+problema es CPU en el proceso; si la latencia sube con lag bajo, el problema está en la I/O o en las dependencias.
+
+## Las causas más comunes están en la I/O
+
+### Consultas N+1
+
+```ts
+// ❌ 1 consulta para las deudas + 1 por cada deuda para su cliente: 201 consultas para 200 deudas
+const debts = await db.query("SELECT * FROM debts WHERE campaign_id = $1", [campaignId]);
+for (const debt of debts.rows) {
+  debt.customer = (await db.query("SELECT * FROM customers WHERE id = $1", [debt.customer_id])).rows[0];
+}
+
+// ✅ Una consulta con JOIN (o dos consultas: deudas y clientes con ANY)
+const rows = await db.query(
+  `SELECT d.id, d.balance_cents, c.id AS customer_id, c.name
+     FROM debts d
+     JOIN customers c ON c.id = d.customer_id
+    WHERE d.campaign_id = $1`,
+  [campaignId],
+);
+```
+
+Con 2 ms por consulta, la versión N+1 tarda 400 ms y ocupa una conexión todo ese tiempo; la versión con JOIN, unos
+pocos milisegundos. En GraphQL o en loaders genéricos, el patrón **DataLoader** agrupa las búsquedas por ID de un
+mismo tick en una sola consulta.
+
+### Llamadas secuenciales independientes
+
+```ts
+// ❌ 3 llamadas independientes en serie: la latencia se suma
+const customer = await customers.get(id);
+const debts = await debtsRepo.listByCustomer(id);
+const history = await contactHistory.list(id);
+
+// ✅ En paralelo: la latencia es la de la más lenta
+const [customer, debts, history] = await Promise.all([
+  customers.get(id),
+  debtsRepo.listByCustomer(id),
+  contactHistory.list(id),
+]);
+```
+
+### Connection pooling
+
+Abrir una conexión a PostgreSQL cuesta (TCP, TLS, autenticación, un proceso en el servidor). Un **pool** mantiene
+conexiones abiertas y las presta:
+
+```ts
+import { Pool } from "pg";
+
+export const pool = new Pool({
+  connectionString: env.DATABASE_URL,
+  max: 10, // conexiones máximas POR RÉPLICA
+  idleTimeoutMillis: 30_000,
+  connectionTimeoutMillis: 2_000, // fallar rápido si el pool está agotado
+});
+```
+
+<MermaidDiagram
+  caption="El número total de conexiones es réplicas × tamaño del pool; debe entrar en el límite de la base."
+  chart={`
+flowchart LR
+  subgraph R["8 réplicas de la API"]
+    R1["Réplica 1<br/>pool 10"]
+    R2["Réplica 2<br/>pool 10"]
+    R8["Réplica 8<br/>pool 10"]
+  end
+  R1 --> PG["PostgreSQL<br/>max_connections 100"]
+  R2 --> PG
+  R8 --> PG
+  PB["PgBouncer<br/>pooler externo"] -.->|"opcional: multiplexa"| PG
+`}
+/>
+
+Un pool más grande no siempre es mejor: la base tiene un límite de conexiones y rinde peor con demasiadas
+concurrentes. Con muchas réplicas o funciones serverless, un **pooler externo** (PgBouncer, o el pooler del
+proveedor) multiplexa muchas conexiones de cliente sobre pocas conexiones reales.
+
+### Caché
+
+Una caché evita repetir trabajo caro, pero agrega un problema: **invalidar**. Antes de cachear, responder:
+
+- ¿Cuánto tiempo puede estar desactualizado el dato? (define el TTL)
+- ¿Quién invalida cuando cambia? (escritura que borra la clave, eventos, sólo TTL)
+- ¿Cuántas claves distintas hay? (límite de memoria; LRU)
+- ¿Qué pasa cuando expira una clave muy pedida? (cache stampede)
+
+| Nivel       | Ejemplo                                     | Cuidado                                       |
+| ----------- | ------------------------------------------- | --------------------------------------------- |
+| En proceso  | `Map` con LRU para configuración del tenant | Cada réplica tiene su copia; límite de tamaño |
+| Distribuida | Redis                                       | Latencia de red; serialización                |
+| HTTP        | `Cache-Control`, CDN                        | Datos por usuario no van a cachés compartidas |
+
+El simulador [Cache stampede](/system-design/simulators/cache-stampede) muestra qué pasa cuando muchas requests
+encuentran la misma clave expirada a la vez. El curso de Redis profundiza en los patrones.
+
+## Escalabilidad horizontal
+
+Escalar **verticalmente** es usar una máquina más grande; tiene un techo y un proceso Node.js sólo usa un núcleo
+para JavaScript. Escalar **horizontalmente** es agregar réplicas detrás de un balanceador, y exige que el servicio
+sea **sin estado** (_stateless_):
+
+| Estado en memoria del proceso | Dónde debe vivir para escalar                                  |
+| ----------------------------- | -------------------------------------------------------------- |
+| Sesiones de usuario           | Redis o la base                                                |
+| Rate limiting y locks         | Redis                                                          |
+| Trabajos en curso             | Una cola (BullMQ, SQS, RabbitMQ)                               |
+| Archivos subidos              | Almacenamiento de objetos (S3)                                 |
+| Caché                         | Redis, o local sólo si es tolerable que difiera entre réplicas |
+
+Además: **health checks** (el orquestador saca las réplicas que no responden), **apagado ordenado** (`SIGTERM`) y
+**autoscaling** por CPU, latencia o largo de cola. Y recordar que al escalar la API el cuello de botella **se mueve**
+a lo compartido: la base de datos, Redis o la cuota del proveedor de LLM.
+
+## Comparación con C# y Java
+
+| Herramienta           | .NET                                  | Java                             | Node.js                                 |
+| --------------------- | ------------------------------------- | -------------------------------- | --------------------------------------- |
+| Profiling             | dotnet-trace, PerfView, Visual Studio | async-profiler, JFR, VisualVM    | `--cpu-prof`, `--inspect`, flame graphs |
+| Pool de conexiones    | Integrado en ADO.NET/Npgsql           | HikariCP                         | `pg.Pool`, poolers externos             |
+| Paralelizar I/O       | `Task.WhenAll`                        | `CompletableFuture.allOf`        | `Promise.all`                           |
+| Batching de consultas | EF Core `Include`, split queries      | JPA `JOIN FETCH`, `@BatchSize`   | JOIN explícito, DataLoader              |
+| Uso de núcleos        | Un proceso usa todos los núcleos      | Un proceso usa todos los núcleos | Una réplica por núcleo o workers        |
+
+## Errores frecuentes
+
+- **Optimizar sin medir** o medir sólo en local con datos de juguete.
+- **Mirar promedios** en lugar de percentiles.
+- **N+1** escondidos en loops o en ORMs con carga perezosa.
+- **Pools sobredimensionados** que agotan las conexiones de la base al escalar réplicas.
+- **Caché sin invalidación ni límite**, que sirve datos viejos o agota la memoria.
+- **Estado en memoria** que rompe al agregar la segunda réplica.
+- **Escalar la API sin revisar las dependencias** que van a recibir más carga.
+
+## Ejercicio interactivo
+
+<KnowledgeCheck
+  id="nodejs.performance-scaling.q1"
+  question="Un endpoint tarda 900 ms. Las trazas muestran 180 spans de consultas SQL de 4 ms cada una, y el event loop lag es bajo. ¿Qué atacás primero?"
+  options={[
+    {
+      text: "Mover el endpoint a un worker thread.",
+      explanation: "El hilo no está ocupado (lag bajo): el tiempo se va en I/O.",
+    },
+    {
+      text: "El patrón N+1: reemplazar las consultas por una con JOIN o con ANY sobre los IDs.",
+      correct: true,
+      explanation: "Correcto. 180 consultas pequeñas en serie explican casi todo el tiempo.",
+    },
+    {
+      text: "Aumentar el tamaño de la instancia.",
+      explanation: "Más CPU no reduce la latencia de 180 viajes a la base.",
+    },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="nodejs.performance-scaling.q2"
+  question="Escalás de 4 a 20 réplicas, cada una con un pool de 20 conexiones, y PostgreSQL tiene `max_connections = 200`. ¿Qué pasa?"
+  options={[
+    { text: "Nada: el pool se adapta solo.", explanation: "Cada réplica intenta abrir hasta 20 conexiones." },
+    {
+      text: "Se pueden pedir hasta 400 conexiones y la base empieza a rechazarlas.",
+      correct: true,
+      explanation: "Correcto. Hay que reducir el pool por réplica o usar un pooler externo como PgBouncer.",
+    },
+    {
+      text: "La base escala sus conexiones automáticamente.",
+      explanation: "max_connections es un límite fijo de configuración.",
+    },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="nodejs.performance-scaling.q3"
+  question="Un servicio guarda las sesiones en un `Map` en memoria. Funcionaba bien y al pasar a 3 réplicas los usuarios se desloguean al azar. ¿Por qué?"
+  options={[
+    { text: "Por una fuga de memoria.", explanation: "No es una fuga: es estado local de cada réplica." },
+    {
+      text: "Porque cada réplica tiene su propio Map y el balanceador manda las requests a réplicas que no conocen la sesión.",
+      correct: true,
+      explanation: "Correcto. Para escalar horizontalmente, el estado va a un almacén compartido como Redis.",
+    },
+    {
+      text: "Porque las cookies no funcionan con balanceadores.",
+      explanation: "Las cookies funcionan; lo que falta es el estado compartido.",
+    },
+  ]}
+/>

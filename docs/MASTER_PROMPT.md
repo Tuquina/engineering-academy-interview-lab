@@ -1764,7 +1764,7 @@ completa para aprender desde cero (para alguien que ya programa) antes de practi
 
 - [ ] Módulo de introducción en cada curso: qué es, para qué sirve, sintaxis básica y ejemplos (ADR-0008).
 - [x] TypeScript.
-- [ ] Node.js.
+- [x] Node.js.
 - [ ] React.
 - [ ] Next.js.
 - [ ] LLMs y agentes de IA.

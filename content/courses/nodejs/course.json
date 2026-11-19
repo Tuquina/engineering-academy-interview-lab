@@ -10,6 +10,25 @@
   "tags": ["nodejs", "backend", "event loop"],
   "modules": [
     {
+      "id": "nodejs.intro",
+      "slug": "introduccion",
+      "title": "Introducción",
+      "description": "Qué es Node.js, cuándo conviene usarlo, cómo se ejecuta un programa y las piezas básicas: paquetes, módulos, el objeto process y el primer servidor HTTP.",
+      "order": 0,
+      "topics": [
+        "Qué es Node.js y qué problema resolvió",
+        "Cuándo conviene y cuándo no",
+        "Ejecutar Node.js (también en Docker) y versiones LTS",
+        "package.json, dependencias y scripts",
+        "npm y pnpm",
+        "Módulos ES y CommonJS",
+        "process, variables de entorno y argumentos",
+        "Módulos del núcleo: fs, path, http, crypto",
+        "Primer servidor HTTP sin frameworks",
+        "Frameworks: Express, Fastify, NestJS y Next.js"
+      ]
+    },
+    {
       "id": "nodejs.internals",
       "slug": "fundamentos-internos",
       "title": "Fundamentos internos",

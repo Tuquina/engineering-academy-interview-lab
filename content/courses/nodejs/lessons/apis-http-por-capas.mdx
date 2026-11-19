@@ -1,0 +1,337 @@
+---
+id: nodejs.http-apis
+moduleId: nodejs.backend
+title: "APIs HTTP mantenibles: REST, capas, validación, errores, middleware y versionado"
+description: "Cómo se estructura una API HTTP profesional en Node.js: diseño REST de recursos y códigos de estado, capas con handlers delgados y casos de uso, validación en el borde, errores con Problem Details, middleware, versionado y contratos OpenAPI."
+difficulty: intermediate
+order: 1
+objectives:
+  - "Diseñar recursos REST con métodos, códigos de estado y semántica de idempotencia correctos."
+  - "Separar transporte (handler), aplicación (caso de uso) y dominio en una API Node.js."
+  - "Validar entradas en el borde y traducir errores a respuestas HTTP consistentes (Problem Details)."
+  - "Explicar el modelo de middleware y qué preocupaciones transversales resuelve."
+  - "Elegir una estrategia de versionado y documentar el contrato con OpenAPI."
+prerequisites: ["nodejs.introduction", "typescript.type-safe-apis"]
+estimatedMinutes: 45
+tags: ["rest", "http", "capas", "validación", "problem details", "middleware", "openapi", "c#", "java"]
+version: "1.0.0"
+comparesWith: ["csharp", "java"]
+references:
+  - title: "RFC 9110 — HTTP Semantics"
+    url: "https://www.rfc-editor.org/rfc/rfc9110"
+  - title: "RFC 9457 — Problem Details for HTTP APIs"
+    url: "https://www.rfc-editor.org/rfc/rfc9457"
+  - title: "MDN — HTTP response status codes"
+    url: "https://developer.mozilla.org/en-US/docs/Web/HTTP/Status"
+  - title: "OpenAPI Specification"
+    url: "https://spec.openapis.org/oas/latest.html"
+  - title: "Fastify — Validation and Serialization"
+    url: "https://fastify.dev/docs/latest/Reference/Validation-and-Serialization/"
+  - title: "Next.js — Route Handlers"
+    url: "https://nextjs.org/docs/app/getting-started/route-handlers"
+interviewQuestions:
+  - question: "¿Qué métodos HTTP son idempotentes y por qué importa?"
+    keyPoints:
+      - "GET, HEAD, PUT, DELETE y OPTIONS son idempotentes por especificación: repetirlos produce el mismo estado."
+      - "POST y PATCH no lo son en general."
+      - "Importa para reintentos: un cliente o proxy puede repetir con seguridad una request idempotente."
+      - "Para POST que no debe duplicarse (cobros, envíos) se usa una Idempotency-Key."
+  - question: "¿Cómo estructurarías un endpoint para que la lógica sea testeable sin HTTP?"
+    keyPoints:
+      - "El handler sólo traduce: parsea y valida la entrada, llama al caso de uso y mapea el resultado a HTTP."
+      - "El caso de uso recibe tipos del dominio y dependencias por constructor (puertos)."
+      - "El dominio no conoce HTTP, frameworks ni la base de datos."
+      - "Se testea el caso de uso con fakes y el handler con unos pocos tests de integración."
+  - question: "¿Qué diferencia hay entre 400, 401, 403, 404, 409 y 422?"
+    keyPoints:
+      - "400: request mal formada (JSON inválido, parámetros imposibles de interpretar)."
+      - "401: falta autenticación o es inválida; 403: autenticado pero sin permiso."
+      - "404: el recurso no existe (o no debe revelarse que existe)."
+      - "409: conflicto con el estado actual (versión desactualizada, transición inválida); 422: semánticamente inválida según las reglas."
+summary:
+  - "REST modela recursos con sustantivos y usa la semántica de los métodos y códigos de HTTP."
+  - "GET, PUT y DELETE son idempotentes; POST no, salvo que se use una Idempotency-Key."
+  - "Handler delgado: parsear, llamar al caso de uso, mapear el resultado. La lógica vive fuera del framework."
+  - "Se valida una vez en el borde con un esquema; los errores de negocio vuelven como Result y se mapean a 4xx."
+  - "Problem Details (RFC 9457) da un formato estándar y consistente a los errores."
+  - "El middleware resuelve preocupaciones transversales: autenticación, correlation IDs, logging, límites."
+  - "Versionar sólo ante cambios incompatibles; agregar campos opcionales no rompe a nadie."
+  - "Un contrato OpenAPI documenta, genera clientes y permite tests de contrato."
+---
+
+## ¿Qué problema resuelve?
+
+En la mayoría de los proyectos Node.js que fracasan en mantenibilidad, el problema no es Node.js: es que **toda la
+lógica vive en los handlers HTTP**. El handler parsea el body a mano, consulta la base, aplica reglas de negocio,
+llama a un proveedor de SMS y arma la respuesta. No se puede testear sin levantar un servidor, no se puede reusar
+desde un worker de colas, y cada endpoint inventa su propio formato de error.
+
+Esta lección presenta la estructura que evita eso: un diseño REST claro, capas con responsabilidades separadas y
+convenciones uniformes para validación y errores.
+
+## REST en lo esencial
+
+REST organiza la API alrededor de **recursos** (sustantivos) identificados por URLs, y usa la **semántica de HTTP**
+para las operaciones:
+
+| Operación                     | Método y ruta                              | Respuesta típica     |
+| ----------------------------- | ------------------------------------------ | -------------------- |
+| Listar deudas de un cliente   | `GET /customers/{id}/debts?status=pending` | `200` con la lista   |
+| Obtener una deuda             | `GET /debts/{id}`                          | `200` o `404`        |
+| Registrar una promesa de pago | `POST /debts/{id}/payment-promises`        | `201` con `Location` |
+| Reemplazar la configuración   | `PUT /agents/{id}/config`                  | `200` o `204`        |
+| Modificar parcialmente        | `PATCH /debts/{id}`                        | `200`                |
+| Cancelar una campaña          | `DELETE /campaigns/{id}`                   | `204`                |
+
+### Propiedades de los métodos
+
+| Método   | Seguro (no modifica) |   Idempotente   |
+| -------- | :------------------: | :-------------: |
+| `GET`    |          Sí          |       Sí        |
+| `PUT`    |          No          |       Sí        |
+| `DELETE` |          No          |       Sí        |
+| `POST`   |          No          |       No        |
+| `PATCH`  |          No          | No (en general) |
+
+**Idempotente** significa que repetir la request deja el sistema en el mismo estado. Importa porque las redes
+fallan: si un `PUT` no recibió respuesta, se puede repetir; si un `POST /payments` no recibió respuesta, repetirlo
+puede cobrar dos veces. La solución para POST críticos es una **Idempotency-Key** (lección de webhooks).
+
+### Códigos de estado que hay que dominar
+
+| Código                | Significado                                                         |
+| --------------------- | ------------------------------------------------------------------- |
+| `200`                 | OK con body                                                         |
+| `201`                 | Creado; incluir `Location` con la URL del recurso                   |
+| `202`                 | Aceptado para procesar después (trabajo asíncrono)                  |
+| `204`                 | OK sin body                                                         |
+| `400`                 | Request mal formada (JSON inválido)                                 |
+| `401`                 | No autenticado                                                      |
+| `403`                 | Autenticado pero sin permiso                                        |
+| `404`                 | No existe (o no se revela que existe)                               |
+| `409`                 | Conflicto con el estado actual (versión vieja, transición inválida) |
+| `422`                 | Bien formada pero inválida según las reglas                         |
+| `429`                 | Demasiadas requests; incluir `Retry-After`                          |
+| `500`                 | Error inesperado del servidor                                       |
+| `502` / `503` / `504` | Dependencia caída, servicio no disponible, timeout de upstream      |
+
+## Arquitectura por capas
+
+<MermaidDiagram
+  caption="Cada capa tiene una responsabilidad; las dependencias apuntan hacia el dominio."
+  chart={`
+flowchart TB
+  C["Cliente HTTP"] --> H["Handler / controller<br/>parsea, valida, mapea a HTTP"]
+  H --> U["Caso de uso<br/>orquesta: carga, aplica reglas, persiste"]
+  U --> D["Dominio<br/>entidades y reglas puras"]
+  U --> P["Puertos<br/>interfaces: DebtRepository, Notifier"]
+  A["Adaptadores<br/>Postgres, proveedor de SMS"] -.->|"implementan"| P
+`}
+/>
+
+| Capa        | Sabe de                                   | No sabe de             |
+| ----------- | ----------------------------------------- | ---------------------- |
+| Handler     | HTTP, el framework, el esquema de entrada | Reglas de negocio, SQL |
+| Caso de uso | El dominio y los puertos                  | HTTP, frameworks, SQL  |
+| Dominio     | Sólo de sí mismo                          | Todo lo demás          |
+| Adaptadores | Una tecnología concreta (Postgres, SMS)   | HTTP                   |
+
+```ts
+// Handler: delgado. Un Route Handler de Next.js, pero sería igual en Fastify o Express.
+export async function POST(request: Request, context: { params: Promise<{ debtId: string }> }) {
+  const { debtId } = await context.params;
+  const parsed = CreatePromiseSchema.safeParse(await request.json().catch(() => null));
+  if (!parsed.success) return problem(422, "invalid_body", z.flattenError(parsed.error).fieldErrors);
+
+  const result = await useCases.registerPaymentPromise.execute({
+    debtId,
+    ...parsed.data,
+    actor: await currentUser(request),
+  });
+
+  if (!result.ok) return mapDomainError(result.error);
+  return Response.json(toPromiseDto(result.value), {
+    status: 201,
+    headers: { location: `/debts/${debtId}/payment-promises/${result.value.id}` },
+  });
+}
+```
+
+El handler no tiene un solo `if` de negocio: valida, delega y traduce. El caso de uso se puede llamar igual desde
+un worker que procesa una cola o desde un test.
+
+## Validación y errores consistentes
+
+**Validá una sola vez, en el borde**, con un esquema (Zod, o el JSON Schema integrado de Fastify). Adentro, los
+tipos ya son confiables.
+
+Para los errores, un formato único evita que cada cliente tenga que adivinar. El estándar **Problem Details**
+(RFC 9457) define un JSON con `type`, `title`, `status`, `detail` e `instance`, extensible con campos propios:
+
+```ts
+/** Respuesta de error con formato Problem Details (RFC 9457). */
+export function problem(
+  status: number,
+  code: string,
+  errors?: Record<string, string[] | undefined>,
+): Response {
+  return Response.json(
+    { type: `https://errors.example.com/${code}`, title: TITLES[code] ?? "Error", status, code, errors },
+    { status, headers: { "content-type": "application/problem+json" } },
+  );
+}
+
+/** Traduce errores esperables del dominio a HTTP en un único lugar. */
+function mapDomainError(error: RegisterPromiseError): Response {
+  switch (error.kind) {
+    case "debt_not_found":
+      return problem(404, "debt_not_found");
+    case "debt_already_paid":
+      return problem(409, "debt_already_paid");
+    case "date_out_of_range":
+      return problem(422, "promised_date_out_of_range");
+  }
+}
+```
+
+Y un manejador global para lo inesperado: registra el error completo con el correlation ID y responde un `500`
+**genérico**, sin stack traces ni mensajes internos (que pueden filtrar SQL, rutas o datos).
+
+## Middleware
+
+Un **middleware** es una función que envuelve el procesamiento de la request para resolver preocupaciones
+**transversales** (que aplican a muchos endpoints):
+
+<FlowDiagram
+  steps={[
+    { title: "Correlation ID", detail: "Lee o genera x-request-id y lo deja disponible para los logs." },
+    {
+      title: "Autenticación",
+      detail: "Verifica el token y adjunta el usuario y el tenant.",
+      tone: "boundary",
+    },
+    { title: "Rate limiting", detail: "Rechaza con 429 si se superó el límite." },
+    { title: "Handler", detail: "La lógica del endpoint.", tone: "runtime" },
+    { title: "Logging de acceso", detail: "Registra método, ruta, status y duración al terminar." },
+  ]}
+  caption="Las preocupaciones transversales se resuelven una vez, alrededor de todos los handlers."
+/>
+
+```ts
+// Estilo Express: (req, res, next)
+app.use((request, response, next) => {
+  const requestId = request.header("x-request-id") ?? randomUUID();
+  response.setHeader("x-request-id", requestId);
+  next();
+});
+
+// Estilo funcional (Next.js Route Handlers u otros): componer funciones
+type Handler = (request: Request) => Promise<Response>;
+const withAuth =
+  (handler: (request: Request, user: User) => Promise<Response>): Handler =>
+  async (request) => {
+    const user = await authenticate(request);
+    return user ? handler(request, user) : problem(401, "unauthenticated");
+  };
+```
+
+En Next.js, el archivo `middleware`/`proxy` corre antes de las rutas y es adecuado para redirecciones y chequeos
+rápidos; la **autorización real** se verifica también en el handler o en el caso de uso, cerca del dato.
+
+## Versionado y contratos
+
+Un cambio es **compatible** si los clientes existentes siguen funcionando: agregar un endpoint, un campo opcional
+en la respuesta o un parámetro opcional. Es **incompatible** si quita o renombra campos, cambia tipos o cambia el
+significado de un valor. Sólo los cambios incompatibles requieren versión nueva.
+
+| Estrategia     | Ejemplo                             | Comentario                                          |
+| -------------- | ----------------------------------- | --------------------------------------------------- |
+| En la URL      | `/v2/debts`                         | La más simple y visible; la más usada               |
+| En un header   | `Api-Version: 2026-11-01`           | URLs estables; versionado por fecha (estilo Stripe) |
+| Por media type | `Accept: application/vnd.x.v2+json` | Purista, más incómodo para clientes                 |
+
+Un contrato **OpenAPI** describe endpoints, esquemas y errores. Sirve para documentar, generar clientes tipados y
+correr tests de contrato. Se puede escribir a mano o generar desde los esquemas (por ejemplo, con integraciones de
+Zod o con el JSON Schema de Fastify). Lo importante es que **el contrato y la validación salgan de la misma
+fuente**.
+
+## Comparación con C# y Java
+
+| Concepto         | ASP.NET Core                    | Spring Boot                | Node.js                                 |
+| ---------------- | ------------------------------- | -------------------------- | --------------------------------------- |
+| Handler          | Controller / Minimal API        | `@RestController`          | Route Handler, ruta de Fastify/Express  |
+| Validación       | Model binding + DataAnnotations | `@Valid` + Bean Validation | Zod / JSON Schema explícito             |
+| Errores estándar | `ProblemDetails` integrado      | `ProblemDetail` (Spring 6) | Implementación propia o plugin          |
+| Middleware       | Pipeline de middleware          | Filters / interceptors     | Middleware de Express, hooks de Fastify |
+| Contrato         | Swashbuckle / OpenAPI integrado | springdoc-openapi          | OpenAPI desde esquemas o a mano         |
+
+La diferencia práctica: en .NET y Spring el framework impone mucha estructura. En Node.js los frameworks
+minimalistas no lo hacen, así que **la disciplina de capas depende del equipo**.
+
+## Errores frecuentes
+
+- **Lógica de negocio en el handler.** Imposible de testear y de reusar.
+- **Devolver `200` con `{ "error": ... }`.** Los clientes, proxies y métricas dependen del status.
+- **Mensajes de error con detalles internos** (stack traces, SQL, rutas del servidor).
+- **Un formato de error distinto por endpoint.**
+- **Verbos en las URLs** (`/getDebts`, `/createPromise`) en lugar de recursos y métodos.
+- **Versionar por cualquier cambio**, incluso compatibles, o no versionar nunca y romper clientes.
+- **Confiar la autorización sólo al middleware** de rutas sin chequear el acceso al recurso concreto.
+
+## Ejercicio interactivo
+
+<KnowledgeCheck
+  id="nodejs.http-apis.q1"
+  question="Un cliente intenta registrar una promesa de pago sobre una deuda que ya está pagada. El body es válido. ¿Qué status corresponde?"
+  options={[
+    { text: "`400 Bad Request`", explanation: "La request está bien formada." },
+    {
+      text: "`409 Conflict`",
+      correct: true,
+      explanation:
+        "Correcto. La operación choca con el estado actual del recurso (ya pagada). Algunos equipos usan 422; lo importante es la consistencia.",
+    },
+    {
+      text: "`500 Internal Server Error`",
+      explanation: "No es un error inesperado: es una regla de negocio conocida.",
+    },
+    {
+      text: "`200 OK` con un mensaje de error",
+      explanation: "Oculta el fallo a clientes, proxies y métricas.",
+    },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="nodejs.http-apis.q2"
+  question="¿Qué cambio en una respuesta de la API es compatible y no requiere versión nueva?"
+  options={[
+    { text: "Renombrar `amount` a `amountCents`.", explanation: "Los clientes que leen amount se rompen." },
+    {
+      text: "Agregar un campo opcional `promisedFor`.",
+      correct: true,
+      explanation: "Correcto. Los clientes existentes ignoran campos que no conocen.",
+    },
+    { text: "Cambiar `status` de string a número.", explanation: "Cambiar el tipo rompe a los clientes." },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="nodejs.http-apis.q3"
+  question="¿Qué debería contener un handler HTTP en una arquitectura por capas?"
+  options={[
+    {
+      text: "Las consultas SQL y las reglas de negocio, para tener todo junto.",
+      explanation: "Acopla HTTP, negocio y persistencia: no se puede testear ni reusar.",
+    },
+    {
+      text: "Parseo y validación de la entrada, llamada al caso de uso y traducción del resultado a HTTP.",
+      correct: true,
+      explanation: "Correcto. El handler es un adaptador: traduce entre HTTP y la aplicación.",
+    },
+    {
+      text: "Sólo el routing; la validación va en el dominio.",
+      explanation: "La validación de formato es del borde; el dominio recibe tipos ya validados.",
+    },
+  ]}
+/>

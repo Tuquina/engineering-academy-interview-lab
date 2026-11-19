@@ -1,0 +1,327 @@
+---
+id: nodejs.workers-memory
+moduleId: nodejs.internals
+title: "Paralelismo y memoria: thread pool, worker threads, procesos y garbage collection"
+description: "Qué hacer cuando el trabajo no es sólo esperar I/O: concurrencia frente a paralelismo, trabajo I/O-bound y CPU-bound, el thread pool de libuv, worker threads, procesos y cluster, y cómo gestiona la memoria V8 (heap, garbage collector generacional, fugas y cómo encontrarlas)."
+difficulty: advanced
+order: 3
+objectives:
+  - "Distinguir concurrencia de paralelismo y clasificar una tarea como I/O-bound o CPU-bound."
+  - "Explicar qué operaciones usan el thread pool de libuv y cómo se satura."
+  - "Mover trabajo CPU-bound a worker threads y elegir entre workers, procesos y otros servicios."
+  - "Describir el heap de V8 y su garbage collector generacional."
+  - "Reconocer las fugas de memoria más comunes en Node.js y diagnosticarlas con heap snapshots."
+prerequisites: ["nodejs.event-loop"]
+estimatedMinutes: 45
+tags: ["worker threads", "thread pool", "cluster", "memoria", "garbage collection", "c#", "java"]
+version: "1.0.0"
+comparesWith: ["csharp", "java"]
+references:
+  - title: "Node.js — Worker threads"
+    url: "https://nodejs.org/api/worker_threads.html"
+  - title: "Node.js — Don't Block the Event Loop (or the Worker Pool)"
+    url: "https://nodejs.org/en/learn/asynchronous-work/dont-block-the-event-loop"
+  - title: "libuv — Thread pool work scheduling"
+    url: "https://docs.libuv.org/en/v1.x/threadpool.html"
+  - title: "Node.js — Understanding and Tuning Memory"
+    url: "https://nodejs.org/en/learn/diagnostics/memory/understanding-and-tuning-memory"
+  - title: "V8 — Trash talk: the Orinoco garbage collector"
+    url: "https://v8.dev/blog/trash-talk"
+  - title: "Node.js — Cluster"
+    url: "https://nodejs.org/api/cluster.html"
+interviewQuestions:
+  - question: "¿Cuál es la diferencia entre concurrencia y paralelismo, y cómo se aplica a Node.js?"
+    keyPoints:
+      - "Concurrencia: varias tareas en progreso al mismo tiempo, intercalándose. Paralelismo: varias ejecutándose en el mismo instante en núcleos distintos."
+      - "Node.js da concurrencia de I/O con un solo hilo de JavaScript."
+      - "El paralelismo se obtiene con el thread pool de libuv (para ciertas operaciones), worker threads o varios procesos."
+  - question: "¿Qué usa el thread pool de libuv y qué pasa si se satura?"
+    keyPoints:
+      - "Operaciones de sistema de archivos, dns.lookup, crypto pesado (pbkdf2, scrypt) y zlib."
+      - "Tiene 4 hilos por defecto (UV_THREADPOOL_SIZE); la red no lo usa."
+      - "Si se satura, esas operaciones esperan en cola y aumenta la latencia aunque el event loop esté libre."
+  - question: "¿Cómo encontrarías una fuga de memoria en un servicio Node.js?"
+    keyPoints:
+      - "Confirmar el patrón: el heap usado crece sin volver a la línea base después de cada GC."
+      - "Tomar dos o más heap snapshots separados en el tiempo y compararlos para ver qué objetos crecen y quién los retiene."
+      - "Sospechosos habituales: cachés sin límite, listeners no removidos, closures que retienen objetos grandes, timers no limpiados."
+      - "Corregir con límites (LRU, TTL), limpieza de listeners y WeakMap cuando la vida del dato depende de otro objeto."
+summary:
+  - "Concurrencia es intercalar tareas; paralelismo es ejecutarlas a la vez. Node.js da concurrencia de I/O con un hilo."
+  - "I/O-bound: el tiempo se va esperando. CPU-bound: el tiempo se va calculando y bloquea el event loop."
+  - "El thread pool de libuv (4 hilos por defecto) atiende fs, dns.lookup, crypto pesado y zlib; la red no lo usa."
+  - "Worker threads ejecutan JavaScript en paralelo con su propio event loop y heap; se comunican por mensajes."
+  - "Para escalar requests se usan varios procesos (una réplica por núcleo, o contenedores), no workers."
+  - "V8 divide el heap en generación joven (scavenge rápido) y vieja (mark-sweep-compact)."
+  - "Las fugas típicas son referencias que nunca se sueltan: cachés sin límite, listeners, closures y timers."
+---
+
+## ¿Qué problema resuelve?
+
+La lección del event loop dejó una regla: **no bloquear el hilo principal**. Pero algunos trabajos son cálculo puro:
+generar un PDF de una liquidación, calcular embeddings localmente, hashear contraseñas, parsear un JSON de 200 MB,
+procesar un lote con reglas de scoring. Mientras ese cálculo corre, ninguna otra request avanza.
+
+Y hay un segundo problema que no se ve hasta producción: **la memoria**. Un servicio que funciona bien durante horas
+y después se reinicia porque superó el límite de memoria del contenedor casi siempre tiene una fuga.
+
+## Concurrencia frente a paralelismo
+
+<MermaidDiagram
+  caption="Concurrencia: tareas que se intercalan en un hilo. Paralelismo: tareas que corren a la vez en núcleos distintos."
+  chart={`
+flowchart TB
+  subgraph C["Concurrencia: un hilo de JavaScript"]
+    direction LR
+    A1["Request A<br/>ejecuta"] --> B1["Request B<br/>ejecuta"] --> A2["Request A<br/>continúa tras I/O"] --> B2["Request B<br/>continúa tras I/O"]
+  end
+  subgraph P["Paralelismo: varios núcleos"]
+    direction LR
+    N1["Núcleo 1<br/>proceso o worker 1"]
+    N2["Núcleo 2<br/>proceso o worker 2"]
+    N3["Núcleo 3<br/>proceso o worker 3"]
+  end
+`}
+/>
+
+- **Concurrencia:** muchas tareas **en progreso** al mismo tiempo, que se turnan. Un cocinero que pone el agua a
+  hervir y mientras tanto corta verduras.
+- **Paralelismo:** varias tareas **ejecutándose en el mismo instante** en núcleos distintos. Varios cocineros.
+
+| Tipo de trabajo | Dónde se va el tiempo               | Qué ayuda en Node.js                           |
+| --------------- | ----------------------------------- | ---------------------------------------------- |
+| **I/O-bound**   | Esperando red, disco, base de datos | Asincronía: el event loop ya lo resuelve       |
+| **CPU-bound**   | Calculando                          | Paralelismo: workers, procesos u otro servicio |
+
+## El thread pool de libuv
+
+Aunque JavaScript corre en un hilo, **Node.js no es un proceso de un solo hilo**. libuv mantiene un **thread pool**
+(4 hilos por defecto) para operaciones que el sistema operativo no ofrece de forma asíncrona:
+
+| Usa el thread pool                                   | No usa el thread pool                         |
+| ---------------------------------------------------- | --------------------------------------------- |
+| `fs` (casi todas las operaciones de archivos)        | Sockets TCP/UDP, HTTP (usa epoll/kqueue/IOCP) |
+| `dns.lookup` (lo usa `http.get` con nombres de host) | `dns.resolve*`                                |
+| `crypto.pbkdf2`, `scrypt`, `randomBytes` asíncronos  | Timers                                        |
+| `zlib` asíncrono                                     |                                               |
+
+Consecuencia práctica: si hacés 100 hashes de contraseñas con `scrypt` a la vez, **cuatro** corren y 96 esperan en
+cola. Mientras tanto, una lectura de archivo de otra request también espera, aunque el event loop esté libre. El
+tamaño se ajusta con la variable `UV_THREADPOOL_SIZE` (al iniciar el proceso), pero agrandarlo no crea núcleos:
+sólo ayuda si los hilos estaban esperando, no calculando.
+
+## Worker threads
+
+Para cómputo CPU-bound en JavaScript, `node:worker_threads` crea **hilos con su propia instancia de V8**: su propio
+event loop, su propio heap y sin memoria compartida por defecto. Se comunican por **mensajes** (los datos se copian
+con el algoritmo de _structured clone_).
+
+```ts
+// pdf-worker.ts
+import { parentPort } from "node:worker_threads";
+
+parentPort?.on("message", (statement: StatementData) => {
+  const pdf = renderStatementPdf(statement); // cálculo pesado, fuera del hilo principal
+  parentPort?.postMessage(pdf, [pdf.buffer]); // transferir el buffer en lugar de copiarlo
+});
+```
+
+```ts
+// main.ts
+import { Worker } from "node:worker_threads";
+
+const worker = new Worker(new URL("./pdf-worker.js", import.meta.url));
+
+function renderInWorker(statement: StatementData): Promise<Uint8Array> {
+  return new Promise((resolve, reject) => {
+    worker.once("message", resolve);
+    worker.once("error", reject);
+    worker.postMessage(statement);
+  });
+}
+```
+
+Crear un worker cuesta (decenas de milisegundos y varios MB), así que en la práctica se usa un **pool de workers**
+reutilizables (librerías como Piscina) con una cola de tareas. Para compartir memoria existe `SharedArrayBuffer`
+con `Atomics`, pero es un caso avanzado y poco común en backends.
+
+<FlowDiagram
+  steps={[
+    { title: "Request", detail: "Pide el PDF de una liquidación." },
+    {
+      title: "Hilo principal",
+      detail: "Encola la tarea en el pool y sigue atendiendo otras requests.",
+      tone: "runtime",
+    },
+    { title: "Worker del pool", detail: "Genera el PDF en otro núcleo." },
+    { title: "Mensaje de vuelta", detail: "El hilo principal recibe el resultado y responde." },
+  ]}
+  caption="El cálculo pesado se mueve a un worker; el event loop nunca queda bloqueado."
+/>
+
+### ¿Workers, procesos u otro servicio?
+
+| Opción                         | Cuándo                                                                         |
+| ------------------------------ | ------------------------------------------------------------------------------ |
+| **Worker threads**             | Cálculo CPU-bound puntual dentro del mismo servicio (PDF, parseo, compresión). |
+| **Varios procesos / réplicas** | Escalar el throughput de requests: una réplica por núcleo o contenedores.      |
+| **Cola + servicio de workers** | Trabajo pesado o largo que no debe competir con la API (lotes, reportes).      |
+| **Otro lenguaje / servicio**   | Cómputo numérico intensivo (ML, video) donde Node.js no es la herramienta.     |
+
+`node:cluster` permite que varios procesos compartan un puerto, pero en contenedores lo habitual es correr **un
+proceso por contenedor** y escalar réplicas con el orquestador (Kubernetes, ECS). Para la mayoría de las APIs, esa
+es la forma de usar todos los núcleos.
+
+## Memoria: cómo gestiona V8 el heap
+
+V8 gestiona la memoria de los objetos de JavaScript en un **heap** con recolección de basura **generacional**, como
+la JVM y el CLR:
+
+<MermaidDiagram
+  caption="Los objetos nacen en la generación joven; los que sobreviven a varias recolecciones pasan a la vieja."
+  chart={`
+flowchart LR
+  N["Objeto nuevo"] --> Y["Generación joven<br/>scavenge: rápido y frecuente"]
+  Y -->|"sobrevive dos recolecciones"| O["Generación vieja<br/>mark-sweep-compact: menos frecuente"]
+  Y -->|"ya no se referencia"| F["Memoria liberada"]
+  O -->|"ya no se referencia"| F
+`}
+/>
+
+- **Generación joven:** la mayoría de los objetos muere joven (variables temporales de una request). Se recolecta
+  con un _scavenger_ rápido.
+- **Generación vieja:** objetos que sobreviven (cachés, conexiones, configuración). Se recolecta con
+  _mark-sweep-compact_, mayormente concurrente e incremental para reducir pausas.
+- El límite del heap viejo se ajusta con `--max-old-space-size` (en MB). En contenedores, las versiones recientes de Node.js calculan el
+  tamaño del heap a partir de la memoria disponible (incluido el límite del contenedor), pero conviene dejar margen para la memoria fuera del heap (Buffers,
+  código nativo).
+
+```ts
+const { heapUsed, heapTotal, rss, external } = process.memoryUsage();
+// rss: memoria total del proceso; heapUsed: objetos de JS vivos; external: Buffers y memoria nativa
+```
+
+### Fugas de memoria
+
+En un lenguaje con GC, una fuga es **una referencia que nunca se suelta**: el objeto sigue alcanzable y el GC no
+puede liberarlo.
+
+```ts
+// ❌ Caché sin límite: crece con cada cliente distinto, para siempre
+const scoreCache = new Map<string, Score>();
+export async function getScore(customerId: string): Promise<Score> {
+  const cached = scoreCache.get(customerId);
+  if (cached) return cached;
+  const score = await computeScore(customerId);
+  scoreCache.set(customerId, score);
+  return score;
+}
+
+// ❌ Listener por request sobre un emisor global
+app.get("/events", (request, response) => {
+  globalBus.on("payment", (event) => response.write(serialize(event))); // nunca se quita
+});
+```
+
+| Fuga típica                                  | Corrección                                                               |
+| -------------------------------------------- | ------------------------------------------------------------------------ |
+| Caché `Map` sin límite                       | LRU con tamaño máximo y TTL, o caché externa (Redis)                     |
+| Listeners que no se quitan                   | `off` al cerrar la conexión, `once`, `AbortSignal` en `addEventListener` |
+| `setInterval` que no se limpia               | `clearInterval` en el cierre                                             |
+| Closures que capturan objetos grandes        | Capturar sólo lo necesario                                               |
+| Metadatos asociados a objetos de otro módulo | `WeakMap` (la entrada se libera cuando el objeto clave muere)            |
+
+**Cómo diagnosticar:** observar el heap usado después de cada GC durante un período (si la línea base sube sin
+parar, hay fuga), tomar **heap snapshots** separados en el tiempo (`node --heapsnapshot-signal=SIGUSR2`, o desde
+Chrome DevTools con `--inspect`) y compararlos para ver qué tipo de objeto crece y **qué lo retiene** (la vista
+_Retainers_).
+
+## Comparación con C# y Java
+
+| Aspecto            | .NET                                | Java                                            | Node.js                                                      |
+| ------------------ | ----------------------------------- | ----------------------------------------------- | ------------------------------------------------------------ |
+| Paralelismo de CPU | Threads, `Parallel.For`, `Task.Run` | Threads, `ForkJoinPool`, parallel streams       | Worker threads, procesos                                     |
+| Memoria compartida | Sí, con locks                       | Sí, con `synchronized` y `java.util.concurrent` | No por defecto; mensajes (o `SharedArrayBuffer`)             |
+| Pool de hilos      | ThreadPool del CLR                  | Executors                                       | Thread pool de libuv (sólo para ciertas operaciones nativas) |
+| GC                 | Generacional (gen 0/1/2, LOH)       | Generacional (G1, ZGC...)                       | Generacional (scavenge + mark-sweep-compact)                 |
+| Límite de memoria  | `GCHeapHardLimit`                   | `-Xmx`                                          | `--max-old-space-size`                                       |
+| Diagnóstico        | dotnet-dump, dotnet-gcdump          | Heap dumps, JFR, VisualVM                       | Heap snapshots, `--inspect`, `--cpu-prof`                    |
+
+La diferencia esencial: en .NET y Java un request handler puede calcular en paralelo sin bloquear a los demás
+porque cada request tiene su hilo. En Node.js **todo el JavaScript de todas las requests comparte un hilo**, así
+que el cálculo pesado hay que moverlo explícitamente.
+
+## Errores frecuentes
+
+- **Hacer cálculo pesado en el hilo principal** "porque es sólo un momento" (un `JSON.parse` de 100 MB, un regex con
+  backtracking catastrófico, un bucle de scoring sobre 50.000 filas).
+- **Crear un worker por request.** Usá un pool.
+- **Agrandar `UV_THREADPOOL_SIZE` para "arreglar" la latencia** sin medir qué está saturado.
+- **Cachés en memoria sin límite**, sobre todo indexadas por IDs de usuario o tenant.
+- **Escalar con `cluster` dentro de contenedores** que ya escalan por réplicas.
+- **Fijar `--max-old-space-size` igual al límite del contenedor**: no deja espacio para la memoria nativa.
+
+## Ejercicio interactivo
+
+<KnowledgeCheck
+  id="nodejs.workers-memory.q1"
+  question="Un endpoint de login usa `crypto.scrypt` (asíncrono). Con 200 logins simultáneos la latencia de lecturas de archivos de otro endpoint también sube, aunque el event loop lag es bajo. ¿Por qué?"
+  options={[
+    {
+      text: "Porque scrypt bloquea el event loop.",
+      explanation: "La versión asíncrona no bloquea el event loop; el lag bajo lo confirma.",
+    },
+    {
+      text: "Porque scrypt y fs comparten el thread pool de libuv (4 hilos por defecto) y las tareas hacen cola.",
+      correct: true,
+      explanation: "Correcto. El cuello de botella es el thread pool, no el event loop.",
+    },
+    {
+      text: "Porque el garbage collector está pausando el proceso.",
+      explanation: "Una pausa del GC también subiría el event loop lag.",
+    },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="nodejs.workers-memory.q2"
+  question="Querés que una API Node.js aproveche los 8 núcleos de un servidor para atender más requests. ¿Qué es lo habitual?"
+  options={[
+    {
+      text: "Usar worker threads para cada request.",
+      explanation: "Los workers son para cálculo puntual, no para atender requests completas.",
+    },
+    {
+      text: "Correr varias réplicas del proceso (una por núcleo o varios contenedores) detrás de un balanceador.",
+      correct: true,
+      explanation:
+        "Correcto. Cada proceso tiene su event loop; el orquestador o cluster reparte las conexiones.",
+    },
+    {
+      text: "Subir UV_THREADPOOL_SIZE a 8.",
+      explanation: "El thread pool no ejecuta el JavaScript de las requests.",
+    },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="nodejs.workers-memory.q3"
+  question="El heap usado de un servicio sube un poco después de cada GC, día tras día, hasta que el contenedor se reinicia. ¿Cuál es la causa más probable?"
+  options={[
+    {
+      text: "El GC de V8 está fallando.",
+      explanation:
+        "El GC libera lo que no está referenciado; si algo sigue referenciado, no puede liberarlo.",
+    },
+    {
+      text: "Una referencia que crece sin límite, como una caché sin tamaño máximo o listeners que no se quitan.",
+      correct: true,
+      explanation:
+        "Correcto. Se confirma comparando heap snapshots y revisando qué retiene los objetos que crecen.",
+    },
+    {
+      text: "Falta subir --max-old-space-size.",
+      explanation: "Eso sólo retrasa el reinicio: la memoria seguiría creciendo.",
+    },
+  ]}
+/>

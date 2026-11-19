@@ -1,0 +1,328 @@
+---
+id: nodejs.streams-events
+moduleId: nodejs.internals
+title: "Streams, Buffers, EventEmitter y backpressure"
+description: "Cómo procesar datos grandes sin cargarlos en memoria: Buffers para bytes, EventEmitter como base de la API de Node.js, los cuatro tipos de streams, pipeline, iteración asíncrona y backpressure, con ejemplos de exportaciones CSV y respuestas de LLM en streaming."
+difficulty: intermediate
+order: 2
+objectives:
+  - "Trabajar con Buffers y codificaciones y saber cuándo aparecen en lugar de strings."
+  - "Usar EventEmitter y conocer sus trampas: el evento error y las fugas de listeners."
+  - "Distinguir streams Readable, Writable, Duplex y Transform."
+  - "Explicar el backpressure y por qué pipeline lo maneja correctamente."
+  - "Procesar streams con iteración asíncrona y escribir transformaciones propias."
+prerequisites: ["nodejs.event-loop"]
+estimatedMinutes: 40
+tags: ["streams", "buffer", "eventemitter", "backpressure", "pipeline", "c#", "java"]
+version: "1.0.0"
+comparesWith: ["csharp", "java"]
+references:
+  - title: "Node.js — Stream"
+    url: "https://nodejs.org/api/stream.html"
+  - title: "Node.js — Backpressuring in Streams"
+    url: "https://nodejs.org/en/learn/modules/backpressuring-in-streams"
+  - title: "Node.js — Buffer"
+    url: "https://nodejs.org/api/buffer.html"
+  - title: "Node.js — Events"
+    url: "https://nodejs.org/api/events.html"
+  - title: "MDN — Streams API"
+    url: "https://developer.mozilla.org/en-US/docs/Web/API/Streams_API"
+interviewQuestions:
+  - question: "¿Qué es el backpressure en streams y qué pasa si se ignora?"
+    keyPoints:
+      - "Es el mecanismo por el que un consumidor lento le indica al productor que deje de enviar datos."
+      - "write() devuelve false cuando el buffer interno supera highWaterMark; hay que esperar el evento drain."
+      - "Si se ignora, los datos se acumulan en memoria hasta agotar el heap o degradar el proceso."
+      - "pipeline() y la iteración con for await manejan el backpressure y la propagación de errores automáticamente."
+  - question: "¿Cuándo usarías streams en lugar de leer todo en memoria?"
+    keyPoints:
+      - "Cuando el tamaño de los datos es grande o desconocido: archivos, exportaciones, uploads, respuestas de otros servicios."
+      - "Cuando se quiere empezar a responder antes de tener todo (time to first byte, streaming de LLMs)."
+      - "Mantienen el uso de memoria acotado e independiente del tamaño total."
+  - question: "¿Qué pasa si un EventEmitter emite error y nadie lo escucha?"
+    keyPoints:
+      - "El error se lanza como excepción y, si nadie la captura, termina el proceso."
+      - "Siempre hay que registrar un listener de error o usar APIs que lo propaguen (pipeline, events.once, for await)."
+summary:
+  - "Un Buffer es una secuencia de bytes; se convierte a string con una codificación explícita (utf8, base64, hex)."
+  - "EventEmitter es la base de streams, servidores y sockets; el evento error sin listener tira el proceso."
+  - "Readable produce datos, Writable los consume, Duplex hace ambas cosas y Transform los modifica en el medio."
+  - "El backpressure evita que un productor rápido llene la memoria cuando el consumidor es lento."
+  - "pipeline() conecta streams, respeta el backpressure, propaga errores y destruye todo al fallar."
+  - "for await sobre un Readable es la forma más legible de consumir un stream."
+  - "Los streams permiten memoria constante: procesar 10 GB con unos pocos MB."
+---
+
+## ¿Qué problema resuelve?
+
+Un operador pide exportar todas las deudas de una campaña a CSV: dos millones de filas. La versión ingenua:
+
+```ts
+const debts = await db.query("SELECT * FROM debts WHERE campaign_id = $1", [campaignId]); // 2.000.000 filas en memoria
+const csv = debts.rows.map(toCsvLine).join("\n"); // otra copia completa como string
+response.end(csv); // y una tercera en el buffer de salida
+```
+
+Con filas de 500 bytes, eso es 1 GB por copia. El proceso se queda sin memoria o pasa segundos en el garbage
+collector, y todas las demás requests se degradan. Lo mismo ocurre al subir un archivo grande o al reenviar la
+respuesta de un LLM token por token.
+
+Los **streams** resuelven esto procesando los datos **por partes**: leer un trozo, transformarlo, escribirlo, y
+seguir. La memoria usada depende del tamaño del trozo, no del total.
+
+## Buffers: bytes, no texto
+
+Antes de los streams, una pieza: el **Buffer**. Es una secuencia de bytes de tamaño fijo, la forma en que Node.js
+representa datos binarios (archivos, sockets, criptografía).
+
+```ts
+const buffer = Buffer.from("Pago recibido ✓", "utf8");
+buffer.length; // 17 bytes (el ✓ ocupa 3 bytes en UTF-8), no 15 caracteres
+buffer.toString("base64"); // el mismo contenido codificado en base64
+buffer.toString("hex");
+
+const signature = Buffer.from(receivedSignature, "hex");
+```
+
+- Un Buffer es un `Uint8Array` con métodos extra.
+- Para convertir a texto hay que **elegir la codificación**. Cortar un Buffer UTF-8 en un punto arbitrario puede
+  partir un carácter multibyte; por eso los streams de texto usan `setEncoding("utf8")` o un `TextDecoder`, que
+  manejan los bordes.
+- Es el equivalente a `byte[]` o `Span<byte>` en C# y a `byte[]` o `ByteBuffer` en Java.
+
+## EventEmitter
+
+Casi todo lo que "produce eventos" en Node.js hereda de `EventEmitter`: servidores, sockets, streams, procesos
+hijos. Es el patrón observer integrado en el runtime:
+
+```ts
+import { EventEmitter, once } from "node:events";
+
+class CampaignRunner extends EventEmitter<{
+  progress: [sent: number, total: number];
+  error: [error: Error];
+  done: [];
+}> {}
+
+const runner = new CampaignRunner();
+runner.on("progress", (sent, total) => console.log(`${sent}/${total}`));
+runner.on("error", (error) => logger.error({ error }, "campaign_failed")); // ¡imprescindible!
+
+runner.emit("progress", 10, 100);
+await once(runner, "done"); // esperar un evento como Promise
+```
+
+Dos trampas:
+
+1. **El evento `error` es especial:** si se emite y no hay listeners, se lanza como excepción y, sin `try`,
+   **termina el proceso**.
+2. **Fugas de listeners:** registrar un `on` por request sobre un emisor que vive para siempre acumula listeners y
+   memoria. Node.js avisa con `MaxListenersExceededWarning` (más de 10 por evento). Hay que quitarlos con `off` o
+   usar `once`.
+
+Los listeners se ejecutan **de forma síncrona** al llamar a `emit`, en orden de registro. No es un bus de mensajes
+asíncrono: si un listener tarda, `emit` tarda.
+
+## Los cuatro tipos de streams
+
+| Tipo        | Qué hace                               | Ejemplos                                                               |
+| ----------- | -------------------------------------- | ---------------------------------------------------------------------- |
+| `Readable`  | Produce datos                          | `fs.createReadStream`, body de una request entrante, cursor de la base |
+| `Writable`  | Consume datos                          | `fs.createWriteStream`, la response HTTP, un upload a S3               |
+| `Duplex`    | Lee y escribe (canales independientes) | Un socket TCP                                                          |
+| `Transform` | Duplex que transforma lo que pasa      | Compresión gzip, parseo CSV, cifrado                                   |
+
+<MermaidDiagram
+  caption="Una exportación en streaming: cada trozo recorre la cadena y la memoria usada es constante."
+  chart={`
+flowchart LR
+  DB["Readable<br/>cursor de PostgreSQL"] --> T1["Transform<br/>fila a línea CSV"]
+  T1 --> T2["Transform<br/>gzip"]
+  T2 --> RES["Writable<br/>respuesta HTTP"]
+  RES -.->|"backpressure: buffer lleno, pausa"| DB
+`}
+/>
+
+## Backpressure
+
+¿Qué pasa si la base produce filas más rápido de lo que el cliente HTTP las descarga? Sin control, los datos se
+acumulan en memoria entre ambos. El **backpressure** es el mecanismo que frena al productor:
+
+- Cada Writable tiene un buffer interno con un límite (`highWaterMark`, 64 KiB por defecto en streams de bytes).
+- `writable.write(chunk)` devuelve `false` cuando el buffer superó ese límite: es la señal de "dejá de mandar".
+- Cuando el buffer se vacía, el Writable emite `drain` y el productor puede continuar.
+
+```ts
+// ❌ Ignora el backpressure: si el cliente es lento, todo queda en memoria
+for (const row of rows) {
+  response.write(toCsvLine(row)); // el valor de retorno se descarta
+}
+
+// ✅ Respeta el backpressure manualmente
+for (const row of rows) {
+  if (!response.write(toCsvLine(row))) {
+    await once(response, "drain"); // espera a que el consumidor se ponga al día
+  }
+}
+```
+
+Escribirlo a mano es propenso a errores (también hay que manejar `error` y `close`). Por eso existe `pipeline`.
+
+## pipeline: la forma correcta de conectar streams
+
+```ts
+import { createReadStream, createWriteStream } from "node:fs";
+import { pipeline } from "node:stream/promises";
+import { createGzip } from "node:zlib";
+
+await pipeline(createReadStream("payments.csv"), createGzip(), createWriteStream("payments.csv.gz"));
+```
+
+`pipeline`:
+
+1. Conecta cada stream con el siguiente.
+2. **Respeta el backpressure** en cada eslabón.
+3. **Propaga errores:** si cualquier stream falla, la Promise se rechaza.
+4. **Destruye todos los streams** al fallar, liberando descriptores de archivo y sockets.
+
+El antiguo `a.pipe(b).pipe(c)` no propaga errores ni limpia: un error en el medio deja streams abiertos. En código
+nuevo, siempre `pipeline`.
+
+### Transformaciones propias con generadores
+
+`pipeline` acepta funciones generadoras asíncronas como pasos de transformación, que es la forma más simple de
+escribir un Transform:
+
+```ts
+import { pipeline } from "node:stream/promises";
+
+async function exportCampaignCsv(campaignId: string, response: NodeJS.WritableStream): Promise<void> {
+  await pipeline(
+    db.streamQuery("SELECT id, customer_id, balance_cents FROM debts WHERE campaign_id = $1", [campaignId]),
+    async function* toCsv(rows: AsyncIterable<DebtRow>) {
+      yield "id,customer_id,balance_cents\n";
+      for await (const row of rows) {
+        yield `${row.id},${row.customer_id},${row.balance_cents}\n`;
+      }
+    },
+    response,
+  );
+}
+```
+
+## Iteración asíncrona
+
+Todo `Readable` es un `AsyncIterable`, así que se puede consumir con `for await`, que también respeta el
+backpressure (no pide el siguiente trozo hasta que termina el cuerpo del bucle):
+
+```ts
+import { createInterface } from "node:readline";
+import { createReadStream } from "node:fs";
+
+const lines = createInterface({ input: createReadStream("payments.csv"), crlfDelay: Infinity });
+let total = 0;
+for await (const line of lines) {
+  total += Number.parseInt(line.split(",")[2] ?? "0", 10);
+}
+```
+
+## Web Streams y respuestas de LLM
+
+Además de los streams de Node.js existen los **Web Streams** (`ReadableStream`, `WritableStream`,
+`TransformStream`), el estándar del navegador. `fetch` devuelve un body como Web Stream, y los Route Handlers de
+Next.js responden con Web Streams. Node.js convierte entre ambos con `Readable.fromWeb` y `Readable.toWeb`.
+
+Un caso típico en plataformas de IA: reenviar la respuesta de un modelo **mientras se genera**:
+
+```ts
+export async function POST(request: Request): Promise<Response> {
+  const upstream = await fetch(LLM_URL, {
+    method: "POST",
+    body: JSON.stringify({ messages, stream: true }),
+    signal: request.signal, // si el cliente se va, se corta la llamada al modelo
+  });
+
+  // El body se reenvía trozo a trozo: el usuario ve texto en cuanto llega el primer token
+  return new Response(upstream.body, { headers: { "content-type": "text/event-stream" } });
+}
+```
+
+## Comparación con C# y Java
+
+| Concepto            | .NET                                     | Java                               | Node.js                              |
+| ------------------- | ---------------------------------------- | ---------------------------------- | ------------------------------------ |
+| Bytes               | `byte[]`, `Span<byte>`, `Memory<byte>`   | `byte[]`, `ByteBuffer`             | `Buffer` (`Uint8Array`)              |
+| Flujo de bytes      | `Stream` (`FileStream`, `NetworkStream`) | `InputStream` / `OutputStream`     | `Readable` / `Writable`              |
+| Secuencia asíncrona | `IAsyncEnumerable<T>` + `await foreach`  | Reactive Streams (Flux), `Flow`    | `AsyncIterable` + `for await`        |
+| Backpressure        | `System.IO.Pipelines`, Channels acotados | Reactive Streams (`request(n)`)    | `highWaterMark`, `drain`, `pipeline` |
+| Eventos             | `event` / delegados                      | Listeners, `PropertyChangeSupport` | `EventEmitter`                       |
+
+## Errores frecuentes
+
+- **Leer archivos o resultados grandes completos** con `readFile` o `SELECT *` sin cursor.
+- **Usar `.pipe()` en código nuevo.** No propaga errores ni libera recursos.
+- **Ignorar el valor de retorno de `write`.**
+- **No escuchar `error`** en un EventEmitter o stream creado a mano.
+- **Registrar listeners por request** en un emisor global sin quitarlos.
+- **Decodificar trozos de bytes por separado** con `chunk.toString()`: rompe caracteres multibyte en los bordes.
+- **No cancelar el stream de origen** cuando el cliente se desconecta (usá la señal del request).
+
+## Ejercicio interactivo
+
+<KnowledgeCheck
+  id="nodejs.streams-events.q1"
+  question="Escribís filas a una response con `response.write(line)` en un bucle sin mirar el valor de retorno. El cliente tiene una conexión lenta. ¿Qué pasa?"
+  options={[
+    {
+      text: "Node.js frena el bucle automáticamente.",
+      explanation: "write no bloquea ni frena: devuelve false y sigue aceptando datos en memoria.",
+    },
+    {
+      text: "Los datos se acumulan en el buffer interno y la memoria crece hasta que el cliente los descarga o el proceso se queda sin memoria.",
+      correct: true,
+      explanation: "Correcto. Hay que esperar drain cuando write devuelve false, o usar pipeline.",
+    },
+    {
+      text: "Se pierden las filas que no entran en el buffer.",
+      explanation: "No se pierden: se encolan en memoria, que es justamente el problema.",
+    },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="nodejs.streams-events.q2"
+  question="¿Por qué se prefiere `pipeline(a, b, c)` sobre `a.pipe(b).pipe(c)`?"
+  options={[
+    { text: "Porque es más rápido.", explanation: "La ventaja no es velocidad sino corrección." },
+    {
+      text: "Porque propaga errores de cualquier eslabón y destruye todos los streams al fallar.",
+      correct: true,
+      explanation:
+        "Correcto. Con pipe, un error en el medio deja streams abiertos y la falla puede pasar desapercibida.",
+    },
+    {
+      text: "Porque pipe no respeta el backpressure.",
+      explanation: "pipe sí lo respeta; lo que no hace es manejar errores y limpieza.",
+    },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="nodejs.streams-events.q3"
+  question="Un EventEmitter propio emite `error` y no tiene ningún listener para ese evento. ¿Qué ocurre?"
+  options={[
+    {
+      text: "El evento se ignora.",
+      explanation: "Eso pasa con cualquier otro evento sin listeners, pero error es especial.",
+    },
+    {
+      text: "Se lanza como excepción y, si nadie la captura, termina el proceso.",
+      correct: true,
+      explanation: "Correcto. Todo emisor que pueda emitir error necesita un listener.",
+    },
+    {
+      text: "Se registra un warning y se continúa.",
+      explanation: "El warning es para el exceso de listeners, no para errores sin manejar.",
+    },
+  ]}
+/>

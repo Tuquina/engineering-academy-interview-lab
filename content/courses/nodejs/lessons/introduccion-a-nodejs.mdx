@@ -1,0 +1,411 @@
+---
+id: nodejs.introduction
+moduleId: nodejs.intro
+title: "Introducción a Node.js: qué es, cómo se ejecuta y sus piezas básicas"
+description: "Qué es Node.js, qué problema resolvió y cuándo conviene usarlo; cómo se ejecuta un programa (también en Docker), cómo funcionan package.json, npm y pnpm, módulos ES y CommonJS, el objeto process, los módulos del núcleo y un primer servidor HTTP sin frameworks."
+difficulty: basic
+order: 1
+objectives:
+  - "Explicar qué es Node.js y en qué tipo de cargas de trabajo conviene usarlo."
+  - "Ejecutar un programa Node.js localmente o en un contenedor, eligiendo una versión LTS."
+  - "Leer y escribir un package.json: dependencias, scripts, type y engines."
+  - "Distinguir módulos ES de CommonJS y saber cómo conviven."
+  - "Usar process, variables de entorno y módulos del núcleo como fs, path y crypto."
+  - "Escribir un servidor HTTP mínimo con node:http y ubicar a los frameworks principales."
+prerequisites: ["typescript.modern-javascript"]
+estimatedMinutes: 40
+tags: ["nodejs", "introducción", "npm", "pnpm", "módulos", "http", "c#", "java"]
+version: "1.0.0"
+comparesWith: ["csharp", "java"]
+references:
+  - title: "Node.js — Introduction to Node.js"
+    url: "https://nodejs.org/en/learn/getting-started/introduction-to-nodejs"
+  - title: "Node.js — Releases (LTS)"
+    url: "https://nodejs.org/en/about/previous-releases"
+  - title: "Node.js — Modules: ECMAScript modules"
+    url: "https://nodejs.org/api/esm.html"
+  - title: "Node.js — process"
+    url: "https://nodejs.org/api/process.html"
+  - title: "npm Docs — package.json"
+    url: "https://docs.npmjs.com/cli/configuring-npm/package-json"
+  - title: "pnpm — Motivation"
+    url: "https://pnpm.io/motivation"
+  - title: "Docker Hub — node (imagen oficial)"
+    url: "https://hub.docker.com/_/node"
+interviewQuestions:
+  - question: "¿Qué es Node.js y para qué tipo de aplicaciones es una buena elección?"
+    keyPoints:
+      - "Un runtime de JavaScript fuera del navegador: V8 más libuv más una librería estándar orientada a I/O."
+      - "Modelo de un hilo de JavaScript con I/O no bloqueante: atiende muchas conexiones concurrentes con poca memoria."
+      - "Bueno para APIs, gateways, BFFs, tiempo real, streaming y servicios que integran muchas APIs externas."
+      - "No es la mejor opción para cómputo intensivo sostenido en CPU sin delegarlo a workers u otros servicios."
+  - question: "¿Qué diferencias hay entre módulos ES y CommonJS en Node.js?"
+    keyPoints:
+      - "ESM usa import/export, se carga de forma asíncrona y es el estándar del lenguaje; CommonJS usa require/module.exports y es síncrono."
+      - "Node decide por la extensión (.mjs/.cjs) o por type en package.json."
+      - "ESM puede importar CommonJS; CommonJS sólo carga ESM con import() dinámico o con require(esm) en versiones recientes y sin top-level await."
+      - "En ESM no existen __dirname ni require: se usa import.meta.dirname e import.meta.url."
+  - question: "¿Para qué sirve el lockfile y por qué se commitea?"
+    keyPoints:
+      - "Fija las versiones exactas de todo el árbol de dependencias, incluidas las transitivas."
+      - "Garantiza instalaciones reproducibles en CI y en todo el equipo."
+      - "En CI se instala en modo frozen (npm ci, pnpm install --frozen-lockfile) para fallar si no coincide."
+summary:
+  - "Node.js = V8 (ejecuta JavaScript) + libuv (I/O asíncrona y event loop) + librería estándar (fs, http, crypto...)."
+  - "Un hilo ejecuta JavaScript; la I/O se delega. Ideal para muchas conexiones con poco cómputo cada una."
+  - "Usá versiones LTS pares en producción y fijá la versión (engines, .nvmrc o la imagen de Docker)."
+  - "package.json declara dependencias, scripts y el tipo de módulos; el lockfile fija el árbol exacto."
+  - "pnpm ahorra disco con un store compartido y evita dependencias fantasma con node_modules estricto."
+  - "ESM (import/export) es el estándar; CommonJS (require) sigue en código existente."
+  - "process expone env, argv, exit codes y señales; las variables de entorno siempre son strings."
+  - "node:http alcanza para entender el modelo; en producción se usa un framework (Fastify, Express, NestJS, Next.js)."
+---
+
+## Qué vas a aprender en este curso
+
+Node.js es el runtime en el que corre el backend del stack de este programa (y también Next.js en el servidor).
+El curso tiene cuatro módulos:
+
+| Módulo               | Qué vas a poder hacer                                                                                |
+| -------------------- | ---------------------------------------------------------------------------------------------------- |
+| Introducción         | Ejecutar programas, manejar paquetes y módulos, escribir un servidor HTTP mínimo.                    |
+| Fundamentos internos | Predecir el event loop, usar streams y workers, entender la memoria y el garbage collector.          |
+| Backend profesional  | Diseñar APIs por capas, autenticar y autorizar, recibir webhooks idempotentes y observar el sistema. |
+| Performance          | Medir, encontrar cuellos de botella y escalar horizontalmente.                                       |
+
+Esta lección asume que leíste la introducción de TypeScript y la de JavaScript moderno: no repetimos sintaxis.
+
+## Qué es Node.js
+
+Hasta 2009, JavaScript sólo se ejecutaba en navegadores. **Node.js** tomó el motor V8 de Chrome y lo combinó con
+una librería de I/O asíncrona en C (**libuv**) y una librería estándar para servidores. El resultado es un runtime
+para ejecutar JavaScript en cualquier máquina.
+
+Su apuesta de diseño fue diferente a la de los servidores de la época: en lugar de **un hilo por conexión**, usar
+**un único hilo de JavaScript** y no bloquearlo nunca esperando I/O. Mientras una consulta a la base está en vuelo,
+el hilo atiende otras requests; cuando la respuesta llega, se ejecuta el callback correspondiente.
+
+<MermaidDiagram
+  caption="Las piezas de Node.js: el código de la aplicación usa la librería estándar, que se apoya en V8 y libuv."
+  chart={`
+flowchart TD
+  APP["Tu aplicación<br/>JavaScript o TypeScript"] --> STD["Librería estándar de Node.js<br/>http, fs, crypto, stream, net"]
+  STD --> V8["V8<br/>ejecuta JavaScript y gestiona la memoria"]
+  STD --> UV["libuv<br/>event loop, I/O asíncrona, thread pool"]
+  UV --> OS["Sistema operativo<br/>epoll, kqueue, IOCP"]
+`}
+/>
+
+El funcionamiento interno (fases del event loop, microtasks, thread pool) se estudia en detalle en la lección
+_El event loop de Node.js_. Por ahora alcanza con esta idea: **mucha I/O concurrente, poco cómputo por request**.
+
+### Cuándo conviene y cuándo no
+
+| Conviene                                                        | Conviene menos                                                        |
+| --------------------------------------------------------------- | --------------------------------------------------------------------- |
+| APIs REST y GraphQL, BFFs para un frontend                      | Cómputo intensivo y sostenido (video, ML, cálculos numéricos)         |
+| Servicios que orquestan muchas APIs externas (LLMs, pagos, SMS) | Procesos que necesitan paralelismo de CPU fino con memoria compartida |
+| Tiempo real: WebSockets, streaming, Server-Sent Events          |                                                                       |
+| Un mismo lenguaje en frontend y backend (tipos compartidos)     |                                                                       |
+
+Una plataforma de agentes de IA encaja muy bien: la mayor parte del tiempo de una request es **espera** (al modelo,
+a la base, al proveedor de mensajería), no cálculo.
+
+## Ejecutar Node.js
+
+Node.js publica una versión mayor cada seis meses. **Las versiones pares pasan a LTS** (soporte de largo plazo, unos
+30 meses) y son las que se usan en producción. Las impares son de corta vida.
+
+```bash
+node --version          # versión instalada
+node app.js             # ejecutar un archivo
+node --watch app.js     # reiniciar al guardar (modo desarrollo)
+node app.ts             # versiones recientes ejecutan TypeScript quitando los tipos
+node                    # REPL interactivo
+```
+
+En este proyecto no se instala nada en la máquina: todo corre en contenedores con la **imagen oficial** de Node.js.
+El equivalente a instalar el SDK es fijar la imagen:
+
+```bash
+# Ejecutar un script con Node 24 sin instalar nada
+docker run --rm -v "$PWD":/app -w /app node:24-alpine node app.js
+```
+
+Fijar la versión (en la imagen de Docker, en `engines` del `package.json` o en un `.nvmrc`) evita el clásico
+"en mi máquina funciona" por diferencias de runtime.
+
+## package.json, dependencias y scripts
+
+Cada proyecto tiene un `package.json`, el equivalente a un `.csproj` o un `pom.xml`:
+
+```json
+{
+  "name": "collections-api",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=24" },
+  "scripts": {
+    "dev": "node --watch src/main.ts",
+    "build": "tsc",
+    "test": "vitest run",
+    "start": "node dist/main.js"
+  },
+  "dependencies": {
+    "fastify": "5.6.1",
+    "zod": "4.1.12"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3",
+    "vitest": "3.2.4"
+  }
+}
+```
+
+| Campo             | Para qué sirve                                                                                   |
+| ----------------- | ------------------------------------------------------------------------------------------------ |
+| `type: "module"`  | Los archivos `.js` son módulos ES (si no, CommonJS).                                             |
+| `scripts`         | Comandos del proyecto: `pnpm dev`, `pnpm test`. Equivalen a targets de Maven o tareas de Gradle. |
+| `dependencies`    | Necesarias en producción.                                                                        |
+| `devDependencies` | Sólo para desarrollo y build: compilador, tests, linters.                                        |
+| `engines`         | Versión de Node.js esperada.                                                                     |
+
+Las versiones siguen **semver** (`MAYOR.MENOR.PARCHE`). Un rango como `^5.6.1` acepta cualquier `5.x.y` posterior;
+una versión exacta (`5.6.1`) no acepta nada más. El **lockfile** (`pnpm-lock.yaml`, `package-lock.json`) registra
+las versiones exactas de **todo** el árbol, incluidas las dependencias de las dependencias, y se commitea siempre.
+
+### npm y pnpm
+
+**npm** viene con Node.js. **pnpm** es una alternativa más rápida y estricta que usa este proyecto:
+
+- Guarda cada versión de cada paquete **una sola vez** en un store global y la enlaza en `node_modules`.
+- Su `node_modules` es **estricto**: sólo podés importar lo que declaraste. Con npm, una dependencia transitiva
+  queda accesible "por accidente" (dependencia fantasma) y el código se rompe cuando alguien la actualiza.
+
+```bash
+pnpm install                      # instala según el lockfile
+pnpm add zod                      # agrega una dependencia
+pnpm add -D vitest                # agrega una dependencia de desarrollo
+pnpm install --frozen-lockfile    # en CI: falla si el lockfile no coincide
+pnpm run test                     # ejecuta un script (o simplemente: pnpm test)
+```
+
+<Callout type="warning" title="Cada dependencia es código de terceros que se ejecuta con tus permisos">
+  Los paquetes pueden ejecutar scripts al instalarse. Revisá qué agregás, preferí paquetes mantenidos, fijá
+  versiones, usá el lockfile y auditá (`pnpm audit`). Los ataques a la cadena de suministro de npm son reales.
+</Callout>
+
+## Módulos ES y CommonJS
+
+Node.js nació con su propio sistema de módulos, **CommonJS**. Después el lenguaje estandarizó los **módulos ES**.
+Hoy conviven:
+
+```js
+// CommonJS (código existente, archivos .cjs o sin "type": "module")
+const { readFile } = require("node:fs/promises");
+module.exports = { loadConfig };
+
+// Módulos ES (el estándar, archivos .mjs o con "type": "module")
+import { readFile } from "node:fs/promises";
+export async function loadConfig() {}
+```
+
+| Aspecto                        | CommonJS                         | Módulos ES                                    |
+| ------------------------------ | -------------------------------- | --------------------------------------------- |
+| Sintaxis                       | `require`, `module.exports`      | `import`, `export`                            |
+| Carga                          | Síncrona, en tiempo de ejecución | Asíncrona, analizada antes de ejecutar        |
+| `await` en el nivel superior   | No                               | Sí                                            |
+| Ruta del archivo actual        | `__dirname`, `__filename`        | `import.meta.dirname`, `import.meta.filename` |
+| Extensión en imports relativos | Opcional                         | Obligatoria (`./config.js`)                   |
+
+Para proyectos nuevos: **módulos ES**. Los módulos del núcleo se importan con el prefijo `node:` (`node:fs`,
+`node:http`) para dejar claro que no son paquetes de npm.
+
+## process: entorno, argumentos y ciclo de vida
+
+`process` es un objeto global con información y control del proceso actual:
+
+```ts
+process.env.DATABASE_URL; // string | undefined: TODAS las variables de entorno son strings
+process.argv; // ["/usr/local/bin/node", "/app/script.js", "--dry-run"]
+process.exitCode = 1; // código de salida al terminar (preferible a process.exit())
+process.cwd(); // directorio de trabajo
+process.memoryUsage(); // memoria del proceso
+
+// Apagado ordenado: Docker y Kubernetes envían SIGTERM antes de matar el contenedor
+process.on("SIGTERM", async () => {
+  await server.close(); // deja de aceptar conexiones y termina las que están en curso
+  await db.end(); // cierra el pool de conexiones
+});
+```
+
+Las variables de entorno se validan **al iniciar** con un esquema (ver _APIs type-safe_ en el curso de
+TypeScript). Un servicio que arranca sin `DATABASE_URL` debe fallar en el arranque, no en la primera request.
+
+## Módulos del núcleo
+
+Node.js trae una librería estándar amplia; muchas tareas no necesitan dependencias:
+
+| Módulo                    | Uso                                                    |
+| ------------------------- | ------------------------------------------------------ |
+| `node:fs/promises`        | Archivos con Promises                                  |
+| `node:path`               | Rutas portables (`path.join`, `path.resolve`)          |
+| `node:http`, `node:https` | Servidores y clientes HTTP de bajo nivel               |
+| `node:crypto`             | Hashes, HMAC, UUIDs (`randomUUID`), comparación segura |
+| `node:stream`             | Streams y `pipeline`                                   |
+| `node:events`             | `EventEmitter`                                         |
+| `node:timers/promises`    | `setTimeout` con Promises y cancelación                |
+| `node:worker_threads`     | Hilos para cómputo intensivo                           |
+| `node:test`               | Runner de tests integrado                              |
+
+Además, Node.js moderno incluye `fetch`, `AbortController`, `URL`, `structuredClone` y `WebSocket` como globales,
+igual que el navegador.
+
+```ts
+import { readFile } from "node:fs/promises";
+import path from "node:path";
+import { createHmac, randomUUID } from "node:crypto";
+
+const configPath = path.join(import.meta.dirname, "config.json");
+const config: unknown = JSON.parse(await readFile(configPath, "utf8")); // top-level await en ESM
+
+const requestId = randomUUID();
+const signature = createHmac("sha256", "secreto").update("payload").digest("hex");
+```
+
+## Primer servidor HTTP sin frameworks
+
+Para entender el modelo, un servidor con `node:http` puro:
+
+```ts
+import { createServer } from "node:http";
+
+const server = createServer(async (request, response) => {
+  // Un solo callback recibe TODAS las requests; el hilo nunca espera bloqueado.
+  if (request.method === "GET" && request.url === "/health") {
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify({ status: "ok" }));
+    return;
+  }
+
+  response.writeHead(404, { "content-type": "application/json" });
+  response.end(JSON.stringify({ error: "not_found" }));
+});
+
+server.listen(3000, () => console.log("Escuchando en http://localhost:3000"));
+```
+
+<FlowDiagram
+  steps={[
+    { title: "Conexión entrante", detail: "libuv notifica al event loop que hay una request." },
+    {
+      title: "Callback del servidor",
+      detail: "Se ejecuta tu función con request y response.",
+      tone: "runtime",
+    },
+    {
+      title: "await de I/O",
+      detail: "Consulta a la base o a una API: el hilo queda libre para otras requests.",
+    },
+    { title: "Respuesta", detail: "Cuando la I/O termina, el callback continúa y escribe la respuesta." },
+  ]}
+  caption="Un único hilo atiende muchas requests intercalando sus callbacks mientras esperan I/O."
+/>
+
+No hay router, ni parseo del body, ni validación, ni manejo de errores: eso es lo que aportan los frameworks.
+
+### Frameworks
+
+| Framework   | Estilo                                                               | Analogía                 |
+| ----------- | -------------------------------------------------------------------- | ------------------------ |
+| **Express** | Minimalista, middlewares; el más difundido y antiguo                 | Minimal APIs, Javalin    |
+| **Fastify** | Rápido, con validación por esquema, plugins y tipado                 | Minimal APIs, Javalin    |
+| **NestJS**  | Opinado: módulos, controladores, DI con decoradores                  | ASP.NET MVC, Spring Boot |
+| **Next.js** | Framework full stack de React; sus Route Handlers son endpoints HTTP | ASP.NET con Razor/Blazor |
+
+La arquitectura de este proyecto prevé **Route Handlers de Next.js** para su backend (cuando llegue la persistencia
+en servidor), con la lógica en casos de uso fuera del framework: el handler sólo traduce HTTP.
+
+## Comparación con C# y Java
+
+| Aspecto                | .NET                            | Java                         | Node.js                                  |
+| ---------------------- | ------------------------------- | ---------------------------- | ---------------------------------------- |
+| Runtime                | CLR                             | JVM                          | V8 + libuv                               |
+| Modelo de concurrencia | Thread pool + async/await       | Threads (y virtual threads)  | Un hilo de JS + I/O asíncrona            |
+| Gestor de paquetes     | NuGet                           | Maven Central (Maven/Gradle) | npm registry (npm, pnpm, yarn)           |
+| Archivo de proyecto    | `.csproj`                       | `pom.xml`, `build.gradle`    | `package.json`                           |
+| Lockfile               | `packages.lock.json` (opcional) | Gradle lockfiles (opcional)  | `pnpm-lock.yaml` (estándar, obligatorio) |
+| Librería estándar      | Muy amplia (BCL)                | Muy amplia (JDK)             | Orientada a I/O; el resto viene de npm   |
+| Framework web típico   | ASP.NET Core                    | Spring Boot                  | Fastify, Express, NestJS, Next.js        |
+
+La diferencia cultural más grande: el ecosistema de npm es enorme y fragmentado. Donde .NET o Java traen algo en la
+librería estándar o en un framework dominante, en Node.js hay que **elegir** paquetes, y cada dependencia agrega
+superficie de mantenimiento y de seguridad.
+
+## Errores frecuentes
+
+- **Usar versiones impares o sin fijar** en producción. Usá LTS y fijá la versión.
+- **No commitear el lockfile** o instalar en CI sin modo frozen.
+- **Mezclar CommonJS y ESM sin entender la diferencia**, y "arreglarlo" con configuraciones al azar.
+- **Leer `process.env` por todo el código** sin validar al inicio.
+- **No manejar `SIGTERM`.** El orquestador mata el proceso con requests en vuelo y conexiones abiertas.
+- **Hacer cómputo pesado en el hilo principal** (lo vemos en la lección del event loop).
+- **Agregar una dependencia para cada cosa pequeña.** Cada paquete es mantenimiento y riesgo.
+
+## Ejercicio interactivo
+
+<KnowledgeCheck
+  id="nodejs.introduction.q1"
+  question="Una plataforma pasa el 90 % del tiempo de cada request esperando a un LLM, a la base y a un proveedor de SMS. ¿Por qué Node.js encaja bien?"
+  options={[
+    {
+      text: "Porque ejecuta JavaScript en paralelo en todos los núcleos.",
+      explanation: "Node.js ejecuta JavaScript en un solo hilo por proceso.",
+    },
+    {
+      text: "Porque mientras una request espera I/O, el mismo hilo atiende otras: mucha concurrencia con poca memoria.",
+      correct: true,
+      explanation: "Correcto. Es el caso ideal: trabajo dominado por espera, no por cómputo.",
+    },
+    {
+      text: "Porque las llamadas a APIs externas son más rápidas desde Node.js.",
+      explanation: "La latencia de la red no depende del runtime.",
+    },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="nodejs.introduction.q2"
+  question="En un proyecto con `type: 'module'`, ¿cómo obtenés el directorio del archivo actual?"
+  options={[
+    { text: "`__dirname`", explanation: "No existe en módulos ES; es de CommonJS." },
+    {
+      text: "`import.meta.dirname`",
+      correct: true,
+      explanation: "Correcto. En ESM se usan import.meta.dirname, import.meta.filename e import.meta.url.",
+    },
+    {
+      text: "`process.cwd()`",
+      explanation: "Eso es el directorio de trabajo del proceso, no el del archivo.",
+    },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="nodejs.introduction.q3"
+  question="¿Qué valor tiene `process.env.MAX_RETRIES` si la variable se definió como `MAX_RETRIES=3`?"
+  options={[
+    { text: "El número `3`.", explanation: "Las variables de entorno siempre llegan como strings." },
+    {
+      text: "El string `'3'`.",
+      correct: true,
+      explanation:
+        "Correcto. Hay que convertirlo y validarlo (por ejemplo con z.coerce.number()) al iniciar.",
+    },
+    {
+      text: "`undefined`, porque hay que importarla.",
+      explanation: "process.env está disponible sin imports.",
+    },
+  ]}
+/>
