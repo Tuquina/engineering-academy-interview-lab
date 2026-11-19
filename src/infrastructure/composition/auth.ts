@@ -5,6 +5,7 @@ import {
   DrizzleSessionRepository,
   DrizzleUserRepository,
 } from "@/modules/auth/infrastructure/drizzle-auth-repositories";
+import { DrizzleAttemptLimiter } from "@/modules/auth/infrastructure/drizzle-attempt-limiter";
 import { GithubOAuthClient } from "@/modules/auth/infrastructure/github-oauth";
 import type { User } from "@/modules/auth/domain/user";
 import { SlidingWindowLimiter } from "../ai/request-guard";
@@ -55,11 +56,19 @@ export function getAuthCapabilities() {
   };
 }
 
-/** Intentos de inicio de sesión por IP y email: frena la fuerza bruta sin bloquear cuentas ajenas. */
-export const loginLimiter = new SlidingWindowLimiter(
-  Math.max(1, Number(process.env.AUTH_MAX_ATTEMPTS) || 10),
-  15 * 60_000,
-);
+const MAX_ATTEMPTS = Math.max(1, Number(process.env.AUTH_MAX_ATTEMPTS) || 10);
+const ATTEMPT_WINDOW_MS = 15 * 60_000;
+const memoryLimiter = new SlidingWindowLimiter(MAX_ATTEMPTS, ATTEMPT_WINDOW_MS);
+
+/**
+ * Registra un intento de login o registro (por IP y email): frena la fuerza bruta sin bloquear cuentas ajenas.
+ * Con base de datos el conteo se comparte entre instancias (necesario en Vercel); devuelve los ms a esperar o 0.
+ */
+export async function takeAuthAttempt(key: string): Promise<number> {
+  const db = getDatabase();
+  if (!db) return memoryLimiter.take(key, Date.now());
+  return new DrizzleAttemptLimiter(db, MAX_ATTEMPTS, ATTEMPT_WINDOW_MS).take(key);
+}
 
 export function clientKey(request: Request): string {
   return request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || "local";

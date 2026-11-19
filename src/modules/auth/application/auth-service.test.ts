@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { createTestDatabase } from "../../../../tests/support/test-database";
 import { RandomTokenService, ScryptPasswordHasher } from "../infrastructure/crypto-adapters";
 import { DrizzleSessionRepository, DrizzleUserRepository } from "../infrastructure/drizzle-auth-repositories";
-import { passwordProblem, resolveRole, shouldRenew } from "../domain/user";
+import { mayCreateFirstAccount, passwordProblem, resolveRole, shouldRenew } from "../domain/user";
 import { AuthError, AuthService, type AuthConfig } from "./auth-service";
 
 describe("dominio de usuarios", () => {
@@ -18,6 +18,15 @@ describe("dominio de usuarios", () => {
     expect(resolveRole({ email: "Admin@X.dev", githubLogin: null }, policy, false)).toBe("admin");
     expect(resolveRole({ email: null, githubLogin: "OctoCat" }, policy, false)).toBe("admin");
     expect(resolveRole({ email: "a@b.c", githubLogin: null }, policy, false)).toBe("user");
+  });
+
+  it("si hay administradores configurados, sólo ellos pueden crear la primera cuenta", () => {
+    const open = { adminEmails: [], adminGithubLogins: [] };
+    const policy = { adminEmails: ["admin@x.dev"], adminGithubLogins: ["octocat"] };
+    expect(mayCreateFirstAccount({ email: "quien@sea.dev", githubLogin: null }, open)).toBe(true);
+    expect(mayCreateFirstAccount({ email: "intruso@x.dev", githubLogin: null }, policy)).toBe(false);
+    expect(mayCreateFirstAccount({ email: "ADMIN@x.dev", githubLogin: null }, policy)).toBe(true);
+    expect(mayCreateFirstAccount({ email: null, githubLogin: "octocat" }, policy)).toBe(true);
   });
 
   it("renueva la sesión cuando le quedan pocos días", () => {
@@ -124,4 +133,32 @@ describe("AuthService contra PostgreSQL (PGlite)", () => {
     expect(await service.authenticate(session.token)).toBeNull();
     expect(await service.authenticate("token-inventado-que-no-existe-en-la-base")).toBeNull();
   });
+});
+
+describe("primera cuenta en una instalación pública (PGlite)", () => {
+  it("con ADMIN_EMAILS configurado, nadie más puede quedarse con la administración", async () => {
+    const test = await createTestDatabase();
+    try {
+      const service = new AuthService(
+        new DrizzleUserRepository(test.db),
+        new DrizzleSessionRepository(test.db),
+        new ScryptPasswordHasher(),
+        new RandomTokenService(),
+        { adminEmails: ["duenio@example.com"], adminGithubLogins: [], allowSignup: false },
+      );
+      await expect(
+        service.register(
+          { email: "intruso@example.com", password: "una frase larga y segura", displayName: "" },
+          null,
+        ),
+      ).rejects.toMatchObject({ code: "signup_closed" });
+      const owner = await service.register(
+        { email: "Duenio@Example.com", password: "una frase larga y segura", displayName: "" },
+        null,
+      );
+      expect(owner.user.role).toBe("admin");
+    } finally {
+      await test.close();
+    }
+  }, 30_000);
 });

@@ -1,5 +1,6 @@
 import {
   isValidEmail,
+  mayCreateFirstAccount,
   normalizeEmail,
   passwordProblem,
   resolveRole,
@@ -115,9 +116,7 @@ export class AuthService {
     const problem = passwordProblem(input.password);
     if (problem) throw new AuthError("invalid_input", problem);
     const displayName = input.displayName.trim().slice(0, 80) || email.split("@")[0]!;
-    if (!this.config.allowSignup && (await this.users.count()) > 0) {
-      throw new AuthError("signup_closed", "El registro está cerrado en esta instalación.");
-    }
+    await this.assertCanSignUp({ email, githubLogin: null });
     if (await this.users.findByEmail(email)) {
       throw new AuthError("already_exists", "Ya existe una cuenta con ese email.");
     }
@@ -161,9 +160,7 @@ export class AuthService {
       });
       return this.issue(await this.syncRole(linked), userAgent);
     }
-    if (!this.config.allowSignup && (await this.users.count()) > 0) {
-      throw new AuthError("signup_closed", "El registro está cerrado en esta instalación.");
-    }
+    await this.assertCanSignUp({ email, githubLogin: profile.login });
     const created = await this.users.create(
       {
         email,
@@ -206,6 +203,20 @@ export class AuthService {
   }
 
   /** La configuración de admins puede cambiar: se aplica en cada inicio de sesión (sólo para promover). */
+  /** Registro cerrado: sólo la primera cuenta, y si hay administradores configurados, sólo uno de ellos. */
+  private async assertCanSignUp(identity: { email: string | null; githubLogin: string | null }) {
+    if (this.config.allowSignup) return;
+    if ((await this.users.count()) > 0) {
+      throw new AuthError("signup_closed", "El registro está cerrado en esta instalación.");
+    }
+    if (!mayCreateFirstAccount(identity, this.config)) {
+      throw new AuthError(
+        "signup_closed",
+        "La primera cuenta de esta instalación está reservada para el administrador configurado.",
+      );
+    }
+  }
+
   private async syncRole(user: StoredUser): Promise<StoredUser> {
     const configured = resolveRole({ email: user.email, githubLogin: user.githubLogin }, this.config, false);
     if (configured === "admin" && user.role !== "admin") return this.users.update(user.id, { role: "admin" });

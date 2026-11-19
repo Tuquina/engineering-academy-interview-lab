@@ -1,4 +1,9 @@
-import { clientKey, getAuthService, loginLimiter, setSessionCookie } from "@/infrastructure/composition/auth";
+import {
+  clientKey,
+  getAuthService,
+  setSessionCookie,
+  takeAuthAttempt,
+} from "@/infrastructure/composition/auth";
 import { PERSISTENCE_DISABLED, authErrorResponse } from "@/infrastructure/http/auth-responses";
 import { isSameOrigin, jsonError, jsonResponse, readJson } from "@/infrastructure/http/same-origin";
 import { loginSchema } from "@/modules/auth/application/auth-schemas";
@@ -12,10 +17,7 @@ export async function POST(request: Request) {
   if (!body.ok) return body.response;
   const input = loginSchema.safeParse(body.data);
   if (!input.success) return jsonError(400, "Completá email y contraseña.");
-  const wait = loginLimiter.take(
-    `login:${clientKey(request)}:${normalizeEmail(input.data.email)}`,
-    Date.now(),
-  );
+  const wait = await takeAuthAttempt(`login:${clientKey(request)}:${normalizeEmail(input.data.email)}`);
   if (wait > 0) {
     return jsonError(429, "Demasiados intentos. Probá en unos minutos.", {
       "retry-after": String(Math.ceil(wait / 1000)),

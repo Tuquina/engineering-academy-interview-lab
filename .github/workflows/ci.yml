@@ -1,0 +1,41 @@
+# Integración continua: los mismos contenedores que en local (ADR-0001), así CI y la PC no divergen.
+# Vercel despliega por su cuenta cada push a `main`; este workflow verifica que ese código pase los checks.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Typecheck, lint, tests y build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: pnpm check en el contenedor de desarrollo
+        run: docker compose run --rm --no-deps app sh -c "pnpm install --frozen-lockfile && pnpm format:check && pnpm check"
+
+  e2e:
+    name: E2E (Playwright + PostgreSQL efímero)
+    runs-on: ubuntu-latest
+    needs: check
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Playwright contra el build de producción
+        run: docker compose --profile e2e run --rm e2e
+      - name: Logs del servidor si falla
+        if: failure()
+        run: docker compose --profile e2e logs web-e2e --tail 200
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: playwright-report
+          retention-days: 7

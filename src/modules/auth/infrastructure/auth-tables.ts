@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { check, index, pgEnum, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
+import { check, index, integer, pgEnum, pgTable, text, timestamp, uuid } from "drizzle-orm/pg-core";
 
 /** Tablas del módulo de autenticación (MASTER_PROMPT §28: Users y sesiones). */
 
@@ -36,4 +36,18 @@ export const sessions = pgTable(
     userAgent: text("user_agent"),
   },
   (t) => [index("sessions_user_idx").on(t.userId), index("sessions_expires_idx").on(t.expiresAt)],
+);
+
+/**
+ * Intentos de inicio de sesión y registro por ventana fija. Vive en la base (no en memoria) para que el límite valga
+ * entre todas las instancias de un despliegue serverless. La clave se guarda hasheada: no conserva IPs ni emails.
+ */
+export const authAttempts = pgTable(
+  "auth_attempts",
+  {
+    keyHash: text("key_hash").primaryKey(),
+    windowStart: timestamp("window_start", { withTimezone: true }).notNull(),
+    count: integer("count").notNull(),
+  },
+  (t) => [index("auth_attempts_window_idx").on(t.windowStart)],
 );

@@ -1,4 +1,9 @@
-import { clientKey, getAuthService, loginLimiter, setSessionCookie } from "@/infrastructure/composition/auth";
+import {
+  clientKey,
+  getAuthService,
+  setSessionCookie,
+  takeAuthAttempt,
+} from "@/infrastructure/composition/auth";
 import { PERSISTENCE_DISABLED, authErrorResponse } from "@/infrastructure/http/auth-responses";
 import { isSameOrigin, jsonError, jsonResponse, readJson } from "@/infrastructure/http/same-origin";
 import { registerSchema } from "@/modules/auth/application/auth-schemas";
@@ -8,7 +13,7 @@ export async function POST(request: Request) {
   const service = getAuthService();
   if (!service) return jsonError(503, PERSISTENCE_DISABLED);
   if (!isSameOrigin(request)) return jsonError(403, "Origen no permitido.");
-  if (loginLimiter.take(`register:${clientKey(request)}`, Date.now()) > 0) {
+  if ((await takeAuthAttempt(`register:${clientKey(request)}`)) > 0) {
     return jsonError(429, "Demasiados intentos. Probá en unos minutos.");
   }
   const body = await readJson(request, 10_000);

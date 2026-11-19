@@ -87,3 +87,16 @@ export function resolveRole(
     return "admin";
   return "user";
 }
+
+/**
+ * Quién puede crear la **primera** cuenta (que será admin) cuando el registro está cerrado. Si la instalación
+ * configura administradores (`ADMIN_EMAILS` o `ADMIN_GITHUB_LOGINS`), sólo ellos: en un servidor público nadie puede
+ * adelantarse y quedarse con la administración. Sin configuración (uso local), cualquiera, como hasta ahora.
+ */
+export function mayCreateFirstAccount(
+  identity: { email: string | null; githubLogin: string | null },
+  policy: RolePolicy,
+): boolean {
+  if (policy.adminEmails.length === 0 && policy.adminGithubLogins.length === 0) return true;
+  return resolveRole(identity, policy, false) === "admin";
+}
