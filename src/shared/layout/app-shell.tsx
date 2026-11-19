@@ -12,11 +12,14 @@ import { ThemeToggle } from "./theme-toggle";
 export function AppShell({
   courses,
   search,
+  account,
   children,
 }: {
   courses: readonly CourseNavLink[];
   /** Buscador global; se inyecta como slot para que el layout compartido no dependa de módulos de negocio. */
   search: ReactNode;
+  /** Acceso a la cuenta (slot: el layout compartido no depende del módulo de autenticación). */
+  account: ReactNode;
   children: ReactNode;
 }) {
   return (
@@ -41,7 +44,7 @@ export function AppShell({
           </div>
           <div className="flex min-w-0 flex-1 justify-center px-2">{search}</div>
           <div className="flex items-center gap-1">
-            <span className="text-muted hidden text-xs xl:inline">Modo invitado · progreso local</span>
+            {account}
             <ThemeToggle />
           </div>
         </header>

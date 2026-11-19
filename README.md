@@ -13,8 +13,24 @@ Engineering**: TypeScript, Node.js, React, Next.js, arquitectura, System Design,
 Sólo **Docker** (con Docker Compose). No hace falta instalar Node.js ni pnpm en el equipo: todo el toolchain corre en
 contenedores ([ADR-0001](docs/adr/0001-docker-only-local-toolchain.md)).
 
-No hay variables de entorno obligatorias: todo funciona sin servicios externos (modo invitado con progreso en
-`localStorage`) y el AI Agents Lab usa un proveedor local determinista que no necesita API key.
+No hay variables de entorno obligatorias. `docker compose up app` levanta también **PostgreSQL 17** local (volumen
+`pgdata`, expuesto en `127.0.0.1:55432`, usuario y base `eal`) y aplica las migraciones. Sin `DATABASE_URL` (por
+ejemplo, en un despliegue sin base) todo sigue funcionando en modo invitado con progreso en `localStorage`. El AI
+Agents Lab usa un proveedor local determinista que no necesita API key.
+
+### Cuentas, sincronización y administración
+
+- La **primera cuenta** que se registra en `/login` es la administradora; después el registro queda cerrado salvo
+  `AUTH_ALLOW_SIGNUP=true`. También se puede promover con `ADMIN_EMAILS` (separados por comas).
+- Con sesión iniciada, progreso, notas, flashcards y laboratorios se sincronizan con PostgreSQL entre navegadores; al
+  iniciar sesión se combinan con lo que había como invitado y al cerrar sesión se borran de ese navegador.
+- GitHub (opcional): creá una OAuth App con callback `http://localhost:3000/api/auth/github/callback` y completá
+  `GITHUB_CLIENT_ID` y `GITHUB_CLIENT_SECRET` en `.env`; `ADMIN_GITHUB_LOGINS` promueve logins.
+- `/admin` permite crear cursos, módulos, lecciones (bloques de texto, código, avisos, diagramas y preguntas) y
+  flashcards, con versiones, publicación, importación/exportación JSON y auditoría
+  ([ADR-0010](docs/adr/0010-persistence-auth-sync-and-admin.md)).
+- Migraciones: `docker compose run --rm app pnpm db:generate` después de cambiar un esquema (`*-tables.ts`), y
+  `pnpm db:migrate` (se ejecuta solo al levantar `app`).
 
 ### Modelo real opcional (AI Agents Lab y AI Study Mentor)
 

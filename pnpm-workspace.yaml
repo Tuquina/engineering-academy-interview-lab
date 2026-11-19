@@ -7,3 +7,5 @@ minimumReleaseAgeExclude:
 allowBuilds:
   # Su script de postinstall sólo imprime un mensaje; no es necesario para funcionar.
   es5-ext: false
+  # drizzle-kit (generación de migraciones) usa esbuild; su postinstall verifica el binario de la plataforma.
+  esbuild: true

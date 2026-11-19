@@ -162,3 +162,30 @@ enlaza a la lección que explica el concepto.
 
 Creá `content/cheatsheets/<slug>.mdx` con frontmatter `title`, `description`, `order`, `tags` y `relatedLessons`
 (IDs de lecciones existentes). El cuerpo admite los mismos componentes MDX que las lecciones.
+
+## 7. Cursos desde la administración (sin tocar el repositorio)
+
+Hay dos caminos para agregar una temática:
+
+| Camino                         | Dónde vive                        | Cuándo usarlo                                                                      |
+| ------------------------------ | --------------------------------- | ---------------------------------------------------------------------------------- |
+| Archivos en `content/courses/` | Repositorio (versionado con git)  | Contenido académico estable, con MDX, diagramas y comparaciones revisadas en un PR |
+| Administración (`/admin`)      | PostgreSQL (`custom_*`, ADR-0010) | Contenido propio creado desde la web, sin recompilar ni desplegar                  |
+
+Desde `/admin` (cuenta administradora):
+
+1. **Nuevo curso**: título y área. El slug se genera solo y define la URL `/c/<slug>`.
+2. **Módulos y lecciones**: cada lección tiene metadatos (dificultad, minutos, objetivos, etiquetas, prerrequisitos,
+   resumen, referencias `título | https://…`, preguntas de entrevista `pregunta :: punto; punto`) y bloques de
+   contenido: título de sección, párrafo (con `backticks` para código en línea), lista, código, aviso, diagrama
+   Mermaid y pregunta autocorregible.
+3. **Guardar** crea una versión (con nota opcional). Si otra pestaña guardó antes, el servidor avisa el conflicto en
+   lugar de pisar cambios. **Restaurar** una versión crea una versión nueva.
+4. **Publicar** valida la integridad (área, módulos, slugs, prerrequisitos, preguntas con una sola respuesta
+   correcta). El curso aparece en la Biblioteca, con progreso, notas y knowledge checks como cualquier lección.
+   Sólo se muestran las lecciones marcadas como publicadas; "Vista previa" muestra también los borradores.
+5. **Exportar / importar** (`eal-content` v1) para respaldar o mover contenido entre instalaciones. Importar es
+   idempotente por slug: "omitir" no toca cursos existentes; "reemplazar" los actualiza guardando una versión.
+
+Los prerrequisitos usan IDs: los de lecciones del repositorio (`typescript.generics`) o de lecciones personalizadas
+(`custom.<uuid>`, visible en el editor). El contenido de la base nunca se escribe en `content/`.

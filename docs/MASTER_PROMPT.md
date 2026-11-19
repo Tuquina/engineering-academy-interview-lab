@@ -1794,13 +1794,13 @@ errores frecuentes, knowledge checks y preguntas de entrevista.
 ### Fase 6 — Persistencia y administración
 
 - [x] PostgreSQL.
-- [ ] Autenticación.
-- [ ] Sincronización.
-- [ ] Contenido personalizado.
-- [ ] Administración.
-- [ ] Importación/exportación.
-- [ ] Seguridad.
-- [ ] Optimización.
+- [x] Autenticación.
+- [x] Sincronización.
+- [x] Contenido personalizado.
+- [x] Administración.
+- [x] Importación/exportación.
+- [x] Seguridad.
+- [x] Optimización (ADR-0010).
 
 **Resultado:** plataforma persistente y extensible.
 

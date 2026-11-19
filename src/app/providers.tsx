@@ -18,6 +18,9 @@ import {
   ReadingFontSizeSync,
 } from "@/modules/preferences/presentation/preferences-context";
 import { ProgressProvider } from "@/modules/progress/presentation/progress-context";
+import { SessionProvider } from "@/modules/auth/presentation/session-context";
+import { BackupProvider } from "@/modules/sync/presentation/data-backup";
+import { SyncProvider } from "@/modules/sync/presentation/sync-context";
 import { AI_DISABLED, AiStatusProvider, type AiStatus } from "@/shared/lib/ai-status";
 
 const createSqlEngine = (dataset: string) => new WorkerSqlEngine(dataset);
@@ -46,31 +49,37 @@ export function Providers({ children }: { children: ReactNode }) {
   }, []);
   const agentRuntime = useMemo(() => createAgentRuntime(ai), [ai]);
   return (
-    <PreferencesProvider store={stores.preferences}>
-      <ProgressProvider store={stores.progress}>
-        <NotebookProvider store={stores.notebook}>
-          <FlashcardsProvider store={stores.flashcards}>
-            <PracticeProvider store={stores.practice}>
-              <CodeRunnerProvider runner={runner}>
-                <SqlEngineProvider factory={createSqlEngine}>
-                  <StudioProvider store={stores.studio}>
-                    <InterviewsProvider store={stores.interviews}>
-                      <AgentLabProvider store={stores.agentLab}>
-                        <AgentRuntimeProvider runtime={agentRuntime}>
-                          <AiStatusProvider status={ai}>
-                            <ReadingFontSizeSync />
-                            {children}
-                          </AiStatusProvider>
-                        </AgentRuntimeProvider>
-                      </AgentLabProvider>
-                    </InterviewsProvider>
-                  </StudioProvider>
-                </SqlEngineProvider>
-              </CodeRunnerProvider>
-            </PracticeProvider>
-          </FlashcardsProvider>
-        </NotebookProvider>
-      </ProgressProvider>
-    </PreferencesProvider>
+    <SessionProvider>
+      <PreferencesProvider store={stores.preferences}>
+        <ProgressProvider store={stores.progress}>
+          <NotebookProvider store={stores.notebook}>
+            <FlashcardsProvider store={stores.flashcards}>
+              <PracticeProvider store={stores.practice}>
+                <CodeRunnerProvider runner={runner}>
+                  <SqlEngineProvider factory={createSqlEngine}>
+                    <StudioProvider store={stores.studio}>
+                      <InterviewsProvider store={stores.interviews}>
+                        <AgentLabProvider store={stores.agentLab}>
+                          <AgentRuntimeProvider runtime={agentRuntime}>
+                            <AiStatusProvider status={ai}>
+                              <SyncProvider controller={stores.sync}>
+                                <BackupProvider port={stores.backup}>
+                                  <ReadingFontSizeSync />
+                                  {children}
+                                </BackupProvider>
+                              </SyncProvider>
+                            </AiStatusProvider>
+                          </AgentRuntimeProvider>
+                        </AgentLabProvider>
+                      </InterviewsProvider>
+                    </StudioProvider>
+                  </SqlEngineProvider>
+                </CodeRunnerProvider>
+              </PracticeProvider>
+            </FlashcardsProvider>
+          </NotebookProvider>
+        </ProgressProvider>
+      </PreferencesProvider>
+    </SessionProvider>
   );
 }

@@ -1,4 +1,5 @@
 import type { z } from "zod";
+import { isSameOrigin } from "../http/same-origin";
 
 /**
  * Protección de los endpoints que llaman a un LLM real (MASTER_PROMPT §30: límites de uso, control de costos y
@@ -74,8 +75,7 @@ export async function guardAiRequest<T>(
   if (!process.env.ANTHROPIC_API_KEY?.trim()) {
     return { ok: false, response: jsonError(503, "No hay un proveedor LLM configurado en el servidor.") };
   }
-  const origin = request.headers.get("origin");
-  if (origin && new URL(origin).host !== new URL(request.url).host) {
+  if (!isSameOrigin(request)) {
     return { ok: false, response: jsonError(403, "Origen no permitido.") };
   }
   const length = Number(request.headers.get("content-length") ?? 0);

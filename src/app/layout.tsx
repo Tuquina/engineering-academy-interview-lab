@@ -4,6 +4,7 @@ import Script from "next/script";
 import type { ReactNode } from "react";
 import { getSearchIndex } from "@/infrastructure/composition/content-extras";
 import { getCatalog } from "@/infrastructure/composition/learning";
+import { AccountButton } from "@/modules/auth/presentation/account-button";
 import { CommandPalette } from "@/modules/search/presentation/command-palette";
 import { AppShell } from "@/shared/layout/app-shell";
 import { themeInitScript } from "@/shared/layout/theme-toggle";
@@ -50,7 +51,11 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
           {themeInitScript}
         </Script>
         <Providers>
-          <AppShell courses={courses} search={<CommandPalette entries={searchIndex} />}>
+          <AppShell
+            courses={courses}
+            search={<CommandPalette entries={searchIndex} />}
+            account={<AccountButton />}
+          >
             {children}
           </AppShell>
         </Providers>

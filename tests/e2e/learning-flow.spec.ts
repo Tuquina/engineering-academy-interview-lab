@@ -73,7 +73,7 @@ test.describe("flujo de aprendizaje (modo invitado)", () => {
     expect(overflow).toBeLessThanOrEqual(0);
   });
 
-  test("las secciones planificadas se muestran deshabilitadas, sin enlaces", async ({ page, isMobile }) => {
+  test("la navegación principal enlaza todas las secciones disponibles", async ({ page, isMobile }) => {
     await page.goto("/library");
     if (isMobile) {
       // El botón necesita la hidratación: se reintenta hasta que el diálogo quede abierto.
@@ -84,9 +84,7 @@ test.describe("flujo de aprendizaje (modo invitado)", () => {
     }
     const nav = page.getByRole("navigation", { name: "Navegación principal" }).last();
     await expect(nav.getByRole("link", { name: "Biblioteca" })).toBeVisible();
-    // La administración de contenido llega en la Fase 6: se ve, pero no es un enlace.
-    await expect(nav.getByRole("link", { name: /Administración de contenido/ })).toHaveCount(0);
-    await expect(nav.getByText("Administración de contenido")).toBeVisible();
+    await expect(nav.getByRole("link", { name: /Administración de contenido/ })).toBeVisible();
     await expect(nav.getByRole("link", { name: /AI Agents Lab/ })).toBeVisible();
   });
 });

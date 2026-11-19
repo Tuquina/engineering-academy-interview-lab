@@ -69,6 +69,6 @@ export const MAIN_SECTIONS: readonly MainSection[] = [
   { id: "flashcards", label: "Flashcards", icon: Boxes, status: "available", href: "/flashcards" },
   { id: "cheatsheets", label: "Cheatsheets", icon: FileText, status: "available", href: "/cheatsheets" },
   { id: "stats", label: "Estadísticas y progreso", icon: BarChart3, status: "available", href: "/stats" },
-  { id: "admin", label: "Administración de contenido", icon: Shield, status: "planned", phase: 6 },
+  { id: "admin", label: "Administración de contenido", icon: Shield, status: "available", href: "/admin" },
   { id: "settings", label: "Configuración", icon: Settings, status: "available", href: "/settings" },
 ];

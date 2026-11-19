@@ -375,6 +375,66 @@ Decisiones en [ADR-0009](adr/0009-agent-lab-providers-and-evals.md). Módulos `a
 - El playground y el simulador no persisten la conversación ni el mundo al recargar (sí los agentes y las
   evaluaciones).
 
+## Fase 6 — Persistencia y administración · ✅ completada (2026-11-19)
+
+Decisiones en [ADR-0010](adr/0010-persistence-auth-sync-and-admin.md). Módulos `auth`, `sync` y
+`content-management`.
+
+### Implementado y verificado
+
+- **PostgreSQL local**: `docker compose up app` levanta PostgreSQL 17 (volumen `pgdata`), aplica migraciones y arranca
+  la app. Drizzle 0.45 + `pg` 8.23; migración inicial versionada en `drizzle/` (8 tablas con claves, únicos,
+  `CHECK`, índices y claves foráneas). Sin `DATABASE_URL` todo sigue en modo invitado.
+- **Autenticación**: registro e inicio de sesión con email y contraseña (scrypt), GitHub OAuth opcional, sesiones en
+  base con token hasheado y cookie `HttpOnly`/`SameSite=Lax`, renovación deslizante, cierre de sesión. Primera
+  cuenta = admin (con lock contra carreras), `ADMIN_EMAILS`, `ADMIN_GITHUB_LOGINS`, registro cerrado por defecto,
+  límite de intentos, mensajes que no revelan si un email existe. Páginas `/login` y `/account`; acceso a la cuenta
+  en la barra superior.
+- **Sincronización**: los 8 stores del cliente se replican en `user_documents` con concurrencia optimista y merge de
+  tres vías (borrados respetados, listas por `id`, conflictos idempotentes). Datos de invitado combinados al iniciar
+  sesión; datos de la cuenta borrados de ese navegador al cerrar sesión o vencer; nunca se mezclan cuentas. Panel de
+  estado en `/account`, sincronización al volver a la pestaña y antes de cerrar sesión. El servidor valida cada
+  documento con el mismo esquema que el navegador.
+- **Copia de seguridad del usuario**: exportar e importar (combinando, idempotente) en `/settings` y `/account`;
+  reemplaza al volcado crudo anterior, que no se podía importar.
+- **Administración** (`/admin`): crear cursos en áreas existentes, módulos, lecciones con bloques estructurados
+  (título, párrafo, lista, código, aviso, diagrama Mermaid, pregunta autocorregible), objetivos, resumen,
+  referencias, preguntas de entrevista, prerrequisitos y flashcards; versiones con nota y restauración; publicar y
+  despublicar por curso y por lección; vista previa de borradores; eliminar; auditoría de acciones.
+- **Contenido personalizado**: rutas genéricas `/c/[curso]` y `/c/[curso]/[lección]` con los mismos componentes
+  (knowledge checks, notas, progreso, resumen, referencias) e IDs estables `custom.<uuid>`; sección "Contenido
+  personalizado" en la Biblioteca. Validación de integridad antes de guardar y de publicar.
+- **Importación/exportación de contenido** (`eal-content` v1) idempotente por slug, con prerrequisitos portables
+  `curso/lección`.
+- **Seguridad**: autorización en los casos de uso, mismo origen en escrituras (con `Host`/`X-Forwarded-Host`),
+  tamaños máximos, cabeceras de seguridad, `no-store` en cuenta y administración, ningún MDX ni HTML de usuarios.
+- **Optimización**: índices por consulta, lectura de un curso en 3 consultas fijas, pool chico apto para serverless,
+  caché pública corta del listado de cursos publicados, agrupación de subidas de sincronización.
+
+### Verificación
+
+- `tsc` y ESLint sin errores; 231 tests unitarios y de integración en 36 archivos. Los repositorios, la
+  autenticación, la sincronización (dos "dispositivos", conflictos, borrados, reintentos, otra cuenta) y la
+  administración (permisos, versiones, integridad, import/export idempotente, auditoría) se prueban contra
+  PostgreSQL real en proceso (PGlite) con las mismas migraciones.
+- E2E contra el build de producción (169 páginas) y PostgreSQL 17 efímero: 47 pasan sin reintentos, 21 omitidos a
+  propósito en móvil. Nuevos: sincronización entre dos navegadores y borrado al cerrar sesión, 403 para usuarios
+  comunes en la API y en `/admin`, y un curso creado, publicado y exportado por un admin que ve un visitante.
+- Revisión manual en el servidor de desarrollo: registro, sincronización de datos de invitado, creación, edición,
+  publicación y lectura de un curso personalizado. La verificación encontró y corrigió un bug real: el chequeo de mismo
+  origen comparaba contra `request.url`, que en Docker es `0.0.0.0`.
+
+### Limitaciones conocidas
+
+- El inicio de sesión con GitHub no se probó contra GitHub (requiere crear una OAuth App); el flujo y la vinculación
+  se verificaron con tests del caso de uso.
+- No se pueden crear áreas, rutas de aprendizaje, challenges de código ni ejercicios SQL desde la administración: las
+  áreas y rutas siguen en el repositorio y los laboratorios necesitan contenido especializado. Las flashcards de un
+  curso personalizado se repasan en su página, no en el planificador de repaso espaciado.
+- Los límites de intentos y los presupuestos viven en memoria del proceso (por instancia).
+- No hay todavía una Content-Security-Policy estricta (Monaco, Sandpack y los workers necesitan excepciones).
+- La sincronización sube el documento completo del store; los contadores en conflicto toman el máximo.
+
 ## Próximas fases
 
 | Fase                                                                          | Estado     |
@@ -384,7 +444,7 @@ Decisiones en [ADR-0009](adr/0009-agent-lab-providers-and-evals.md). Módulos `a
 | 4 — Arquitectura y entrevistas (System Design Studio, Interview Arena)        | Completada |
 | 4.5 — Teoría de los cursos (ADR-0008)                                         | Completada |
 | 5 — Agentes IA (configuración, tool calling, memoria, evals, mentor)          | Completada |
-| 6 — Persistencia y administración (PostgreSQL, auth, contenido personalizado) | Pendiente  |
+| 6 — Persistencia y administración (PostgreSQL, auth, contenido personalizado) | Completada |
 | 7 — Producción (CI/CD, Vercel)                                                | Pendiente  |
 
 ### Contenido pendiente respecto del objetivo inicial (§35)

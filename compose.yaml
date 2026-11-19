@@ -1,8 +1,27 @@
-# Entorno local completo en contenedores (no requiere Node.js en el host). Uso:
-#   docker compose up app                        -> servidor de desarrollo en http://localhost:3000
+# Entorno local completo en contenedores (no requiere Node.js ni PostgreSQL en el host). Uso:
+#   docker compose up app                        -> PostgreSQL + migraciones + servidor de desarrollo en http://localhost:3000
 #   docker compose run --rm app pnpm <script>    -> typecheck, lint, test, build, etc.
-#   docker compose --profile e2e run --rm e2e    -> E2E con Playwright contra un build de producción
+#   docker compose --profile e2e run --rm e2e    -> E2E con Playwright contra un build de producción y una base efímera
 name: engineering-academy
+
+# Variables comunes. Las opcionales se toman de un archivo `.env` local (ignorado por git) o del entorno.
+x-app-env:
+  &app-env # Los eventos de archivos no atraviesan de forma confiable el bind mount desde Windows: se usa polling.
+  WATCHPACK_POLLING: "true"
+  CHOKIDAR_USEPOLLING: "true"
+  # Proveedor LLM real opcional (AI Agents Lab y AI Study Mentor). Vacíos: proveedor local determinista.
+  ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+  AI_MODEL: ${AI_MODEL:-}
+  AI_JUDGE_MODEL: ${AI_JUDGE_MODEL:-}
+  AI_RATE_LIMIT_PER_MINUTE: ${AI_RATE_LIMIT_PER_MINUTE:-}
+  AI_DAILY_REQUEST_LIMIT: ${AI_DAILY_REQUEST_LIMIT:-}
+  # Autenticación (Fase 6). GitHub es opcional; sin él, se usa email y contraseña.
+  GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:-}
+  GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:-}
+  ADMIN_EMAILS: ${ADMIN_EMAILS:-}
+  ADMIN_GITHUB_LOGINS: ${ADMIN_GITHUB_LOGINS:-}
+  AUTH_ALLOW_SIGNUP: ${AUTH_ALLOW_SIGNUP:-}
+  AUTH_MAX_ATTEMPTS: ${AUTH_MAX_ATTEMPTS:-}
 
 x-app-base: &app-base
   build:
@@ -10,40 +29,79 @@ x-app-base: &app-base
     dockerfile: docker/dev.Dockerfile
   image: engineering-academy-dev:local
   working_dir: /app
-  environment:
-    # Los eventos de archivos no atraviesan de forma confiable el bind mount desde Windows: se usa polling.
-    WATCHPACK_POLLING: "true"
-    CHOKIDAR_USEPOLLING: "true"
-    # Proveedor LLM real opcional (AI Agents Lab y AI Study Mentor). Se toman de un archivo `.env` local (ignorado
-    # por git) o del entorno; vacíos, la plataforma funciona con el proveedor local determinista.
-    ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-    AI_MODEL: ${AI_MODEL:-}
-    AI_JUDGE_MODEL: ${AI_JUDGE_MODEL:-}
-    AI_RATE_LIMIT_PER_MINUTE: ${AI_RATE_LIMIT_PER_MINUTE:-}
-    AI_DAILY_REQUEST_LIMIT: ${AI_DAILY_REQUEST_LIMIT:-}
 
 services:
+  # PostgreSQL local para desarrollo: los datos persisten en el volumen `pgdata`. Se expone sólo en 127.0.0.1:55432
+  # para inspeccionarla con un cliente propio, sin chocar con un PostgreSQL instalado en el puerto 5432.
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: eal
+      POSTGRES_PASSWORD: eal
+      POSTGRES_DB: eal
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "127.0.0.1:55432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U eal -d eal"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+
   app:
     <<: *app-base
+    environment:
+      <<: *app-env
+      DATABASE_URL: ${DATABASE_URL:-postgres://eal:eal@db:5432/eal}
+    depends_on:
+      db:
+        condition: service_healthy
     volumes:
       - .:/app
       # node_modules y la caché de Next viven en volúmenes Linux: evita mezclar binarios nativos
       # de Windows y Linux, y acelera la E/S frente al bind mount.
       - node_modules:/app/node_modules
       - next_cache:/app/.next
-    command: sh -c "pnpm install --frozen-lockfile && pnpm dev:docker"
+    command: sh -c "pnpm install --frozen-lockfile && pnpm db:migrate && pnpm dev:docker"
     ports:
       - "3000:3000"
+
+  # Base efímera para E2E (en memoria): cada `docker compose --profile e2e down` la descarta.
+  db-e2e:
+    image: postgres:17-alpine
+    profiles: ["e2e"]
+    environment:
+      POSTGRES_USER: eal
+      POSTGRES_PASSWORD: eal
+      POSTGRES_DB: eal
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U eal -d eal"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
 
   # Build de producción aislado para E2E: usa su propio volumen .next para no pisar el de desarrollo.
   web-e2e:
     <<: *app-base
     profiles: ["e2e"]
+    environment:
+      <<: *app-env
+      DATABASE_URL: postgres://eal:eal@db-e2e:5432/eal
+      ADMIN_EMAILS: admin@e2e.test
+      AUTH_ALLOW_SIGNUP: "true"
+      # Las pruebas registran muchas cuentas desde la misma IP: más margen que el límite real (10 cada 15 min).
+      AUTH_MAX_ATTEMPTS: "500"
+    depends_on:
+      db-e2e:
+        condition: service_healthy
     volumes:
       - .:/app
       - node_modules:/app/node_modules
       - next_e2e:/app/.next
-    command: sh -c "pnpm install --frozen-lockfile && pnpm build && pnpm start --hostname 0.0.0.0 --port 3000"
+    command: sh -c "pnpm install --frozen-lockfile && pnpm db:migrate && pnpm build && pnpm start --hostname 0.0.0.0 --port 3000"
     healthcheck:
       test:
         [
@@ -79,3 +137,4 @@ volumes:
   node_modules:
   next_cache:
   next_e2e:
+  pgdata:

@@ -20,7 +20,7 @@ Documentos de trabajo:
 No hay Node.js en el host y no se debe instalar nada en la PC. Todo comando corre en el contenedor:
 
 ```bash
-docker compose up app                          # dev server en http://localhost:3000 (webpack + polling)
+docker compose up app                          # PostgreSQL + migraciones + dev server en http://localhost:3000
 docker compose run --rm app pnpm check         # typecheck + lint + test + build
 docker compose --profile e2e run --rm e2e      # Playwright contra build de producción
 ```
@@ -30,7 +30,7 @@ No correr `pnpm build` en el contenedor mientras `app` está levantado: comparte
 ## Reglas clave (resumen; el detalle está en el master prompt)
 
 - Stack: Next.js App Router + React + TypeScript estricto + Tailwind + componentes propios estilo shadcn; Route Handlers
-  en Vercel Functions; PostgreSQL con un único ORM (Drizzle preferido) cuando llegue la Fase 6; pnpm; Vitest + RTL + Playwright.
+  en Vercel Functions; PostgreSQL 17 local en Docker con Drizzle (migraciones en `drizzle/`, tests con PGlite); pnpm; Vitest + RTL + Playwright.
 - Arquitectura hexagonal y modular en `src/modules/<módulo>/{domain,application,infrastructure,presentation}`.
   Dependencias hacia el dominio; Route Handlers delgados; casos de uso testeables sin Next.js. Composición en
   `src/infrastructure/composition`.
@@ -47,4 +47,6 @@ No correr `pnpm build` en el contenedor mientras `app` está levantado: comparte
 - Fase 4 — Arquitectura y entrevistas: **completada** (ver docs/STATUS.md y docs/adr/0007).
 - Fase 4.5 — Teoría de los cursos: **completada** (agregada por el usuario; 60 lecciones en 9 cursos; ver docs/adr/0008).
 - Fase 5 — Agentes IA: **completada** (AI Agents Lab, evals y AI Study Mentor opcional; ver docs/adr/0009).
-- Siguiente: **Fase 6 — Persistencia y administración**.
+- Fase 6 — Persistencia y administración: **completada** (PostgreSQL local, cuentas, sincronización, administración de
+  contenido; ver docs/adr/0010).
+- Siguiente: **Fase 7 — Producción** (último paso: despliegue en Vercel).

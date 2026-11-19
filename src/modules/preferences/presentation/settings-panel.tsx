@@ -1,6 +1,6 @@
 "use client";
 
-import { Download, Keyboard, Trash2 } from "lucide-react";
+import { Keyboard, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { setTheme, useTheme, type Theme } from "@/shared/layout/theme-toggle";
 import { cn } from "@/shared/lib/cn";
@@ -68,29 +68,6 @@ export function SettingsPanel() {
   const { update } = usePreferencesActions();
   const theme = useTheme();
   const [confirmingReset, setConfirmingReset] = useState(false);
-
-  const exportData = () => {
-    const data: Record<string, unknown> = {};
-    for (let i = 0; i < localStorage.length; i++) {
-      const key = localStorage.key(i);
-      if (!key?.startsWith(LOCAL_KEY_PREFIX)) continue;
-      const raw = localStorage.getItem(key);
-      try {
-        data[key] = raw === null ? null : (JSON.parse(raw) as unknown);
-      } catch {
-        data[key] = raw;
-      }
-    }
-    const blob = new Blob([JSON.stringify({ exportedAt: new Date().toISOString(), data }, null, 2)], {
-      type: "application/json",
-    });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `interview-lab-backup-${new Date().toISOString().slice(0, 10)}.json`;
-    link.click();
-    URL.revokeObjectURL(url);
-  };
 
   const resetData = () => {
     const keys: string[] = [];
@@ -172,13 +149,11 @@ export function SettingsPanel() {
       <Card className="flex flex-col gap-3">
         <CardTitle>Datos locales</CardTitle>
         <CardDescription>
-          En modo invitado, el progreso, las notas, los marcadores y los repasos viven sólo en este navegador.
-          Exportalos como respaldo antes de borrar datos del navegador.
+          Sin cuenta, el progreso, las notas y los laboratorios viven sólo en este navegador: exportalos como
+          respaldo (abajo) antes de borrar. Con una cuenta, borrar acá sólo limpia este navegador; tus datos
+          siguen en la cuenta y vuelven a sincronizarse.
         </CardDescription>
         <div className="flex flex-wrap gap-3">
-          <Button variant="secondary" onClick={exportData}>
-            <Download /> Exportar respaldo (JSON)
-          </Button>
           {!confirmingReset ? (
             <Button variant="secondary" onClick={() => setConfirmingReset(true)}>
               <Trash2 /> Borrar datos locales
@@ -189,7 +164,7 @@ export function SettingsPanel() {
               className="border-danger/50 bg-danger/8 flex flex-wrap items-center gap-3 rounded-md border px-3 py-2"
             >
               <span className="text-foreground text-sm">
-                Se borrará todo el progreso local. No se puede deshacer.
+                Se borrarán los datos de este navegador. Sin cuenta, no se puede deshacer.
               </span>
               <Button size="sm" className="bg-danger hover:bg-danger/90 text-white" onClick={resetData}>
                 Sí, borrar

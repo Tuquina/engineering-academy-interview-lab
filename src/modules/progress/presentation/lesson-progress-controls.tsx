@@ -3,14 +3,16 @@
 import { CheckCircle2, RotateCcw } from "lucide-react";
 import { useEffect } from "react";
 import { Button } from "@/shared/ui/button";
+import { useSession } from "@/modules/auth/presentation/session-context";
 import { useProgressActions, useProgressState } from "./progress-context";
 
 /**
  * Registra la visita a la lección al montarse y permite marcarla como completada o reabrirla.
- * El progreso es local (modo invitado) y así se indica al usuario.
+ * Indica dónde se guarda el progreso: en este navegador (invitado) o también en la cuenta (sesión iniciada).
  */
 export function LessonProgressControls({ lessonId }: { lessonId: string }) {
   const state = useProgressState();
+  const session = useSession();
   const { recordVisit, complete, reopen } = useProgressActions();
   const completed = state.lessons[lessonId]?.status === "completed";
 
@@ -24,7 +26,11 @@ export function LessonProgressControls({ lessonId }: { lessonId: string }) {
         <p className="text-foreground font-medium">
           {completed ? "Lección completada" : "¿Terminaste la lección?"}
         </p>
-        <p className="text-muted text-sm">El progreso se guarda en este navegador (modo invitado).</p>
+        <p className="text-muted text-sm">
+          {session.status === "authenticated"
+            ? "El progreso se guarda en tu cuenta y se sincroniza entre navegadores."
+            : "El progreso se guarda en este navegador (modo invitado)."}
+        </p>
       </div>
       {completed ? (
         <Button variant="secondary" onClick={() => reopen(lessonId)}>

@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { getCatalog } from "@/infrastructure/composition/learning";
 import { DIFFICULTY_LABELS } from "@/modules/learning/domain/catalog-types";
+import { CustomCoursesSection } from "@/modules/content-management/presentation/custom-courses-section";
 import { ProgressSummaryBar } from "@/modules/progress/presentation/progress-badges";
 import { Badge } from "@/shared/ui/badge";
 
@@ -56,6 +57,7 @@ export default async function LibraryPage() {
             </section>
           );
         })}
+        <CustomCoursesSection />
       </div>
     </div>
   );
