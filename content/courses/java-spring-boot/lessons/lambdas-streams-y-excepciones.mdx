@@ -1,0 +1,247 @@
+---
+id: java.streams-exceptions
+moduleId: java.language
+title: "Lambdas, streams y excepciones"
+description: "Programación funcional en Java con interfaces funcionales, lambdas, referencias a métodos y la Stream API; y el modelo de excepciones: checked y unchecked, try-with-resources y buenas prácticas."
+difficulty: intermediate
+order: 3
+objectives:
+  - "Escribir lambdas y referencias a métodos sobre las interfaces funcionales estándar."
+  - "Transformar, filtrar y agregar colecciones con la Stream API y los Collectors."
+  - "Explicar la evaluación perezosa de los streams y sus errores frecuentes."
+  - "Distinguir excepciones checked de unchecked y diseñar un manejo de errores claro."
+  - "Liberar recursos con try-with-resources."
+prerequisites: ["java.objects-collections"]
+estimatedMinutes: 45
+tags: ["java", "lambdas", "streams", "excepciones"]
+version: "1.0.0"
+references:
+  - title: "Dev.java — Lambda Expressions"
+    url: "https://dev.java/learn/lambdas/"
+  - title: "Dev.java — The Stream API"
+    url: "https://dev.java/learn/api/streams/"
+  - title: "Java SE API — java.util.stream"
+    url: "https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/stream/package-summary.html"
+  - title: "The Java Tutorials — Exceptions"
+    url: "https://docs.oracle.com/javase/tutorial/essential/exceptions/index.html"
+interviewQuestions:
+  - question: "¿Qué es una interfaz funcional y cómo se relaciona con las lambdas?"
+    keyPoints:
+      - "Una interfaz con un único método abstracto (puede tener default y static)."
+      - "Una lambda es una implementación concisa de ese método."
+      - "Ejemplos estándar: Function, Predicate, Supplier, Consumer, BiFunction."
+      - "@FunctionalInterface hace que el compilador verifique que tiene un solo método abstracto."
+  - question: "¿Qué significa que los streams sean perezosos?"
+    keyPoints:
+      - "Las operaciones intermedias (map, filter) no se ejecutan hasta que hay una operación terminal (collect, sum, findFirst)."
+      - "Permite cortocircuitar: findFirst deja de procesar al encontrar el primer elemento."
+      - "Un stream sólo se puede consumir una vez."
+  - question: "¿Checked o unchecked? ¿Cuándo usar cada una?"
+    keyPoints:
+      - "Las checked (Exception salvo RuntimeException) obligan a declararlas o capturarlas."
+      - "Las unchecked (RuntimeException) no; se usan para errores de programación o de negocio que se manejan en un borde."
+      - "Muchos frameworks modernos (Spring incluido) prefieren unchecked y un manejador central."
+      - "Nunca tragar excepciones con un catch vacío; envolver conservando la causa."
+summary:
+  - "Una lambda implementa una interfaz funcional: Function, Predicate, Supplier, Consumer…"
+  - "Las referencias a métodos (Customer::name) son lambdas más cortas."
+  - "Un stream es fuente → operaciones intermedias perezosas → una operación terminal."
+  - "Collectors.groupingBy, toMap y joining resuelven la mayoría de las agregaciones."
+  - "Los streams no reemplazan siempre a un for: si hay efectos secundarios o lógica compleja, el bucle es más claro."
+  - "Checked: Exception; unchecked: RuntimeException; Error: problemas de la JVM que no se manejan."
+  - "try-with-resources cierra automáticamente lo que implementa AutoCloseable."
+---
+
+## Interfaces funcionales y lambdas
+
+Una **interfaz funcional** tiene un único método abstracto. Una **lambda** es una forma corta de implementarla. El
+paquete `java.util.function` trae las más comunes:
+
+| Interfaz        | Firma       | Ejemplo                   |
+| --------------- | ----------- | ------------------------- |
+| `Function`      | T → R       | `o -> o.totalCents()`     |
+| `Predicate`     | T → boolean | `o -> o.isPaid()`         |
+| `Supplier`      | () → T      | `() -> UUID.randomUUID()` |
+| `Consumer`      | T → void    | `o -> log.info(o.id())`   |
+| `BiFunction`    | (T, U) → R  | `(a, b) -> a + b`         |
+| `UnaryOperator` | T → T       | `s -> s.trim()`           |
+
+```java
+Predicate<Order> isPaid = order -> order.status() == OrderStatus.PAID;
+Function<Order, Long> total = Order::totalCents;       // referencia a método
+Comparator<Product> byPrice = Comparator.comparingLong(Product::priceCents)
+                                        .thenComparing(Product::name);
+```
+
+Las lambdas pueden usar variables locales del método que las contiene sólo si son **efectivamente finales** (no se
+reasignan). Es la misma idea de closure de JavaScript, pero con esa restricción.
+
+## La Stream API
+
+Un stream procesa una secuencia de elementos en tres partes: **fuente**, **operaciones intermedias** y una
+**operación terminal**.
+
+```java
+record Order(String id, String customerId, OrderStatus status, long totalCents) {}
+
+List<Order> orders = repository.findAll();
+
+// Total facturado de los pedidos pagados
+long revenue = orders.stream()
+    .filter(o -> o.status() == OrderStatus.PAID)
+    .mapToLong(Order::totalCents)
+    .sum();
+
+// Pedidos agrupados por cliente
+Map<String, List<Order>> byCustomer = orders.stream()
+    .collect(Collectors.groupingBy(Order::customerId));
+
+// Total por cliente
+Map<String, Long> totalByCustomer = orders.stream()
+    .collect(Collectors.groupingBy(Order::customerId, Collectors.summingLong(Order::totalCents)));
+
+// Top 3 pedidos más caros
+List<Order> top3 = orders.stream()
+    .sorted(Comparator.comparingLong(Order::totalCents).reversed())
+    .limit(3)
+    .toList();                                   // Java 16+: lista inmutable
+
+String ids = orders.stream().map(Order::id).collect(Collectors.joining(", "));
+```
+
+<MermaidDiagram
+  caption="Las operaciones intermedias sólo describen el procesamiento; nada se ejecuta hasta la operación terminal."
+  chart={`
+flowchart LR
+  S["Fuente: orders.stream()"] --> F["filter (intermedia)"]
+  F --> M["mapToLong (intermedia)"]
+  M --> T["sum (terminal): recién acá se recorre"]
+`}
+/>
+
+### Evaluación perezosa
+
+Las operaciones intermedias **no hacen nada** hasta que aparece la terminal. Eso permite cortocircuitar:
+`findFirst`, `anyMatch` o `limit` dejan de procesar en cuanto tienen la respuesta. Un stream **se consume una sola
+vez**: reutilizarlo lanza `IllegalStateException`.
+
+<Callout type="warning" title="Cuidado con los efectos secundarios y con toMap">
+  Modificar estado externo dentro de `map` o `forEach` de un stream paralelo produce resultados no deterministas.
+  `Collectors.toMap` lanza `IllegalStateException` si hay claves duplicadas: pasá una función de merge,
+  `toMap(k, v, (a, b) -> a)`.
+</Callout>
+
+`parallelStream()` reparte el trabajo en el ForkJoinPool común. Sólo conviene con colecciones grandes, operaciones
+de CPU sin estado compartido y midiendo: en un servidor web casi nunca es una buena idea por defecto.
+
+## Cuándo un for es mejor
+
+Los streams brillan en transformaciones y agregaciones. Un bucle clásico es más claro cuando hay varias salidas
+tempranas, excepciones checked dentro del cuerpo, o se modifica más de una variable. Elegí lo más legible, no lo más
+"funcional".
+
+## Excepciones
+
+En Java todo error es un objeto que hereda de `Throwable`:
+
+| Tipo      | Hereda de          | ¿Obliga a manejarla?       | Ejemplos                                           |
+| --------- | ------------------ | -------------------------- | -------------------------------------------------- |
+| Checked   | `Exception`        | Sí: `throws` o `try/catch` | `IOException`, `SQLException`                      |
+| Unchecked | `RuntimeException` | No                         | `IllegalArgumentException`, `NullPointerException` |
+| Error     | `Error`            | No (no se manejan)         | `OutOfMemoryError`, `StackOverflowError`           |
+
+```java
+public class InsufficientStockException extends RuntimeException {
+    public InsufficientStockException(String sku, int requested) {
+        super("Stock insuficiente de " + sku + ": pedido " + requested);
+    }
+}
+
+try {
+    inventory.reserve(sku, quantity);
+} catch (InsufficientStockException e) {
+    return Result.rejected(e.getMessage());
+} catch (InventoryUnavailableException e) {
+    throw new CheckoutFailedException("No se pudo reservar stock", e);  // conservar la causa
+} finally {
+    metrics.increment("checkout.attempt");
+}
+```
+
+Buenas prácticas:
+
+- **No tragar excepciones**: un `catch` vacío esconde errores.
+- **Envolver conservando la causa** (`new X("mensaje", e)`) para no perder el stack trace.
+- **Capturar lo específico**, no `Exception`, salvo en el borde de la aplicación.
+- Las checked no se llevan bien con las lambdas de los streams: muchas APIs modernas prefieren unchecked y un
+  **manejador central** (en Spring, `@ControllerAdvice`).
+
+## try-with-resources
+
+Todo lo que implementa `AutoCloseable` (conexiones, archivos, streams de I/O) se cierra solo al salir del bloque,
+incluso si hay una excepción:
+
+```java
+try (var reader = Files.newBufferedReader(Path.of("orders.csv"));
+     var lines = reader.lines()) {
+    return lines.skip(1).map(OrderCsv::parse).toList();
+} // reader y lines se cierran en orden inverso
+```
+
+Antes de Java 7 había que cerrar en un `finally`, con riesgo de fugas si el cierre también fallaba.
+
+## Comprobá lo aprendido
+
+<KnowledgeCheck
+  id="java.streams-exceptions.q1"
+  question="orders.stream().filter(...).map(...) sin ninguna operación terminal. ¿Cuántas veces se ejecuta el filtro?"
+  options={[
+    { text: "Una vez por elemento.", explanation: "Sin operación terminal no se procesa nada." },
+    {
+      text: "Ninguna: las operaciones intermedias son perezosas.",
+      correct: true,
+      explanation: "Correcto. Recién collect, sum, toList, etc. disparan el procesamiento.",
+    },
+    {
+      text: "Depende de si el stream es paralelo.",
+      explanation: "Paralelo o no, sin terminal no se ejecuta.",
+    },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="java.streams-exceptions.q2"
+  question="¿Qué hace Collectors.toMap si dos elementos producen la misma clave y no se pasó función de merge?"
+  options={[
+    {
+      text: "Se queda con el último.",
+      explanation: "Ese comportamiento hay que pedirlo con una función de merge.",
+    },
+    {
+      text: "Lanza IllegalStateException.",
+      correct: true,
+      explanation: "Correcto. Hay que pasar una función de merge para resolver duplicados.",
+    },
+    { text: "Guarda una lista con ambos.", explanation: "Para eso se usa groupingBy." },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="java.streams-exceptions.q3"
+  question="¿Cuál de estas es una excepción checked?"
+  options={[
+    { text: "IllegalArgumentException", explanation: "Hereda de RuntimeException: es unchecked." },
+    {
+      text: "IOException",
+      correct: true,
+      explanation: "Correcto. Hereda de Exception y hay que declararla o capturarla.",
+    },
+    { text: "NullPointerException", explanation: "Es unchecked." },
+  ]}
+/>
+
+## Resumen
+
+Lambdas y referencias a métodos implementan interfaces funcionales; la Stream API encadena operaciones perezosas
+hasta una terminal. Para errores: unchecked para el dominio, checked donde el llamador realmente puede recuperarse,
+nunca tragar excepciones y try-with-resources para liberar recursos.

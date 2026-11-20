@@ -1,0 +1,285 @@
+---
+id: dotnet.aspnet-core
+moduleId: dotnet.aspnet
+title: "APIs con ASP.NET Core"
+description: "Cómo funciona una aplicación ASP.NET Core: el host, el pipeline de middleware, minimal APIs y controladores, inyección de dependencias con sus lifetimes, configuración con options, validación y errores con ProblemDetails."
+difficulty: intermediate
+order: 4
+objectives:
+  - "Describir el pipeline de middleware y el orden en que se ejecuta."
+  - "Crear endpoints con minimal APIs y con controladores."
+  - "Registrar servicios con el lifetime correcto y evitar dependencias cautivas."
+  - "Configurar la aplicación con appsettings, variables de entorno y el patrón options."
+  - "Responder errores con ProblemDetails y validar la entrada."
+prerequisites: ["dotnet.async-memory"]
+estimatedMinutes: 55
+tags: ["c#", "asp.net core", "inyección de dependencias", "middleware", "apis"]
+version: "1.0.0"
+references:
+  - title: "Microsoft Learn — ASP.NET Core fundamentals"
+    url: "https://learn.microsoft.com/aspnet/core/fundamentals/"
+  - title: "Microsoft Learn — ASP.NET Core middleware"
+    url: "https://learn.microsoft.com/aspnet/core/fundamentals/middleware/"
+  - title: "Microsoft Learn — Dependency injection in ASP.NET Core"
+    url: "https://learn.microsoft.com/aspnet/core/fundamentals/dependency-injection"
+  - title: "Microsoft Learn — Minimal APIs overview"
+    url: "https://learn.microsoft.com/aspnet/core/fundamentals/minimal-apis/overview"
+  - title: "Microsoft Learn — Options pattern"
+    url: "https://learn.microsoft.com/aspnet/core/fundamentals/configuration/options"
+interviewQuestions:
+  - question: "¿Cuáles son los lifetimes de servicios en ASP.NET Core y qué es una dependencia cautiva?"
+    keyPoints:
+      - "Transient: una instancia nueva cada vez que se resuelve."
+      - "Scoped: una instancia por request (por ejemplo, el DbContext)."
+      - "Singleton: una instancia para toda la aplicación; debe ser thread-safe."
+      - "Dependencia cautiva: un singleton que recibe un servicio scoped lo retiene para siempre; en desarrollo el contenedor lo detecta y lanza un error."
+  - question: "¿Cómo funciona el pipeline de middleware?"
+    keyPoints:
+      - "Cada middleware recibe el contexto HTTP y decide si llama al siguiente (next) o corta la cadena."
+      - "Se ejecutan en el orden en que se registran a la ida y en el orden inverso a la vuelta."
+      - "El orden importa: manejo de excepciones primero, autenticación antes de autorización, y luego los endpoints."
+  - question: "¿Minimal APIs o controladores?"
+    keyPoints:
+      - "Ambos son parte de ASP.NET Core y comparten el mismo pipeline, DI y configuración."
+      - "Minimal APIs: menos ceremonia y buen rendimiento; se organizan con grupos de rutas."
+      - "Controladores: convenciones, filtros y una estructura familiar en proyectos grandes."
+      - "La elección es de estilo y organización del equipo."
+summary:
+  - "Program.cs arma el host: registra servicios (builder.Services) y define el pipeline (app.Use…)."
+  - "El orden de los middlewares importa: errores → HTTPS → autenticación → autorización → endpoints."
+  - "Minimal APIs (app.MapGet…) y controladores conviven; ambos usan DI y model binding."
+  - "Lifetimes: Transient, Scoped (por request) y Singleton; nunca inyectes scoped en singleton."
+  - "Configuración en capas: appsettings.json, appsettings.{Environment}.json, variables de entorno y secretos."
+  - "IOptions tipa y valida la configuración al arrancar."
+  - "ProblemDetails (RFC 9457) estandariza las respuestas de error."
+---
+
+## El host y Program.cs
+
+Una aplicación ASP.NET Core se arma en `Program.cs` en dos fases: **registrar servicios** y **definir el pipeline**.
+
+```csharp
+var builder = WebApplication.CreateBuilder(args);
+
+// 1. Servicios (inyección de dependencias)
+builder.Services.AddScoped<IOrderRepository, PostgresOrderRepository>();
+builder.Services.AddScoped<CheckoutService>();
+builder.Services.AddProblemDetails();
+builder.Services.AddHttpClient<IPaymentGateway, PaymentGatewayClient>(c =>
+    c.BaseAddress = new Uri(builder.Configuration["Payments:BaseUrl"]!));
+
+var app = builder.Build();
+
+// 2. Pipeline de middleware
+app.UseExceptionHandler();
+app.UseHttpsRedirection();
+app.UseAuthentication();
+app.UseAuthorization();
+
+// 3. Endpoints
+app.MapGet("/orders/{id}", async (string id, IOrderRepository orders, CancellationToken ct) =>
+    await orders.FindAsync(id, ct) is { } order ? Results.Ok(order) : Results.NotFound());
+
+app.Run();
+```
+
+ASP.NET Core corre sobre **Kestrel**, un servidor web multiplataforma; en producción suele ir detrás de un proxy o un
+balanceador.
+
+## El pipeline de middleware
+
+Cada **middleware** recibe el contexto HTTP, puede hacer algo antes, llamar al siguiente y hacer algo después, o
+**cortar** la cadena respondiendo directamente.
+
+<MermaidDiagram
+  caption="La request atraviesa los middlewares en el orden en que se registraron hasta el endpoint; la respuesta vuelve en orden inverso."
+  chart={`
+flowchart LR
+  R["Request"] --> E["Manejo de excepciones"]
+  E --> H["Redirección HTTPS"]
+  H --> AN["Autenticación"]
+  AN --> AZ["Autorización"]
+  AZ --> EP["Endpoint"]
+  EP -. "respuesta" .-> AZ
+  AZ -. "respuesta" .-> AN
+  AN -. "respuesta" .-> H
+  H -. "respuesta" .-> E
+`}
+/>
+
+```csharp
+app.Use(async (context, next) =>
+{
+    var started = Stopwatch.GetTimestamp();
+    await next(context);                                   // el resto del pipeline
+    var elapsed = Stopwatch.GetElapsedTime(started);
+    app.Logger.LogInformation("{Method} {Path} {Status} en {Elapsed}",
+        context.Request.Method, context.Request.Path, context.Response.StatusCode, elapsed);
+});
+```
+
+**El orden importa**: el manejador de excepciones va primero para capturar los errores de todo lo que sigue, la
+autenticación antes que la autorización, y los endpoints al final.
+
+## Minimal APIs y controladores
+
+**Minimal APIs** definen endpoints con lambdas y se agrupan con `MapGroup`:
+
+```csharp
+var products = app.MapGroup("/api/products").RequireAuthorization();
+
+products.MapPost("/", async (CreateProductRequest request, ProductService service, CancellationToken ct) =>
+{
+    var created = await service.CreateAsync(request, ct);
+    return Results.Created($"/api/products/{created.Id}", created);
+});
+```
+
+**Controladores** organizan endpoints en clases, con atributos:
+
+```csharp
+[ApiController]
+[Route("api/products")]
+public class ProductsController(ProductService service) : ControllerBase   // constructor primario (C# 12)
+{
+    [HttpGet("{id}")]
+    public async Task<ActionResult<ProductResponse>> Get(string id, CancellationToken ct) =>
+        await service.FindAsync(id, ct) is { } product ? product : NotFound();
+}
+```
+
+Ambos comparten pipeline, inyección de dependencias, **model binding** (ruta, query, body y servicios se resuelven
+como parámetros) y configuración. Con `[ApiController]`, un modelo inválido responde 400 automáticamente con
+`ValidationProblemDetails`.
+
+## Inyección de dependencias y lifetimes
+
+El contenedor de dependencias viene integrado. Cada servicio se registra con un **lifetime**:
+
+| Lifetime       | Instancias                         | Uso típico                                           |
+| -------------- | ---------------------------------- | ---------------------------------------------------- |
+| `AddTransient` | Una nueva cada vez que se resuelve | Servicios livianos sin estado                        |
+| `AddScoped`    | Una por request                    | `DbContext`, unidad de trabajo, contexto del usuario |
+| `AddSingleton` | Una para toda la aplicación        | Cachés, configuración, clientes thread-safe          |
+
+<Callout type="danger" title="Dependencia cautiva">
+  Si un **singleton** recibe un servicio **scoped** (por ejemplo, un `DbContext`), lo retiene para siempre y
+  lo comparte entre requests y hilos: errores de concurrencia y datos viejos. En el entorno Development, el
+  contenedor valida los scopes y lanza un error al resolverlo. Si un singleton necesita algo scoped, crea un
+  scope con `IServiceScopeFactory`.
+</Callout>
+
+## Configuración y options
+
+La configuración se arma en **capas**, donde la última gana: `appsettings.json`, `appsettings.{Environment}.json`,
+User Secrets en desarrollo, variables de entorno y argumentos.
+
+```json
+{
+  "Payments": { "BaseUrl": "https://api.payments.example", "TimeoutSeconds": 5 }
+}
+```
+
+```csharp
+public sealed class PaymentsOptions
+{
+    [Required, Url] public string BaseUrl { get; init; } = "";
+    [Range(1, 30)] public int TimeoutSeconds { get; init; }
+}
+
+builder.Services.AddOptions<PaymentsOptions>()
+    .Bind(builder.Configuration.GetSection("Payments"))
+    .ValidateDataAnnotations()
+    .ValidateOnStart();                         // falla al arrancar si la configuración es inválida
+
+public class PaymentGatewayClient(HttpClient http, IOptions<PaymentsOptions> options) { /* ... */ }
+```
+
+Las variables de entorno usan `__` para las secciones: `Payments__BaseUrl`. Los secretos van en variables de entorno o
+en un gestor de secretos, nunca en `appsettings.json` del repositorio.
+
+## Errores y validación
+
+```csharp
+builder.Services.AddProblemDetails();
+builder.Services.AddExceptionHandler<DomainExceptionHandler>();
+
+public sealed class DomainExceptionHandler(IProblemDetailsService problems) : IExceptionHandler
+{
+    public async ValueTask<bool> TryHandleAsync(HttpContext context, Exception exception, CancellationToken ct)
+    {
+        if (exception is not OutOfStockException outOfStock) return false;   // que lo maneje el siguiente
+        context.Response.StatusCode = StatusCodes.Status409Conflict;
+        return await problems.TryWriteAsync(new ProblemDetailsContext
+        {
+            HttpContext = context,
+            ProblemDetails = { Title = "Sin stock", Detail = outOfStock.Message },
+        });
+    }
+}
+```
+
+`ProblemDetails` produce el formato estándar de errores HTTP (RFC 9457). Para validar la entrada se usan Data
+Annotations o librerías como FluentValidation.
+
+## Comprobá lo aprendido
+
+<KnowledgeCheck
+  id="dotnet.aspnet-core.q1"
+  question="Un servicio registrado como Singleton recibe por constructor un DbContext (Scoped). ¿Qué problema hay?"
+  options={[
+    {
+      text: "Ninguno: el contenedor crea un DbContext por request igual.",
+      explanation: "El singleton se crea una vez y retiene el DbContext que recibió.",
+    },
+    {
+      text: "Es una dependencia cautiva: el mismo DbContext se comparte entre requests y hilos.",
+      correct: true,
+      explanation: "Correcto. En Development el contenedor lo detecta y lanza un error.",
+    },
+    {
+      text: "Que el DbContext se crea dos veces por request.",
+      explanation: "Al contrario: se crea una sola vez para toda la aplicación.",
+    },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="dotnet.aspnet-core.q2"
+  question="¿Por qué UseExceptionHandler se registra al principio del pipeline?"
+  options={[
+    {
+      text: "Porque es el middleware más rápido.",
+      explanation: "El motivo es el orden de ejecución, no la velocidad.",
+    },
+    {
+      text: "Para envolver a todos los middlewares y endpoints posteriores y capturar sus excepciones.",
+      correct: true,
+      explanation: "Correcto.",
+    },
+    { text: "Porque la autenticación lo necesita.", explanation: "No hay esa dependencia." },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="dotnet.aspnet-core.q3"
+  question="¿Qué lifetime corresponde al DbContext de Entity Framework en una API?"
+  options={[
+    { text: "Singleton", explanation: "DbContext no es thread-safe y acumula estado." },
+    {
+      text: "Scoped: una instancia por request.",
+      correct: true,
+      explanation: "Correcto. Es lo que registra AddDbContext por defecto.",
+    },
+    {
+      text: "Transient siempre.",
+      explanation: "Distintos servicios de la misma request no compartirían la unidad de trabajo.",
+    },
+  ]}
+/>
+
+## Resumen
+
+ASP.NET Core se arma registrando servicios y definiendo un pipeline de middlewares en orden. Minimal APIs y
+controladores comparten la misma base. Los lifetimes correctos, la configuración tipada y validada al arrancar, y
+ProblemDetails para errores son la base de una API .NET profesional.

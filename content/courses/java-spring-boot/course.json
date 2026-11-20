@@ -1,0 +1,80 @@
+{
+  "id": "java-spring-boot",
+  "slug": "java-spring-boot",
+  "title": "Java y Spring Boot para backend",
+  "description": "Del primer programa en Java a un servicio REST con Spring Boot: sintaxis, orientación a objetos, colecciones, streams, concurrencia, la JVM, inyección de dependencias, JPA, transacciones y testing.",
+  "areaId": "backend-languages",
+  "difficulty": "intermediate",
+  "order": 10,
+  "prerequisites": [],
+  "tags": ["java", "spring boot", "jvm", "backend"],
+  "modules": [
+    {
+      "id": "java.intro",
+      "slug": "introduccion",
+      "title": "Introducción y sintaxis",
+      "description": "Qué es Java, cómo se compila y ejecuta, y la sintaxis necesaria para empezar a programar.",
+      "order": 0,
+      "topics": [
+        "Qué es Java, la JVM y el JDK",
+        "Versiones LTS",
+        "Compilar y ejecutar",
+        "Tipos primitivos y de referencia",
+        "Control de flujo",
+        "Métodos y clases",
+        "Strings y arrays",
+        "Maven y Gradle"
+      ]
+    },
+    {
+      "id": "java.language",
+      "slug": "lenguaje",
+      "title": "El lenguaje en profundidad",
+      "description": "Orientación a objetos, colecciones, genéricos, lambdas, streams y excepciones.",
+      "order": 1,
+      "topics": [
+        "Clases, interfaces, herencia y composición",
+        "Records, enums y sealed",
+        "equals y hashCode",
+        "Collections Framework",
+        "Genéricos",
+        "Optional",
+        "Lambdas y streams",
+        "Excepciones checked y unchecked"
+      ]
+    },
+    {
+      "id": "java.runtime",
+      "slug": "concurrencia-y-jvm",
+      "title": "Concurrencia y JVM",
+      "description": "Hilos, executors, virtual threads, memoria, garbage collection y JIT.",
+      "order": 2,
+      "topics": [
+        "Threads y ExecutorService",
+        "CompletableFuture",
+        "synchronized, locks y volatile",
+        "Colecciones concurrentes",
+        "Virtual threads",
+        "Heap, stack y garbage collection",
+        "JIT"
+      ]
+    },
+    {
+      "id": "java.spring",
+      "slug": "spring-boot",
+      "title": "Spring Boot",
+      "description": "Inversión de control, APIs REST, persistencia con JPA, transacciones, testing y producción.",
+      "order": 3,
+      "topics": [
+        "Inversión de control e inyección de dependencias",
+        "Auto-configuración y starters",
+        "Controladores REST y validación",
+        "Configuración y perfiles",
+        "Spring Data JPA",
+        "@Transactional",
+        "Testing con Spring Boot",
+        "Actuator y producción"
+      ]
+    }
+  ]
+}

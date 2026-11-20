@@ -1,0 +1,60 @@
+{
+  "id": "dotnet",
+  "slug": "dotnet",
+  "title": "C# y .NET para backend",
+  "description": "De la sintaxis de C# a una API con ASP.NET Core: tipos, clases, records, LINQ, async/await, memoria, inyección de dependencias, middleware, Entity Framework Core y testing.",
+  "areaId": "backend-languages",
+  "difficulty": "intermediate",
+  "order": 13,
+  "prerequisites": [],
+  "tags": ["c#", ".net", "asp.net core", "backend"],
+  "modules": [
+    {
+      "id": "dotnet.intro",
+      "slug": "introduccion",
+      "title": "Introducción y sintaxis",
+      "description": "Qué es .NET, cómo se ejecuta un programa en C# y la sintaxis necesaria para programar.",
+      "order": 0,
+      "topics": [
+        "Qué es .NET: CLR, SDK y versiones LTS",
+        "dotnet CLI y proyectos",
+        "Tipos, variables y nullable",
+        "Control de flujo y pattern matching",
+        "Métodos, clases y propiedades",
+        "Strings y colecciones básicas"
+      ]
+    },
+    {
+      "id": "dotnet.language",
+      "slug": "lenguaje",
+      "title": "El lenguaje en profundidad",
+      "description": "Tipos de valor y de referencia, records, interfaces, genéricos, LINQ, async/await y memoria.",
+      "order": 1,
+      "topics": [
+        "Tipos de valor y de referencia",
+        "Clases, structs, records e interfaces",
+        "Genéricos y colecciones",
+        "LINQ y ejecución diferida",
+        "Task, async/await y cancelación",
+        "Excepciones e IDisposable",
+        "Garbage collector"
+      ]
+    },
+    {
+      "id": "dotnet.aspnet",
+      "slug": "aspnet-core",
+      "title": "ASP.NET Core",
+      "description": "APIs, inyección de dependencias, middleware, configuración, Entity Framework Core, testing y producción.",
+      "order": 2,
+      "topics": [
+        "Minimal APIs y controladores",
+        "Inyección de dependencias y lifetimes",
+        "Pipeline de middleware",
+        "Configuración y options",
+        "Entity Framework Core",
+        "Testing con xUnit y WebApplicationFactory",
+        "Producción: logging, health checks y contenedores"
+      ]
+    }
+  ]
+}

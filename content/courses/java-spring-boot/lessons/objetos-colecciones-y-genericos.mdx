@@ -1,0 +1,293 @@
+---
+id: java.objects-collections
+moduleId: java.language
+title: "Objetos, colecciones y genéricos"
+description: "Cómo modelar en Java: clases, interfaces, herencia y composición, records, enums y sealed; el contrato equals/hashCode, el Collections Framework, genéricos y Optional."
+difficulty: intermediate
+order: 2
+objectives:
+  - "Modelar con clases, interfaces, records, enums y jerarquías sealed."
+  - "Implementar correctamente equals y hashCode y explicar por qué importan en colecciones."
+  - "Elegir entre List, Set, Map y sus implementaciones según el caso de uso."
+  - "Usar genéricos, incluidos los comodines extends y super."
+  - "Usar Optional sin abusar de él."
+prerequisites: ["java.introduction"]
+estimatedMinutes: 50
+tags: ["java", "poo", "colecciones", "genéricos", "records"]
+version: "1.0.0"
+references:
+  - title: "Dev.java — Records"
+    url: "https://dev.java/learn/records/"
+  - title: "The Java Tutorials — Collections"
+    url: "https://docs.oracle.com/javase/tutorial/collections/index.html"
+  - title: "The Java Tutorials — Generics"
+    url: "https://docs.oracle.com/javase/tutorial/java/generics/index.html"
+  - title: "Java SE API — Object.equals y hashCode"
+    url: "https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/lang/Object.html"
+  - title: "Dev.java — Sealed classes"
+    url: "https://dev.java/learn/classes-objects/sealed-classes/"
+interviewQuestions:
+  - question: "¿Cuál es el contrato entre equals y hashCode y qué pasa si se rompe?"
+    keyPoints:
+      - "Si dos objetos son iguales según equals, deben tener el mismo hashCode."
+      - "Dos objetos con el mismo hashCode no necesariamente son iguales (colisiones)."
+      - "Si se sobrescribe equals sin hashCode, HashMap y HashSet no encuentran el objeto o guardan duplicados."
+      - "Los campos usados deberían ser inmutables mientras el objeto esté dentro de una colección hash."
+  - question: "¿Cómo funciona un HashMap por dentro?"
+    keyPoints:
+      - "Un array de buckets; el índice sale del hashCode de la clave."
+      - "Las colisiones se encadenan en el bucket; desde Java 8, un bucket con muchas colisiones pasa a ser un árbol."
+      - "Al superar el factor de carga (0,75 por defecto) se redimensiona y redistribuye: O(1) amortizado."
+      - "No es thread-safe: para concurrencia se usa ConcurrentHashMap."
+  - question: "¿Cuándo usarías un record y cuándo una clase?"
+    keyPoints:
+      - "Un record es un portador inmutable de datos: genera constructor, accessors, equals, hashCode y toString."
+      - "Ideal para DTOs, valores y resultados."
+      - "Una clase cuando hay estado mutable, identidad propia o comportamiento complejo (por ejemplo, entidades JPA)."
+summary:
+  - "Preferí composición e interfaces a jerarquías de herencia profundas."
+  - "Los records modelan datos inmutables en una línea; los enums, conjuntos cerrados de valores."
+  - "sealed limita qué clases pueden implementar una interfaz: permite switch exhaustivos."
+  - "equals y hashCode van juntos; si no, las colecciones hash se rompen."
+  - "ArrayList para listas, HashMap/HashSet para búsquedas O(1), TreeMap si necesitás orden, LinkedHashMap para orden de inserción."
+  - "Los genéricos se verifican en compilación y se borran en runtime (type erasure)."
+  - "PECS: Producer Extends, Consumer Super."
+  - "Optional es para valores de retorno que pueden faltar, no para campos ni parámetros."
+---
+
+## Clases, interfaces y herencia
+
+Una **interfaz** define un contrato; una **clase** lo implementa. Java permite heredar de una sola clase
+(`extends`) e implementar varias interfaces (`implements`). Desde Java 8 las interfaces pueden tener métodos
+`default` con implementación.
+
+```java
+public interface PaymentMethod {
+    PaymentResult charge(long amountCents);
+
+    default boolean supportsRefunds() {
+        return true;
+    }
+}
+
+public class CardPayment implements PaymentMethod {
+    private final String token;
+
+    public CardPayment(String token) {
+        this.token = token;
+    }
+
+    @Override
+    public PaymentResult charge(long amountCents) {
+        // llamaría al proveedor de pagos
+        return PaymentResult.approved("tx-" + token);
+    }
+}
+```
+
+`@Override` hace que el compilador verifique que realmente estás sobrescribiendo un método. Una clase `abstract`
+puede tener métodos sin implementar y no se instancia.
+
+<Callout type="tip" title="Composición antes que herencia">
+  La herencia acopla la subclase a los detalles de la clase padre. Para reutilizar comportamiento, en general
+  es mejor que un objeto **tenga** otro (composición) y dependa de una interfaz. Es lo que hace posible la
+  inyección de dependencias de Spring.
+</Callout>
+
+## Records, enums y sealed
+
+Un **record** (Java 16) es una clase inmutable para datos: el compilador genera el constructor, los accessors,
+`equals`, `hashCode` y `toString`.
+
+```java
+public record Money(long cents, String currency) {
+    public Money {                          // constructor compacto: validación
+        if (cents < 0) throw new IllegalArgumentException("Monto negativo");
+        if (currency == null || currency.length() != 3) throw new IllegalArgumentException("Moneda inválida");
+    }
+
+    public Money plus(Money other) {
+        if (!currency.equals(other.currency)) throw new IllegalArgumentException("Monedas distintas");
+        return new Money(cents + other.cents, currency);
+    }
+}
+
+var price = new Money(1500, "ARS");
+price.cents();   // los accessors no llevan "get"
+```
+
+Un **enum** modela un conjunto cerrado de valores y puede tener campos y métodos:
+
+```java
+public enum OrderStatus {
+    CREATED, PAID, SHIPPED, DELIVERED, CANCELLED;
+
+    public boolean isFinal() {
+        return this == DELIVERED || this == CANCELLED;
+    }
+}
+```
+
+Con **sealed** (Java 17) se declara qué tipos pueden implementar una interfaz. Combinado con records y el pattern
+matching de `switch` (Java 21), el compilador verifica que se cubran todos los casos:
+
+```java
+public sealed interface PaymentEvent permits Approved, Rejected, Refunded {}
+public record Approved(String txId, long cents) implements PaymentEvent {}
+public record Rejected(String reason) implements PaymentEvent {}
+public record Refunded(String txId) implements PaymentEvent {}
+
+String describe(PaymentEvent event) {
+    return switch (event) {                  // sin default: si falta un caso, no compila
+        case Approved a -> "Aprobado por " + a.cents();
+        case Rejected r -> "Rechazado: " + r.reason();
+        case Refunded f -> "Reembolsado " + f.txId();
+    };
+}
+```
+
+## equals y hashCode
+
+Por defecto, `equals` compara **identidad** (si son el mismo objeto). Para objetos de valor hay que sobrescribirlo,
+y **siempre junto con `hashCode`**:
+
+- Si `a.equals(b)`, entonces `a.hashCode() == b.hashCode()`.
+- Lo inverso no es necesario: dos objetos distintos pueden compartir hash.
+
+Si se rompe el contrato, un `HashSet` puede guardar duplicados o un `HashMap` no encontrar la clave. Los records ya lo
+implementan bien; en clases comunes se usa `Objects.equals` y `Objects.hash`, o lo genera el IDE.
+
+```java
+@Override
+public boolean equals(Object o) {
+    if (this == o) return true;
+    if (!(o instanceof Sku other)) return false;   // pattern matching de instanceof (Java 16)
+    return code.equals(other.code);
+}
+
+@Override
+public int hashCode() {
+    return Objects.hash(code);
+}
+```
+
+## El Collections Framework
+
+| Interfaz        | Implementación habitual | Acceso                     | Notas                                               |
+| --------------- | ----------------------- | -------------------------- | --------------------------------------------------- |
+| `List`          | `ArrayList`             | índice O(1), búsqueda O(n) | Orden de inserción, permite duplicados              |
+| `Set`           | `HashSet`               | contiene O(1) promedio     | Sin duplicados (usa equals/hashCode)                |
+| `Set` ordenado  | `TreeSet`               | O(log n)                   | Ordenado por comparador                             |
+| `Map`           | `HashMap`               | get/put O(1) promedio      | Sin orden garantizado                               |
+| `Map`           | `LinkedHashMap`         | O(1)                       | Mantiene orden de inserción (base de una caché LRU) |
+| `Map` ordenado  | `TreeMap`               | O(log n)                   | Rangos: `headMap`, `ceilingKey`                     |
+| `Queue`/`Deque` | `ArrayDeque`            | O(1) en extremos           | Pila y cola; preferible a `Stack`                   |
+| Prioridad       | `PriorityQueue`         | O(log n)                   | Heap binario                                        |
+
+```java
+List<String> skus = new ArrayList<>();
+skus.add("SKU-1");
+
+Map<String, Integer> stock = new HashMap<>();
+stock.merge("SKU-1", 5, Integer::sum);            // suma si ya existe
+stock.getOrDefault("SKU-9", 0);
+stock.computeIfAbsent("SKU-2", k -> 0);
+
+List<String> fixed = List.of("a", "b");            // inmutable: add lanza UnsupportedOperationException
+Map<String, Integer> prices = Map.of("A", 100, "B", 200);
+```
+
+**HashMap por dentro**: un array de buckets; el índice sale del `hashCode` de la clave. Las colisiones se
+encadenan en el bucket y, desde Java 8, un bucket con muchas entradas se convierte en un árbol balanceado. Al superar
+el factor de carga (0,75 por defecto) el array se duplica. **No es thread-safe**: para concurrencia, `ConcurrentHashMap`.
+
+## Genéricos
+
+Los genéricos parametrizan tipos para detectar errores en compilación: `List<String>` no acepta un `Integer`.
+
+```java
+public class Page<T> {
+    private final List<T> items;
+    private final String nextCursor;
+    // ...
+}
+
+public static <T extends Comparable<T>> T max(List<T> values) { /* ... */ }
+```
+
+Igual que en TypeScript, los genéricos de Java usan **type erasure**: en runtime `List<String>` y `List<Integer>`
+son la misma clase. Por eso no se puede hacer `new T()` ni preguntar `instanceof List<String>`.
+
+Los **comodines** controlan la variancia, con la regla **PECS** (_Producer Extends, Consumer Super_):
+
+```java
+// Lee números de cualquier lista de subtipos de Number: la lista "produce"
+double sum(List<? extends Number> values) { /* ... */ }
+
+// Agrega enteros a una lista de Integer, Number u Object: la lista "consume"
+void fill(List<? super Integer> target) { target.add(42); }
+```
+
+## Optional
+
+`Optional<T>` representa un valor de retorno que **puede no existir**, y obliga a quien llama a considerarlo:
+
+```java
+Optional<Customer> customer = repository.findByEmail(email);
+String name = customer.map(Customer::name).orElse("Invitado");
+Customer found = customer.orElseThrow(() -> new CustomerNotFound(email));
+```
+
+Usalo como tipo de retorno. No conviene en campos, parámetros ni colecciones (`Optional<List<…>>`: devolvé una lista
+vacía). Nunca llames `get()` sin verificar: para eso está `orElseThrow`.
+
+## Comprobá lo aprendido
+
+<KnowledgeCheck
+  id="java.objects-collections.q1"
+  question="Una clase sobrescribe equals pero no hashCode y se usa como clave de un HashMap. ¿Qué puede pasar?"
+  options={[
+    {
+      text: "Nada: HashMap sólo usa equals.",
+      explanation: "HashMap usa hashCode para elegir el bucket y después equals.",
+    },
+    {
+      text: "Que dos claves iguales caigan en buckets distintos y el get no encuentre el valor.",
+      correct: true,
+      explanation: "Correcto. Se rompe el contrato equals/hashCode.",
+    },
+    { text: "Un error de compilación.", explanation: "Compila; el problema aparece en runtime." },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="java.objects-collections.q2"
+  question="Necesitás una colección sin duplicados que recorra los elementos ordenados. ¿Cuál usás?"
+  options={[
+    { text: "HashSet", explanation: "No garantiza ningún orden." },
+    {
+      text: "TreeSet",
+      correct: true,
+      explanation: "Correcto. Mantiene los elementos ordenados con O(log n) por operación.",
+    },
+    { text: "ArrayList", explanation: "Permite duplicados y no ordena sola." },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="java.objects-collections.q3"
+  question="¿Qué genera automáticamente un record?"
+  options={[
+    { text: "Setters para cada campo.", explanation: "Los records son inmutables: no tienen setters." },
+    { text: "Constructor, accessors, equals, hashCode y toString.", correct: true, explanation: "Correcto." },
+    {
+      text: "Una tabla en la base de datos.",
+      explanation: "Eso sería JPA, y los records no sirven como entidades JPA.",
+    },
+  ]}
+/>
+
+## Resumen
+
+Modelá con interfaces y composición, records para datos inmutables, enums y sealed para conjuntos cerrados.
+Respetá equals/hashCode, elegí la colección por su complejidad, usá genéricos con PECS y Optional sólo como retorno.

@@ -1,0 +1,281 @@
+---
+id: python.idiomatic
+moduleId: python.language
+title: "Python idiomático: comprensiones, generadores, decoradores y clases"
+description: "Mutabilidad y referencias, comprensiones, generadores e iteradores, closures y decoradores, clases con métodos especiales, propiedades y dataclasses."
+difficulty: intermediate
+order: 2
+objectives:
+  - "Explicar cómo funcionan las referencias y evitar los errores clásicos de mutabilidad."
+  - "Escribir comprensiones y generadores, y elegir entre ellos según la memoria."
+  - "Crear decoradores con closures y functools.wraps."
+  - "Modelar con clases, métodos especiales, propiedades y dataclasses."
+  - "Conocer la complejidad de las operaciones de las colecciones."
+prerequisites: ["python.introduction"]
+estimatedMinutes: 50
+tags: ["python", "comprensiones", "generadores", "decoradores", "dataclasses"]
+version: "1.0.0"
+references:
+  - title: "The Python Tutorial — Data Structures"
+    url: "https://docs.python.org/3/tutorial/datastructures.html"
+  - title: "The Python Tutorial — Classes"
+    url: "https://docs.python.org/3/tutorial/classes.html"
+  - title: "Python docs — dataclasses"
+    url: "https://docs.python.org/3/library/dataclasses.html"
+  - title: "Python docs — functools.wraps"
+    url: "https://docs.python.org/3/library/functools.html#functools.wraps"
+  - title: "Python Wiki — TimeComplexity"
+    url: "https://wiki.python.org/moin/TimeComplexity"
+interviewQuestions:
+  - question: "¿Por qué no conviene usar una lista como valor por defecto de un parámetro?"
+    keyPoints:
+      - "El valor por defecto se evalúa una sola vez, al definir la función."
+      - "Todas las llamadas comparten la misma lista, que acumula cambios entre llamadas."
+      - "Se usa None como valor por defecto y se crea la lista dentro de la función."
+  - question: "¿Qué es un generador y cuándo lo usarías?"
+    keyPoints:
+      - "Una función con yield que produce valores de a uno, bajo demanda (evaluación perezosa)."
+      - "Usa memoria constante aunque procese millones de elementos."
+      - "Útil para leer archivos grandes, paginar APIs o encadenar transformaciones."
+      - "Se puede recorrer una sola vez."
+  - question: "¿Qué es un decorador?"
+    keyPoints:
+      - "Una función que recibe una función y devuelve otra que la envuelve."
+      - "La sintaxis @decorador es azúcar para f = decorador(f)."
+      - "Se usa para logging, reintentos, caché, autorización y registro de rutas (como en FastAPI)."
+      - "functools.wraps conserva el nombre y la documentación de la función original."
+summary:
+  - "Las variables son referencias: asignar no copia; usá copy o deepcopy cuando necesites una copia."
+  - "Nunca uses un objeto mutable como valor por defecto de un parámetro."
+  - "Comprensiones para construir listas, diccionarios y sets; generadores para procesar flujos grandes."
+  - "Un decorador envuelve una función; functools.wraps conserva sus metadatos."
+  - "Los métodos especiales (__repr__, __eq__, __len__…) integran tus clases con el lenguaje."
+  - "@property expone cálculos como atributos; @dataclass genera __init__, __repr__ y __eq__."
+  - "list: append O(1), insertar al principio O(n); dict y set: O(1) promedio; para colas, collections.deque."
+---
+
+## Referencias y mutabilidad
+
+En Python todo es un objeto y las variables son **nombres que apuntan a objetos**. Asignar no copia:
+
+```python
+cart = ["SKU-1"]
+backup = cart          # mismo objeto
+backup.append("SKU-2")
+cart                   # ['SKU-1', 'SKU-2']
+
+import copy
+snapshot = cart.copy()           # copia superficial (también list(cart) o cart[:])
+deep = copy.deepcopy(order)      # copia también los objetos anidados
+```
+
+Los tipos **inmutables** (`int`, `str`, `tuple`, `frozenset`) no cambian: cualquier "modificación" crea un objeto
+nuevo. Los **mutables** (`list`, `dict`, `set`, objetos de tus clases) sí.
+
+<Callout type="danger" title="El error del parámetro mutable por defecto">
+  El valor por defecto se evalúa **una sola vez**, al definir la función. Con `def add(item, items=[])`, todas
+  las llamadas comparten la misma lista y se acumulan los elementos. Usá `items=None` y creá la lista adentro:
+  `items = [] if items is None else items`.
+</Callout>
+
+## Comprensiones
+
+Una **comprensión** construye una colección a partir de otra en una sola expresión:
+
+```python
+prices = [p.price_cents for p in products if p.active]                 # lista
+by_sku = {p.sku: p for p in products}                                  # diccionario
+categories = {p.category for p in products}                            # set
+total = sum(i.price_cents * i.quantity for i in cart)                  # expresión generadora
+```
+
+Son más rápidas y legibles que el `for` con `append` equivalente, siempre que la lógica sea simple. Si necesitás
+varios `if` anidados o efectos secundarios, un bucle explícito es más claro.
+
+## Iteradores y generadores
+
+Un **generador** es una función con `yield`: produce valores de a uno, **bajo demanda**, y conserva su estado entre
+llamadas.
+
+```python
+def read_orders(path):
+    with open(path, encoding="utf-8") as file:
+        next(file)                              # salta el encabezado
+        for line in file:                       # el archivo también se lee línea por línea
+            yield Order.from_csv(line)
+
+paid = (o for o in read_orders("orders.csv") if o.status == "PAID")   # nada se ejecutó todavía
+revenue = sum(o.total_cents for o in paid)                            # recién acá se recorre
+```
+
+Procesar un archivo de 10 GB así usa memoria constante, porque nunca hay más de un pedido en memoria. Un generador
+**se consume una sola vez**. El módulo `itertools` agrega herramientas como `islice`, `groupby` y `chain`.
+
+<MermaidDiagram
+  caption="Un pipeline de generadores procesa un elemento por vez: cada etapa pide el siguiente a la anterior sólo cuando lo necesita."
+  chart={`
+flowchart LR
+  A["Archivo CSV"] -->|"una línea"| B["read_orders: yield Order"]
+  B -->|"un pedido"| C["filtro: status PAID"]
+  C -->|"un pedido"| D["sum: acumula el total"]
+`}
+/>
+
+## Closures y decoradores
+
+Una función definida dentro de otra **recuerda** las variables del ámbito donde se creó (closure). Sobre esa idea se
+construyen los **decoradores**: funciones que reciben una función y devuelven otra que la envuelve.
+
+```python
+import functools
+import time
+
+def retry(times: int, delay_s: float = 0.2):
+    def decorator(func):
+        @functools.wraps(func)                      # conserva __name__ y docstring
+        def wrapper(*args, **kwargs):
+            for attempt in range(1, times + 1):
+                try:
+                    return func(*args, **kwargs)
+                except ConnectionError:
+                    if attempt == times:
+                        raise
+                    time.sleep(delay_s * 2 ** (attempt - 1))   # backoff exponencial
+        return wrapper
+    return decorator
+
+@retry(times=3)
+def fetch_exchange_rate(currency: str) -> float:
+    ...
+```
+
+`@retry(times=3)` es azúcar sintáctica para `fetch_exchange_rate = retry(times=3)(fetch_exchange_rate)`. FastAPI,
+Flask, pytest y `functools.cache` usan decoradores constantemente.
+
+## Clases
+
+```python
+class Cart:
+    def __init__(self, customer_id: str):
+        self.customer_id = customer_id          # atributos de instancia
+        self._items: dict[str, int] = {}        # el guion bajo indica "privado" por convención
+
+    def add(self, sku: str, quantity: int = 1) -> None:
+        if quantity <= 0:
+            raise ValueError("Cantidad inválida")
+        self._items[sku] = self._items.get(sku, 0) + quantity
+
+    @property
+    def total_items(self) -> int:              # se usa como atributo: cart.total_items
+        return sum(self._items.values())
+
+    def __len__(self) -> int:                  # len(cart)
+        return len(self._items)
+
+    def __repr__(self) -> str:                 # representación para depurar
+        return f"Cart({self.customer_id!r}, {self._items})"
+```
+
+- `self` es explícito: es la instancia, equivalente a `this`.
+- No hay modificadores de acceso: `_nombre` indica uso interno por convención.
+- Los **métodos especiales** (`__eq__`, `__lt__`, `__iter__`, `__getitem__`, `__enter__`…) integran tus clases con
+  la sintaxis del lenguaje.
+- La herencia se declara con `class CardPayment(Payment):` y `super().__init__(...)` llama al padre. Python admite
+  herencia múltiple, aunque en la práctica se prefiere composición.
+
+## Dataclasses
+
+Para clases que sobre todo **guardan datos**, `@dataclass` genera `__init__`, `__repr__` y `__eq__`:
+
+```python
+from dataclasses import dataclass, field
+
+@dataclass(frozen=True)                          # inmutable y hashable
+class Money:
+    cents: int
+    currency: str = "ARS"
+
+    def __post_init__(self):
+        if self.cents < 0:
+            raise ValueError("Monto negativo")
+
+@dataclass
+class Order:
+    id: str
+    items: list[str] = field(default_factory=list)   # evita el problema del mutable por defecto
+
+Money(1500) == Money(1500)       # True: compara por valor
+```
+
+Para validar datos que llegan de afuera (JSON de una API), en backend se usa **Pydantic**, que veremos con FastAPI.
+
+## Complejidad de las colecciones
+
+| Operación                      | `list`          | `dict` / `set` |
+| ------------------------------ | --------------- | -------------- |
+| Acceso por índice o clave      | O(1)            | O(1) promedio  |
+| `x in coleccion`               | O(n)            | O(1) promedio  |
+| Agregar al final               | O(1) amortizado | O(1) promedio  |
+| Insertar o quitar al principio | O(n)            | —              |
+
+Para colas usá `collections.deque` (O(1) en ambos extremos); para un heap, el módulo `heapq`; para contar,
+`collections.Counter`; y para agrupar, `collections.defaultdict`.
+
+## Comprobá lo aprendido
+
+<KnowledgeCheck
+  id="python.idiomatic.q1"
+  question="def add(item, items=[]): items.append(item); return items. ¿Qué devuelve la segunda llamada add('b') después de add('a')?"
+  options={[
+    { text: "['b']", explanation: "La lista por defecto se comparte entre llamadas." },
+    {
+      text: "['a', 'b']",
+      correct: true,
+      explanation: "Correcto. El valor por defecto se evalúa una sola vez.",
+    },
+    { text: "Un error.", explanation: "Funciona, pero con un comportamiento inesperado." },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="python.idiomatic.q2"
+  question="Tenés que sumar los montos de un archivo de 20 GB. ¿Qué conviene?"
+  options={[
+    {
+      text: "Leerlo entero con file.read() y después procesarlo.",
+      explanation: "Carga los 20 GB en memoria.",
+    },
+    {
+      text: "Un generador que procese línea por línea y sum sobre él.",
+      correct: true,
+      explanation: "Correcto. Memoria constante.",
+    },
+    {
+      text: "Una comprensión de lista con todas las líneas.",
+      explanation: "Construye una lista con todo el contenido en memoria.",
+    },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="python.idiomatic.q3"
+  question="¿Para qué sirve functools.wraps al escribir un decorador?"
+  options={[
+    {
+      text: "Para que el decorador se ejecute más rápido.",
+      explanation: "No tiene impacto en el rendimiento.",
+    },
+    {
+      text: "Para que la función envuelta conserve su nombre, docstring y otros metadatos.",
+      correct: true,
+      explanation: "Correcto. Sin wraps, la función decorada se llamaría wrapper.",
+    },
+    { text: "Para poder decorar clases.", explanation: "No es su propósito." },
+  ]}
+/>
+
+## Resumen
+
+El Python idiomático aprovecha comprensiones, generadores y decoradores, y modela datos con clases y dataclasses.
+Entender referencias y mutabilidad evita los errores más comunes, y conocer la complejidad de las colecciones es clave
+en entrevistas de live coding en Python.

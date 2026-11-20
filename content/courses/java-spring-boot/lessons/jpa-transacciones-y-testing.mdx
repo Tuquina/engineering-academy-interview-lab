@@ -1,0 +1,283 @@
+---
+id: java.spring-data
+moduleId: java.spring
+title: "Persistencia con JPA, transacciones y testing"
+description: "Spring Data JPA y Hibernate: entidades, repositorios, el contexto de persistencia y el problema N+1; cómo funciona @Transactional y sus trampas; y cómo testear y operar un servicio Spring Boot en producción."
+difficulty: advanced
+order: 6
+objectives:
+  - "Mapear entidades y usar repositorios de Spring Data JPA."
+  - "Detectar y resolver el problema N+1 y elegir entre carga lazy y eager."
+  - "Explicar cómo funciona @Transactional (proxies, propagación, rollback) y sus errores frecuentes."
+  - "Escribir tests unitarios, de capa web y de integración con una base real."
+  - "Preparar el servicio para producción con Actuator, migraciones e imágenes de contenedor."
+prerequisites: ["java.spring-boot"]
+estimatedMinutes: 60
+tags: ["java", "spring data", "jpa", "hibernate", "transacciones", "testing"]
+version: "1.0.0"
+references:
+  - title: "Spring Data JPA — Reference Documentation"
+    url: "https://docs.spring.io/spring-data/jpa/reference/"
+  - title: "Spring Framework — Declarative Transaction Management"
+    url: "https://docs.spring.io/spring-framework/reference/data-access/transaction/declarative.html"
+  - title: "Spring Boot — Testing"
+    url: "https://docs.spring.io/spring-boot/reference/testing/index.html"
+  - title: "Testcontainers for Java"
+    url: "https://java.testcontainers.org/"
+  - title: "Spring Boot — Actuator"
+    url: "https://docs.spring.io/spring-boot/reference/actuator/index.html"
+interviewQuestions:
+  - question: "¿Qué es el problema N+1 en JPA y cómo se resuelve?"
+    keyPoints:
+      - "Se carga una lista de N entidades con una consulta y, al acceder a una relación lazy de cada una, se dispara una consulta más por elemento."
+      - "Se detecta activando el log de SQL o contando consultas en los tests."
+      - "Se resuelve con JOIN FETCH, @EntityGraph, consultas que devuelven DTOs o batch fetching."
+      - "Cambiar todo a EAGER no es la solución: carga datos de más en todos los casos."
+  - question: "¿Por qué a veces @Transactional no tiene efecto?"
+    keyPoints:
+      - "Spring implementa @Transactional con un proxy alrededor del bean."
+      - "Una llamada interna desde otro método de la misma clase (self-invocation) no pasa por el proxy: no abre transacción."
+      - "Por defecto sólo hace rollback ante excepciones unchecked; con checked hace commit salvo que se configure rollbackFor."
+      - "Los métodos tienen que ser llamados desde afuera del bean y no ser privados."
+  - question: "¿Qué tipos de tests escribirías para un servicio Spring Boot?"
+    keyPoints:
+      - "Unitarios del dominio y los servicios, con fakes o mocks, sin levantar Spring."
+      - "Slices: @WebMvcTest para controladores y @DataJpaTest para repositorios."
+      - "Integración con @SpringBootTest y una base real en contenedor (Testcontainers)."
+      - "Pocos end-to-end para los flujos críticos."
+summary:
+  - "Una entidad JPA es una clase mapeada a una tabla; Spring Data genera la implementación de los repositorios."
+  - "Las entidades administradas se sincronizan solas con la base al hacer commit (dirty checking)."
+  - "Por defecto, las relaciones a colecciones son LAZY: cuidado con el N+1 y con acceder fuera de la transacción."
+  - "@Transactional funciona por proxy: la self-invocation no abre transacción."
+  - "Rollback por defecto sólo ante RuntimeException y Error."
+  - "Las migraciones del esquema se versionan con Flyway o Liquibase, no con ddl-auto en producción."
+  - "Testcontainers levanta PostgreSQL real en los tests de integración."
+  - "Actuator expone health, métricas y probes para Kubernetes."
+---
+
+## JPA, Hibernate y Spring Data
+
+**JPA** (Jakarta Persistence) es la especificación estándar para mapear objetos a tablas. **Hibernate** es su
+implementación más usada. **Spring Data JPA** agrega repositorios que se implementan solos a partir de interfaces.
+
+```java
+@Entity
+@Table(name = "orders")
+public class Order {
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+
+    @Column(nullable = false)
+    private String customerId;
+
+    @Enumerated(EnumType.STRING)
+    private OrderStatus status;
+
+    @OneToMany(mappedBy = "order", cascade = CascadeType.ALL, orphanRemoval = true)
+    private List<OrderItem> items = new ArrayList<>();
+
+    @Version                       // control de concurrencia optimista
+    private long version;
+
+    protected Order() {}           // JPA necesita un constructor sin argumentos
+
+    public void pay() {
+        if (status != OrderStatus.CREATED) throw new IllegalStateException("No se puede pagar en estado " + status);
+        status = OrderStatus.PAID;
+    }
+}
+
+public interface OrderRepository extends JpaRepository<Order, Long> {
+    List<Order> findByCustomerIdAndStatus(String customerId, OrderStatus status);   // consulta derivada del nombre
+
+    @Query("select o from Order o join fetch o.items where o.id = :id")
+    Optional<Order> findWithItems(@Param("id") Long id);
+}
+```
+
+Las entidades son clases mutables con identidad: no uses records para ellas.
+
+### El contexto de persistencia
+
+Dentro de una transacción, las entidades cargadas quedan **administradas**: si cambiás un campo, Hibernate detecta el
+cambio (_dirty checking_) y ejecuta el `UPDATE` al hacer commit, sin llamar a `save`.
+
+```java
+@Transactional
+public void pay(Long orderId) {
+    Order order = orders.findById(orderId).orElseThrow();
+    order.pay();          // al terminar el método, Hibernate ejecuta el UPDATE
+}
+```
+
+`@Version` agrega concurrencia optimista: si dos transacciones modifican el mismo pedido, la segunda falla con
+`OptimisticLockException` en lugar de pisar silenciosamente a la primera.
+
+## El problema N+1
+
+```java
+List<Order> list = orders.findAll();          // 1 consulta
+for (Order o : list) {
+    o.getItems().size();                      // +1 consulta por pedido (relación LAZY)
+}
+```
+
+Con 500 pedidos son 501 consultas. Se detecta activando el log de SQL (`spring.jpa.show-sql` o el logger
+`org.hibernate.SQL`) y se resuelve trayendo lo necesario en una sola consulta:
+
+| Técnica                                               | Cuándo                                                   |
+| ----------------------------------------------------- | -------------------------------------------------------- |
+| `join fetch` en una `@Query`                          | Una pantalla concreta necesita la relación.              |
+| `@EntityGraph`                                        | Lo mismo de forma declarativa sobre el repositorio.      |
+| Proyección a DTO                                      | Listados de lectura: traer sólo las columnas necesarias. |
+| Batch fetching (`hibernate.default_batch_fetch_size`) | Cargar relaciones de a lotes con `IN`.                   |
+
+Poner todo en `EAGER` no lo soluciona: carga datos de más en todos los casos y no evita el N+1 en todas las consultas.
+
+## Cómo funciona @Transactional
+
+Spring envuelve el bean en un **proxy**. Cuando alguien llama a un método `@Transactional` desde afuera, el proxy abre
+la transacción, ejecuta el método y hace commit o rollback.
+
+<MermaidDiagram
+  caption="La transacción la maneja el proxy. Una llamada interna desde la misma clase no pasa por él y no abre transacción."
+  chart={`
+sequenceDiagram
+  participant C as Controller
+  participant P as Proxy de Spring
+  participant S as OrderService
+  participant DB as Base de datos
+  C->>P: placeOrder()
+  P->>DB: BEGIN
+  P->>S: placeOrder()
+  S->>DB: INSERT order e items
+  S-->>P: retorna sin excepción
+  P->>DB: COMMIT
+  P-->>C: resultado
+`}
+/>
+
+Trampas frecuentes:
+
+- **Self-invocation**: `this.otroMetodoTransaccional()` desde la misma clase no pasa por el proxy y no abre
+  transacción.
+- **Rollback**: por defecto sólo ante `RuntimeException` y `Error`. Con una excepción checked hace **commit**, salvo que
+  se indique `@Transactional(rollbackFor = Exception.class)`.
+- **Llamadas lentas dentro de la transacción**: llamar a un proveedor de pagos con la transacción abierta mantiene
+  conexiones y locks tomados. Mejor: guardar el estado, hacer commit y llamar afuera (o usar outbox).
+- **Propagación**: `REQUIRED` (por defecto) se une a la transacción existente; `REQUIRES_NEW` abre una nueva y suspende
+  la actual (útil para registrar auditoría aunque la principal falle).
+- `@Transactional(readOnly = true)` en consultas permite optimizaciones de Hibernate y del driver.
+
+## Migraciones del esquema
+
+`spring.jpa.hibernate.ddl-auto=update` es cómodo para prototipos, pero en producción el esquema se versiona con
+**Flyway** o **Liquibase**: scripts SQL numerados que se aplican al arrancar o en el pipeline, revisables en code
+review y repetibles en todos los entornos.
+
+## Testing
+
+| Nivel         | Herramienta                                 | Qué levanta                                             |
+| ------------- | ------------------------------------------- | ------------------------------------------------------- |
+| Unitario      | JUnit 5 + AssertJ (+ Mockito si hace falta) | Nada de Spring: `new` con fakes                         |
+| Capa web      | `@WebMvcTest`                               | Sólo controladores, filtros y JSON; servicios simulados |
+| Capa de datos | `@DataJpaTest`                              | Repositorios y JPA contra una base                      |
+| Integración   | `@SpringBootTest` + Testcontainers          | La aplicación completa con PostgreSQL real              |
+
+```java
+@SpringBootTest
+@Testcontainers
+class CheckoutIntegrationTest {
+    // El paquete exacto de PostgreSQLContainer depende de la versión de Testcontainers.
+    @Container
+    @ServiceConnection                           // Spring Boot configura el datasource con el contenedor
+    static PostgreSQLContainer<?> postgres = new PostgreSQLContainer<>("postgres:17");
+
+    @Autowired CheckoutService checkout;
+    @Autowired OrderRepository orders;
+
+    @Test
+    void createsAPaidOrder() {
+        var order = checkout.checkout(new CheckoutCommand("c-1", List.of(new Line("SKU-1", 2))));
+        assertThat(orders.findById(order.id())).get()
+            .extracting(Order::getStatus).isEqualTo(OrderStatus.PAID);
+    }
+}
+```
+
+Probar contra **la misma base que en producción** encuentra errores de SQL, restricciones y transacciones que una base
+en memoria como H2 no muestra.
+
+## Producción
+
+- **Actuator**: `/actuator/health` con probes de liveness y readiness para Kubernetes, métricas con Micrometer
+  (Prometheus, OpenTelemetry).
+- **Imagen de contenedor**: `mvn spring-boot:build-image` genera una imagen con Buildpacks, o un Dockerfile multi-stage
+  con un JRE.
+- **Pool de conexiones**: HikariCP es el pool por defecto; su tamaño se ajusta según las conexiones que admite la base.
+- **Apagado ordenado**: termina las requests en curso antes de cerrar (`server.shutdown=graceful`, activo por defecto
+  desde Spring Boot 3.4) con un tiempo máximo configurable.
+
+## Comprobá lo aprendido
+
+<KnowledgeCheck
+  id="java.spring-data.q1"
+  question="Un método público de OrderService llama a this.saveAudit(), anotado con @Transactional(propagation = REQUIRES_NEW). ¿Se abre una transacción nueva?"
+  options={[
+    {
+      text: "Sí, siempre que el método esté anotado.",
+      explanation: "La anotación la interpreta el proxy, y una llamada con this no pasa por él.",
+    },
+    {
+      text: "No: es self-invocation y no pasa por el proxy de Spring.",
+      correct: true,
+      explanation: "Correcto. Hay que mover el método a otro bean.",
+    },
+    {
+      text: "Sólo si la clase es final.",
+      explanation: "Al contrario: las clases final no pueden ser proxied por subclase.",
+    },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="java.spring-data.q2"
+  question="Un endpoint lista 200 pedidos y para cada uno accede a sus ítems. El log muestra 201 consultas. ¿Cuál es la mejor solución?"
+  options={[
+    {
+      text: "Cambiar la relación a FetchType.EAGER.",
+      explanation: "Carga los ítems en todas las consultas, aunque no se necesiten.",
+    },
+    {
+      text: "Una consulta con join fetch, @EntityGraph o una proyección a DTO para ese caso.",
+      correct: true,
+      explanation: "Correcto. Se trae lo necesario en una consulta para ese caso de uso.",
+    },
+    {
+      text: "Agregar caché de segundo nivel.",
+      explanation: "Esconde el síntoma sin resolver la cantidad de consultas.",
+    },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="java.spring-data.q3"
+  question="Un método @Transactional lanza una excepción checked (IOException) sin configuración extra. ¿Qué pasa con la transacción?"
+  options={[
+    { text: "Hace rollback.", explanation: "Por defecto el rollback es sólo para unchecked." },
+    {
+      text: "Hace commit.",
+      correct: true,
+      explanation: "Correcto. Hay que configurar rollbackFor para que haga rollback ante checked.",
+    },
+    { text: "Queda abierta.", explanation: "Siempre se cierra, con commit o rollback." },
+  ]}
+/>
+
+## Resumen
+
+Spring Data JPA simplifica el acceso a datos, pero hay que entender lo que pasa debajo: el contexto de persistencia,
+la carga lazy, el N+1 y el proxy de @Transactional. Con migraciones versionadas, tests de integración con
+Testcontainers y Actuator, el servicio queda listo para un entorno empresarial.

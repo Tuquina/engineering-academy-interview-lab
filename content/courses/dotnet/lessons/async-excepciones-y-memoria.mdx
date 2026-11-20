@@ -1,0 +1,236 @@
+---
+id: dotnet.async-memory
+moduleId: dotnet.language
+title: "async/await, excepciones y memoria en .NET"
+description: "Task y async/await, cómo funciona la máquina de estados, cancelación con CancellationToken, el deadlock de .Result, concurrencia con Task.WhenAll y Parallel, excepciones, IDisposable y el garbage collector generacional."
+difficulty: advanced
+order: 3
+objectives:
+  - "Escribir código asíncrono con Task, async/await y CancellationToken."
+  - "Explicar por qué bloquear con .Result o .Wait() causa problemas."
+  - "Ejecutar operaciones concurrentes con Task.WhenAll y limitar la concurrencia."
+  - "Manejar excepciones y liberar recursos con using e IDisposable."
+  - "Describir el garbage collector generacional de .NET."
+prerequisites: ["dotnet.types-linq"]
+estimatedMinutes: 50
+tags: ["c#", "async", "task", "excepciones", "garbage collector"]
+version: "1.0.0"
+references:
+  - title: "Microsoft Learn — Asynchronous programming with async and await"
+    url: "https://learn.microsoft.com/dotnet/csharp/asynchronous-programming/"
+  - title: "Microsoft Learn — Task cancellation"
+    url: "https://learn.microsoft.com/dotnet/standard/parallel-programming/task-cancellation"
+  - title: "Microsoft Learn — Fundamentals of garbage collection"
+    url: "https://learn.microsoft.com/dotnet/standard/garbage-collection/fundamentals"
+  - title: "Microsoft Learn — Implement a Dispose method"
+    url: "https://learn.microsoft.com/dotnet/standard/garbage-collection/implementing-dispose"
+  - title: "Microsoft Learn — Exceptions and exception handling"
+    url: "https://learn.microsoft.com/dotnet/csharp/fundamentals/exceptions/"
+interviewQuestions:
+  - question: "¿Qué hace realmente await?"
+    keyPoints:
+      - "Si la tarea no terminó, devuelve el control al llamador sin bloquear el hilo."
+      - "El compilador transforma el método en una máquina de estados que continúa cuando la tarea termina."
+      - "async/await no crea hilos por sí mismo: libera el hilo mientras se espera I/O."
+  - question: "¿Por qué no conviene usar .Result o .Wait() en código asíncrono?"
+    keyPoints:
+      - "Bloquean el hilo hasta que la tarea termine, desperdiciando un hilo del pool."
+      - "En contextos con SynchronizationContext (UI, ASP.NET clásico) pueden causar deadlocks."
+      - "Bajo carga contribuyen a agotar el thread pool (thread pool starvation)."
+      - "La regla es async de punta a punta."
+  - question: "¿Cómo funciona el garbage collector de .NET?"
+    keyPoints:
+      - "Generacional: generación 0 (objetos nuevos), 1 y 2 (sobrevivientes)."
+      - "La mayoría de los objetos muere en la generación 0, que se recolecta seguido y rápido."
+      - "Los objetos grandes (85.000 bytes o más) van al Large Object Heap."
+      - "IDisposable libera recursos no administrados de forma determinista; el GC sólo administra memoria."
+summary:
+  - "Task representa una operación en curso; async/await la espera sin bloquear el hilo."
+  - "Async de punta a punta: nunca .Result ni .Wait() en código de servidor."
+  - "Aceptá CancellationToken y pasalo a todas las llamadas de I/O."
+  - "Task.WhenAll ejecuta operaciones concurrentes; SemaphoreSlim o Parallel.ForEachAsync limitan la concurrencia."
+  - "async void sólo para manejadores de eventos: sus excepciones no se pueden capturar."
+  - "Capturá excepciones específicas; throw; conserva el stack trace."
+  - "using libera recursos IDisposable al salir del bloque."
+  - "El GC es generacional; un leak es retener referencias (eventos, cachés estáticas)."
+---
+
+## Task y async/await
+
+Una **`Task`** representa una operación en curso que eventualmente produce un resultado (`Task<T>`) o termina
+(`Task`). `async`/`await` permite escribir código asíncrono con forma secuencial:
+
+```csharp
+public async Task<Quote> GetQuoteAsync(string sku, CancellationToken ct)
+{
+    var product = await _catalog.GetAsync(sku, ct);          // libera el hilo mientras espera
+    var price = await _pricing.GetPriceAsync(sku, ct);
+    return new Quote(product, price);
+}
+```
+
+Cuando el código llega a un `await` de una tarea que no terminó, **devuelve el control** sin bloquear el hilo. El
+compilador transforma el método en una **máquina de estados** que continúa cuando la tarea termina. `async/await` no
+crea hilos: en un servidor, eso significa que mientras una request espera a la base, el mismo hilo atiende otras.
+
+### Concurrencia
+
+```csharp
+// Las dos llamadas en paralelo: el tiempo total es el de la más lenta
+var productTask = _catalog.GetAsync(sku, ct);
+var priceTask = _pricing.GetPriceAsync(sku, ct);
+await Task.WhenAll(productTask, priceTask);
+var quote = new Quote(productTask.Result, priceTask.Result);   // ya terminaron: .Result no bloquea acá
+
+// Muchas operaciones con concurrencia limitada
+await Parallel.ForEachAsync(customers, new ParallelOptions { MaxDegreeOfParallelism = 10, CancellationToken = ct },
+    async (customer, token) => await _notifications.SendAsync(customer, token));
+```
+
+### Cancelación
+
+Toda operación de I/O debería aceptar un **`CancellationToken`** y pasarlo hacia abajo. En ASP.NET Core, el token de
+la request se cancela si el cliente se desconecta.
+
+```csharp
+using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+cts.CancelAfter(TimeSpan.FromSeconds(2));                 // timeout
+var rate = await _shipping.GetRateAsync(order, cts.Token);
+```
+
+<Callout type="danger" title="No bloquees código asíncrono con .Result o .Wait()">
+  Bloquear una tarea ocupa un hilo esperando. En contextos con `SynchronizationContext` (aplicaciones de
+  escritorio, ASP.NET clásico) puede producir **deadlocks**, y en un servidor con carga contribuye a **agotar
+  el thread pool**: las requests empiezan a demorarse sin que la CPU esté ocupada. La regla es *async de punta
+  a punta*.
+</Callout>
+
+Otras reglas:
+
+- `async void` sólo para manejadores de eventos: sus excepciones no se pueden esperar ni capturar desde afuera.
+- `ConfigureAwait(false)` evita volver al contexto original; es relevante en librerías que pueden usarse en
+  aplicaciones con `SynchronizationContext`. ASP.NET Core no tiene uno.
+- `ValueTask` reduce asignaciones en métodos que muchas veces terminan de forma síncrona; usalo sólo si hace falta.
+
+## Excepciones
+
+```csharp
+try
+{
+    await _inventory.ReserveAsync(sku, quantity, ct);
+}
+catch (OutOfStockException ex) when (ex.Available > 0)     // filtro de excepción
+{
+    return Result.Partial(ex.Available);
+}
+catch (HttpRequestException ex)
+{
+    _logger.LogWarning(ex, "Inventario no disponible");
+    throw new CheckoutException("No se pudo reservar stock", ex);   // conserva la causa en InnerException
+}
+finally
+{
+    _metrics.CheckoutAttempted();
+}
+```
+
+- C# no tiene excepciones checked: el compilador no obliga a capturarlas.
+- Capturá excepciones específicas; `catch (Exception)` sólo en el borde (middleware), registrando el error.
+- Para relanzar dentro de un `catch` usá `throw;` (conserva el stack trace), no `throw ex;`.
+- Los filtros `when` permiten decidir sin capturar.
+- Para errores esperables del dominio, muchos equipos usan resultados tipados en lugar de excepciones.
+
+## IDisposable y using
+
+El garbage collector administra **memoria**, pero no libera de forma determinista recursos como conexiones,
+archivos o sockets. Esos tipos implementan **`IDisposable`** (o `IAsyncDisposable`) y se liberan con `using`:
+
+```csharp
+await using var connection = new NpgsqlConnection(connectionString);   // se libera al salir del ámbito
+await connection.OpenAsync(ct);
+
+using (var stream = File.OpenRead("orders.csv"))
+{
+    // ...
+} // Dispose acá, aunque haya una excepción
+```
+
+<Callout type="warning" title="HttpClient">
+  Crear y descartar un `HttpClient` por request puede agotar los sockets disponibles. En ASP.NET Core se usa
+  `IHttpClientFactory` (o clientes tipados registrados con `AddHttpClient`), que administra las conexiones.
+</Callout>
+
+## El garbage collector
+
+<MermaidDiagram
+  caption="El GC de .NET es generacional: los objetos nacen en la generación 0; los que sobreviven a una recolección pasan a la siguiente."
+  chart={`
+flowchart LR
+  N["new Order()"] --> G0["Generación 0: recolección frecuente y rápida"]
+  G0 -->|"sobrevive"| G1["Generación 1: intermedia"]
+  G1 -->|"sobrevive"| G2["Generación 2: objetos de larga vida"]
+  L["Objetos de 85.000 bytes o más"] --> LOH["Large Object Heap: se recolecta con la generación 2"]
+`}
+/>
+
+- La mayoría de los objetos muere joven: la generación 0 se recolecta seguido y es barata.
+- En ASP.NET Core se usa por defecto el **Server GC**, optimizado para throughput con varios núcleos.
+- Un **memory leak** en .NET es retener referencias sin querer: suscripciones a eventos que nunca se quitan, cachés
+  estáticas sin límite, servicios con lifetime equivocado.
+- Para reducir asignaciones en código caliente: `Span<T>`, `ArrayPool<T>`, evitar boxing y LINQ en bucles muy
+  ajustados (midiendo con BenchmarkDotNet).
+
+## Comprobá lo aprendido
+
+<KnowledgeCheck
+  id="dotnet.async-memory.q1"
+  question="Un controlador llama a _service.GetAsync().Result. ¿Cuál es el problema principal en un servidor con carga?"
+  options={[
+    {
+      text: "Ninguno: .Result es más rápido que await.",
+      explanation: "Bloquea un hilo del pool mientras espera.",
+    },
+    {
+      text: "Bloquea hilos del pool y puede llevar a thread pool starvation.",
+      correct: true,
+      explanation: "Correcto. Hay que usar await de punta a punta.",
+    },
+    { text: "No compila.", explanation: "Compila sin problemas." },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="dotnet.async-memory.q2"
+  question="Dentro de un catch, ¿cómo relanzás la excepción conservando el stack trace original?"
+  options={[
+    { text: "throw ex;", explanation: "Reinicia el stack trace desde ese punto." },
+    { text: "throw;", correct: true, explanation: "Correcto." },
+    { text: "return ex;", explanation: "No relanza nada." },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="dotnet.async-memory.q3"
+  question="¿Qué garantiza using var connection = ... ?"
+  options={[
+    {
+      text: "Que el garbage collector libere la memoria inmediatamente.",
+      explanation: "using llama a Dispose; la memoria la libera el GC cuando corresponda.",
+    },
+    {
+      text: "Que se llame a Dispose al salir del ámbito, aunque haya una excepción.",
+      correct: true,
+      explanation: "Correcto. Libera la conexión de forma determinista.",
+    },
+    {
+      text: "Que la conexión se reutilice entre requests.",
+      explanation: "El pooling lo hace el driver, no using.",
+    },
+  ]}
+/>
+
+## Resumen
+
+async/await libera hilos mientras se espera I/O: usalo de punta a punta, con CancellationToken y sin .Result. Las
+excepciones se capturan específicas y se relanzan con throw;. Los recursos se liberan con using, y entender el GC
+generacional ayuda a diagnosticar problemas de memoria.

@@ -1,0 +1,229 @@
+---
+id: python.concurrency
+moduleId: python.backend
+title: "Concurrencia en Python: el GIL, threads, procesos y asyncio"
+description: "Qué es el GIL y qué cambia el modo sin GIL; cuándo usar threads, procesos o asyncio; cómo funciona el event loop de asyncio, async/await, gather, timeouts y los errores frecuentes."
+difficulty: advanced
+order: 4
+objectives:
+  - "Explicar qué es el GIL y su impacto en trabajo de CPU y de I/O."
+  - "Elegir entre threading, multiprocessing y asyncio según el tipo de carga."
+  - "Escribir código con async/await, gather, TaskGroup y timeouts."
+  - "Evitar bloquear el event loop con llamadas síncronas."
+prerequisites: ["python.typing-errors"]
+estimatedMinutes: 50
+tags: ["python", "concurrencia", "gil", "asyncio", "threads"]
+version: "1.0.0"
+references:
+  - title: "Python docs — asyncio"
+    url: "https://docs.python.org/3/library/asyncio.html"
+  - title: "Python docs — concurrent.futures"
+    url: "https://docs.python.org/3/library/concurrent.futures.html"
+  - title: "Python HOWTO — Free-threaded CPython"
+    url: "https://docs.python.org/3/howto/free-threading-python.html"
+  - title: "PEP 703 — Making the Global Interpreter Lock Optional"
+    url: "https://peps.python.org/pep-0703/"
+  - title: "What's New in Python 3.14"
+    url: "https://docs.python.org/3/whatsnew/3.14.html"
+interviewQuestions:
+  - question: "¿Qué es el GIL y cómo afecta a una aplicación?"
+    keyPoints:
+      - "El Global Interpreter Lock de CPython permite que un solo hilo ejecute bytecode Python a la vez."
+      - "En trabajo de CPU, varios threads no aprovechan varios núcleos: se usan procesos."
+      - "En trabajo de I/O el GIL se libera mientras se espera, así que threads y asyncio sí ayudan."
+      - "CPython ofrece un build opcional sin GIL (experimental en 3.13, soportado oficialmente desde 3.14), que no es el build por defecto."
+  - question: "¿Cuándo usarías asyncio, threads o procesos?"
+    keyPoints:
+      - "asyncio: muchas operaciones de I/O concurrentes (APIs, bases, sockets) con librerías async."
+      - "threads: I/O con librerías bloqueantes o integrar código síncrono."
+      - "procesos (multiprocessing o ProcessPoolExecutor): cómputo intensivo en CPU que necesita varios núcleos."
+  - question: "¿Qué pasa si llamás a time.sleep o a requests.get dentro de una función async?"
+    keyPoints:
+      - "Bloquea el event loop: ninguna otra tarea avanza mientras tanto."
+      - "Hay que usar equivalentes async (asyncio.sleep, httpx.AsyncClient) o delegar con asyncio.to_thread."
+summary:
+  - "El GIL deja ejecutar bytecode Python a un hilo por vez en el build estándar de CPython."
+  - "I/O-bound: threads o asyncio. CPU-bound: procesos (o el build sin GIL, evaluándolo con cuidado)."
+  - "asyncio usa un event loop de un hilo: las corrutinas ceden el control en cada await."
+  - "asyncio.gather y TaskGroup ejecutan corrutinas concurrentemente; asyncio.timeout pone límites."
+  - "Nunca bloquees el loop: usá librerías async o asyncio.to_thread para código síncrono."
+  - "concurrent.futures ofrece la misma API para pools de threads y de procesos."
+---
+
+## El GIL
+
+CPython tiene un **Global Interpreter Lock (GIL)**: en el build estándar, un solo hilo ejecuta bytecode Python a la
+vez. Simplifica la implementación del intérprete y de las extensiones en C, pero tiene una consecuencia directa:
+
+| Tipo de trabajo              | ¿Varios threads ayudan? | Por qué                                              |
+| ---------------------------- | ----------------------- | ---------------------------------------------------- |
+| I/O (red, disco, base)       | Sí                      | El GIL se libera mientras el hilo espera             |
+| CPU en Python puro           | No                      | Los threads se turnan el GIL: no usan varios núcleos |
+| CPU en extensiones C (NumPy) | A menudo sí             | Muchas extensiones liberan el GIL en sus cálculos    |
+
+El PEP 703 hizo el GIL **opcional**: Python 3.13 incluyó un build experimental sin GIL (_free-threaded_) y desde
+**Python 3.14** ese build tiene soporte oficial. No es el build por defecto: hay que instalarlo explícitamente, y
+algunas extensiones todavía pueden no ser compatibles. Para la mayoría de los servicios web, el modelo clásico sigue
+siendo el punto de partida.
+
+## Threads, procesos y concurrent.futures
+
+```python
+from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
+
+# I/O con una librería bloqueante: varios threads
+with ThreadPoolExecutor(max_workers=10) as pool:
+    rates = list(pool.map(fetch_shipping_rate, carriers))
+
+# CPU intensivo: varios procesos, cada uno con su intérprete y su GIL
+with ProcessPoolExecutor() as pool:
+    thumbnails = list(pool.map(resize_image, image_paths))
+```
+
+Los procesos no comparten memoria: los argumentos y resultados se **serializan** (pickle) para enviarse, lo que tiene
+un costo. Por eso conviene repartir tareas de cómputo relativamente grandes, no millones de operaciones mínimas.
+
+Con threads hay que proteger el estado compartido con `threading.Lock`: aunque exista el GIL, una operación como
+`counter += 1` no es atómica y puede perder incrementos.
+
+## asyncio
+
+**asyncio** implementa concurrencia con un **event loop** en un solo hilo, como Node.js. Las funciones `async def`
+son **corrutinas**: cada `await` cede el control al loop mientras se espera una operación de I/O, y el loop avanza
+otras tareas.
+
+```python
+import asyncio
+import httpx
+
+async def fetch_rate(client: httpx.AsyncClient, carrier: str) -> dict:
+    response = await client.get(f"https://rates.example/{carrier}", timeout=2.0)
+    response.raise_for_status()
+    return response.json()
+
+async def best_rate(carriers: list[str]) -> dict:
+    async with httpx.AsyncClient() as client:
+        results = await asyncio.gather(
+            *(fetch_rate(client, c) for c in carriers),
+            return_exceptions=True,            # un proveedor caído no cancela a los demás
+        )
+    valid = [r for r in results if not isinstance(r, Exception)]
+    return min(valid, key=lambda r: r["price_cents"])
+
+asyncio.run(best_rate(["dhl", "fedex", "correo"]))
+```
+
+<MermaidDiagram
+  caption="Con asyncio, mientras una corrutina espera la red, el loop ejecuta otra. Las tres consultas se superponen en el tiempo en un solo hilo."
+  chart={`
+sequenceDiagram
+  participant L as Event loop
+  participant A as fetch dhl
+  participant B as fetch fedex
+  participant C as fetch correo
+  L->>A: ejecuta hasta el await
+  A-->>L: espera la red
+  L->>B: ejecuta hasta el await
+  B-->>L: espera la red
+  L->>C: ejecuta hasta el await
+  C-->>L: espera la red
+  Note over L: llegan las respuestas
+  L->>B: continúa
+  L->>A: continúa
+  L->>C: continúa
+`}
+/>
+
+### Herramientas principales
+
+| Herramienta                   | Para qué                                                                   |
+| ----------------------------- | -------------------------------------------------------------------------- |
+| `asyncio.gather(*corrutinas)` | Ejecutar varias y esperar todas                                            |
+| `asyncio.TaskGroup` (3.11+)   | Lo mismo con cancelación estructurada: si una falla, se cancelan las demás |
+| `asyncio.timeout(s)` (3.11+)  | Límite de tiempo para un bloque                                            |
+| `asyncio.Semaphore(n)`        | Limitar la concurrencia (por ejemplo, 10 requests a la vez)                |
+| `asyncio.Queue`               | Productor/consumidor entre tareas                                          |
+| `asyncio.to_thread(f, ...)`   | Ejecutar una función bloqueante sin frenar el loop                         |
+
+```python
+async def notify_all(customers):
+    limit = asyncio.Semaphore(10)
+
+    async def notify(customer):
+        async with limit:                        # como máximo 10 a la vez
+            async with asyncio.timeout(3):
+                await push.send(customer.device_token, "Tu pedido fue enviado")
+
+    async with asyncio.TaskGroup() as group:
+        for customer in customers:
+            group.create_task(notify(customer))
+```
+
+<Callout type="danger" title="No bloquees el event loop">
+  `time.sleep`, `requests.get` o un driver de base síncrono dentro de una función `async` frenan **todo** el
+  loop: ninguna otra request avanza. Usá equivalentes async (`asyncio.sleep`, `httpx.AsyncClient`, `asyncpg`)
+  o `asyncio.to_thread` para el código bloqueante. Lo mismo vale para cálculos largos de CPU.
+</Callout>
+
+## Cómo elegir
+
+- **API web con mucha I/O** y librerías async disponibles: asyncio (FastAPI con endpoints `async`).
+- **Código existente síncrono** o librerías bloqueantes: threads (o endpoints `def` comunes en FastAPI, que se
+  ejecutan en un pool de threads).
+- **Cómputo intensivo**: procesos, o mover ese trabajo a workers separados (Celery, colas) para no afectar la API.
+
+## Comprobá lo aprendido
+
+<KnowledgeCheck
+  id="python.concurrency.q1"
+  question="Un cálculo de CPU en Python puro tarda 8 segundos. ¿Qué ayuda a usar 4 núcleos con el CPython estándar?"
+  options={[
+    {
+      text: "ThreadPoolExecutor con 4 threads.",
+      explanation: "Con el GIL, los threads se turnan y no usan varios núcleos en Python puro.",
+    },
+    {
+      text: "ProcessPoolExecutor con 4 procesos.",
+      correct: true,
+      explanation: "Correcto. Cada proceso tiene su intérprete y su GIL.",
+    },
+    { text: "asyncio.gather.", explanation: "asyncio es concurrencia en un hilo: no paraleliza CPU." },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="python.concurrency.q2"
+  question="Un endpoint async llama a requests.get(url). ¿Cuál es el problema?"
+  options={[
+    { text: "Ninguno, requests es async.", explanation: "requests es una librería síncrona." },
+    {
+      text: "Bloquea el event loop y frena todas las demás requests mientras espera.",
+      correct: true,
+      explanation: "Correcto. Hay que usar httpx.AsyncClient o asyncio.to_thread.",
+    },
+    { text: "No compila.", explanation: "Funciona, pero degrada mucho la concurrencia." },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="python.concurrency.q3"
+  question="¿Qué ventaja tiene asyncio.TaskGroup sobre gather?"
+  options={[
+    {
+      text: "Ejecuta las tareas en paralelo en varios núcleos.",
+      explanation: "Ambos son concurrencia en un solo hilo.",
+    },
+    {
+      text: "Si una tarea falla, cancela las demás y propaga los errores de forma estructurada.",
+      correct: true,
+      explanation: "Correcto. Es concurrencia estructurada.",
+    },
+    { text: "No necesita await.", explanation: "Se usa con async with." },
+  ]}
+/>
+
+## Resumen
+
+El GIL condiciona el paralelismo en CPython: threads y asyncio para I/O, procesos para CPU. asyncio ofrece mucha
+concurrencia en un hilo siempre que no se bloquee el loop. Saber explicar estas diferencias es una de las preguntas más
+frecuentes en entrevistas de backend con Python.

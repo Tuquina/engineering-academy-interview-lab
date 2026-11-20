@@ -1,0 +1,251 @@
+---
+id: go.slices-packages
+moduleId: go.language
+title: "Slices y maps por dentro, paquetes y testing"
+description: "Cómo funcionan los slices (array de fondo, len, cap y append), los errores clásicos de aliasing, los maps, cómo organizar paquetes y módulos, y el testing idiomático con tests de tabla, benchmarks y fuzzing."
+difficulty: intermediate
+order: 3
+objectives:
+  - "Explicar la estructura de un slice y predecir el comportamiento de append."
+  - "Evitar errores de aliasing al compartir sub-slices."
+  - "Usar maps correctamente, incluido su comportamiento con concurrencia."
+  - "Organizar un proyecto en paquetes con una API pública mínima."
+  - "Escribir tests de tabla, benchmarks y tests con el paquete testing."
+prerequisites: ["go.types"]
+estimatedMinutes: 45
+tags: ["go", "slices", "maps", "paquetes", "testing"]
+version: "1.0.0"
+references:
+  - title: "Go Blog — Go Slices: usage and internals"
+    url: "https://go.dev/blog/slices-intro"
+  - title: "Go Blog — Go maps in action"
+    url: "https://go.dev/blog/maps"
+  - title: "Go — Organizing a Go module"
+    url: "https://go.dev/doc/modules/layout"
+  - title: "Go — Package testing"
+    url: "https://pkg.go.dev/testing"
+  - title: "Go Wiki — TableDrivenTests"
+    url: "https://go.dev/wiki/TableDrivenTests"
+interviewQuestions:
+  - question: "¿Qué es un slice en Go y qué pasa al hacer append?"
+    keyPoints:
+      - "Un descriptor con un puntero a un array de fondo, una longitud (len) y una capacidad (cap)."
+      - "Si hay capacidad, append escribe en el mismo array; si no, reserva uno más grande y copia."
+      - "Por eso siempre se asigna el resultado: s = append(s, x)."
+      - "Dos slices pueden compartir el array de fondo y pisarse los datos."
+  - question: "¿Los maps de Go son seguros para usar desde varias goroutines?"
+    keyPoints:
+      - "No: escrituras concurrentes sin sincronización son un error y el runtime puede abortar con fatal error."
+      - "Se protegen con sync.Mutex o sync.RWMutex, o se usa sync.Map para casos específicos."
+      - "El orden de iteración de un map no está definido."
+  - question: "¿Qué es un test de tabla?"
+    keyPoints:
+      - "Un slice de casos con entrada y salida esperada recorrido en un único test."
+      - "Cada caso se ejecuta con t.Run para tener un nombre y poder correrlo por separado."
+      - "Agregar un caso es agregar una fila."
+summary:
+  - "Un slice es puntero + len + cap sobre un array de fondo."
+  - "append puede reasignar el array: siempre s = append(s, x)."
+  - "Los sub-slices comparten memoria: copiá con slices.Clone o copy cuando haga falta independencia."
+  - "Pre-asignar con make([]T, 0, n) evita realocaciones."
+  - "Los maps no son seguros para escrituras concurrentes y su orden de iteración es aleatorio."
+  - "Un paquete por responsabilidad; internal/ impide que otros módulos importen lo interno."
+  - "go test con tests de tabla, t.Run, benchmarks y fuzzing incluidos en la librería estándar."
+---
+
+## Slices por dentro
+
+Un **array** en Go tiene tamaño fijo y es parte del tipo (`[3]int`). Lo que se usa casi siempre es el **slice**: un
+descriptor con tres campos.
+
+<MermaidDiagram
+  caption="Un slice apunta a un array de fondo. b := a[1:3] comparte ese array: modificar b[0] modifica a[1]."
+  chart={`
+flowchart TB
+  subgraph A["slice a: len 4, cap 4"]
+    PA["puntero"]
+  end
+  subgraph B["slice b = a[1:3]: len 2, cap 3"]
+    PB["puntero"]
+  end
+  subgraph ARR["array de fondo"]
+    E0["10"] --- E1["20"] --- E2["30"] --- E3["40"]
+  end
+  PA --> E0
+  PB --> E1
+`}
+/>
+
+```go
+s := make([]int, 0, 4)     // len 0, cap 4
+s = append(s, 1, 2, 3)     // entra en la capacidad: mismo array
+s = append(s, 4, 5)        // se supera cap: se reserva un array más grande y se copian los datos
+len(s), cap(s)             // 5 y una capacidad mayor (el crecimiento es un detalle de implementación)
+```
+
+`append` **puede devolver un slice que apunta a otro array**, por eso siempre se asigna su resultado.
+
+### Aliasing: el error clásico
+
+```go
+all := []string{"a", "b", "c", "d"}
+firstTwo := all[:2]                  // comparte el array con all
+firstTwo = append(firstTwo, "X")     // ¡hay capacidad! escribe sobre all[2]
+fmt.Println(all)                     // [a b X d]
+
+independent := slices.Clone(all[:2]) // copia propia (o copy en un slice nuevo)
+```
+
+Si una función recibe un slice y lo modifica o hace `append`, puede afectar al llamador. Cuando necesitás
+independencia, copiá. Y si sabés cuántos elementos vas a agregar, pre-asigná con `make([]T, 0, n)` para evitar
+realocaciones.
+
+## Maps
+
+```go
+counts := make(map[string]int)
+counts["SKU-1"]++                         // el zero value permite incrementar sin inicializar
+
+var byCustomer map[string][]Order         // map nil: se puede leer, pero escribir produce panic
+byCustomer = map[string][]Order{}
+
+keys := slices.Sorted(maps.Keys(counts))  // el orden de iteración no está definido: ordenar si importa
+```
+
+<Callout type="danger" title="Los maps no son seguros para escrituras concurrentes">
+  Escribir en un map desde varias goroutines sin sincronización es un error: el runtime puede abortar el
+  programa con un *fatal error* de acceso concurrente. Protegelo con `sync.Mutex` o `sync.RWMutex`, o usá
+  `sync.Map` en los casos para los que está pensado (muchas lecturas, claves estables).
+</Callout>
+
+## Strings y bytes
+
+Un `string` es una secuencia **inmutable de bytes** (normalmente UTF-8). `len` cuenta bytes, `range` recorre `rune`
+(code points) y `[]byte(s)` copia. Para construir strings en bucles se usa `strings.Builder`; el paquete `strings` trae
+`Split`, `Contains`, `TrimSpace`, `EqualFold` y más.
+
+## Paquetes y módulos
+
+Cada carpeta es un **paquete**. Lo que empieza con mayúscula se exporta; lo demás es privado del paquete. Una
+estructura habitual para un servicio:
+
+```text
+shop/
+├── go.mod
+├── cmd/
+│   └── api/main.go            # punto de entrada: arma dependencias y arranca el servidor
+└── internal/                  # no puede importarse desde otros módulos
+    ├── orders/
+    │   ├── order.go           # dominio
+    │   ├── service.go
+    │   └── postgres.go        # adaptador
+    └── httpapi/
+        └── handlers.go
+```
+
+- **Un paquete por responsabilidad**, con nombres cortos en minúscula (`orders`, no `orderService`).
+- `internal/` es una regla del compilador: sólo el código del mismo módulo puede importarlo.
+- Evitá paquetes genéricos como `utils` o `common`: esconden dependencias.
+- No hay dependencias circulares entre paquetes: el compilador las rechaza.
+
+## Testing
+
+El testing viene en la librería estándar. Los tests van en archivos `_test.go` junto al código:
+
+```go
+// discount_test.go
+func TestApplyDiscount(t *testing.T) {
+    tests := []struct {
+        name     string
+        cents    int64
+        pct      int
+        want     int64
+        wantErr  bool
+    }{
+        {name: "sin descuento", cents: 1000, pct: 0, want: 1000},
+        {name: "10 por ciento", cents: 1000, pct: 10, want: 900},
+        {name: "porcentaje inválido", cents: 1000, pct: 120, wantErr: true},
+    }
+    for _, tt := range tests {
+        t.Run(tt.name, func(t *testing.T) {
+            got, err := ApplyDiscount(tt.cents, tt.pct)
+            if (err != nil) != tt.wantErr {
+                t.Fatalf("error = %v, wantErr %v", err, tt.wantErr)
+            }
+            if got != tt.want {
+                t.Errorf("ApplyDiscount(%d, %d) = %d, want %d", tt.cents, tt.pct, got, tt.want)
+            }
+        })
+    }
+}
+
+func BenchmarkApplyDiscount(b *testing.B) {
+    for b.Loop() {                // Go 1.24+; antes: for i := 0; i < b.N; i++
+        ApplyDiscount(1000, 10)
+    }
+}
+```
+
+```bash
+go test ./...                     # todos los tests
+go test -run TestApplyDiscount/10 # un caso concreto
+go test -race ./...               # detector de data races
+go test -bench . -benchmem        # benchmarks con asignaciones de memoria
+go test -cover ./...              # cobertura
+```
+
+Los **tests de tabla** son el estilo idiomático: agregar un caso es agregar una fila. También hay **fuzzing**
+integrado (`func FuzzX(f *testing.F)`) para generar entradas automáticamente, y `net/http/httptest` para probar
+handlers sin levantar un servidor real.
+
+## Comprobá lo aprendido
+
+<KnowledgeCheck
+  id="go.slices-packages.q1"
+  question="all := []int{1, 2, 3, 4}; head := all[:2]; head = append(head, 9). ¿Qué vale all?"
+  options={[
+    { text: "[1 2 3 4]", explanation: "head tiene capacidad 4 y comparte el array con all." },
+    { text: "[1 2 9 4]", correct: true, explanation: "Correcto. append escribió en el array compartido." },
+    { text: "[1 2 9 3 4]", explanation: "append no inserta en el medio de all." },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="go.slices-packages.q2"
+  question="Varias goroutines escriben en el mismo map sin sincronización. ¿Qué puede pasar?"
+  options={[
+    {
+      text: "Funciona porque los maps son thread-safe.",
+      explanation: "Los maps de Go no son seguros para escrituras concurrentes.",
+    },
+    {
+      text: "El runtime puede abortar el programa con un fatal error por acceso concurrente.",
+      correct: true,
+      explanation: "Correcto. Hay que protegerlo con un Mutex o usar sync.Map.",
+    },
+    {
+      text: "Se pierden algunas escrituras sin más consecuencias.",
+      explanation: "El comportamiento no está definido y el runtime puede abortar.",
+    },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="go.slices-packages.q3"
+  question="¿Qué impide la carpeta internal/ en un módulo de Go?"
+  options={[
+    { text: "Que sus paquetes se compilen en producción.", explanation: "Se compilan normalmente." },
+    {
+      text: "Que código de otros módulos importe esos paquetes.",
+      correct: true,
+      explanation: "Correcto. Es una regla del compilador.",
+    },
+    { text: "Que tengan tests.", explanation: "Pueden tener tests como cualquier paquete." },
+  ]}
+/>
+
+## Resumen
+
+Entender slices (puntero, len y cap) evita los errores más sutiles de Go; los maps necesitan sincronización bajo
+concurrencia. Los paquetes chicos con internal/ mantienen la arquitectura limpia, y el testing de la librería estándar
+(tablas, race detector, benchmarks y fuzzing) alcanza para un proyecto profesional.

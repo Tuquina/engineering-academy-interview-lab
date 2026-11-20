@@ -1,0 +1,62 @@
+{
+  "id": "go",
+  "slug": "go",
+  "title": "Go para backend",
+  "description": "De la sintaxis de Go a un servicio HTTP en producción: tipos, structs, interfaces, errores, slices y maps, paquetes, goroutines, channels, context y testing.",
+  "areaId": "backend-languages",
+  "difficulty": "intermediate",
+  "order": 12,
+  "prerequisites": [],
+  "tags": ["go", "golang", "concurrencia", "backend"],
+  "modules": [
+    {
+      "id": "go.intro",
+      "slug": "introduccion",
+      "title": "Introducción y sintaxis",
+      "description": "Qué es Go, su toolchain y la sintaxis necesaria para empezar a programar.",
+      "order": 0,
+      "topics": [
+        "Qué es Go y por qué existe",
+        "Toolchain y módulos",
+        "Variables, tipos y constantes",
+        "Control de flujo",
+        "Funciones con múltiples retornos",
+        "Slices y maps básicos",
+        "Errores como valores"
+      ]
+    },
+    {
+      "id": "go.language",
+      "slug": "lenguaje",
+      "title": "El lenguaje en profundidad",
+      "description": "Structs, métodos, interfaces, errores, genéricos, slices y maps por dentro, y paquetes.",
+      "order": 1,
+      "topics": [
+        "Structs y métodos",
+        "Punteros y receptores",
+        "Interfaces implícitas",
+        "Errores: wrapping, errors.Is y errors.As",
+        "Genéricos",
+        "Slices por dentro",
+        "Paquetes, visibilidad y testing"
+      ]
+    },
+    {
+      "id": "go.backend",
+      "slug": "concurrencia-y-servicios",
+      "title": "Concurrencia y servicios",
+      "description": "Goroutines, channels, select, sync, context y servicios HTTP en producción.",
+      "order": 2,
+      "topics": [
+        "Goroutines y el scheduler",
+        "Channels y select",
+        "sync: WaitGroup y Mutex",
+        "context: cancelación y timeouts",
+        "Data races",
+        "net/http y middleware",
+        "database/sql",
+        "Apagado ordenado y despliegue"
+      ]
+    }
+  ]
+}

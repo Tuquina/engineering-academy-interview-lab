@@ -1,0 +1,88 @@
+{
+  "id": "python",
+  "title": "Python",
+  "description": "El lenguaje, concurrencia y FastAPI.",
+  "courseId": "python",
+  "cards": [
+    {
+      "id": "py.dynamic-strong",
+      "front": "¿Python es de tipado dinámico o estático? ¿Fuerte o débil?",
+      "back": "Dinámico (los tipos se verifican en ejecución) y fuerte: no convierte implícitamente, por eso '3' + 3 lanza TypeError.",
+      "difficulty": "basic",
+      "tags": ["fundamentos"],
+      "lessonId": "python.introduction"
+    },
+    {
+      "id": "py.list-tuple",
+      "front": "Lista vs tupla.",
+      "back": "La lista es mutable; la tupla es inmutable y, si sus elementos son hashables, puede ser clave de un diccionario.",
+      "difficulty": "basic",
+      "tags": ["colecciones"],
+      "lessonId": "python.introduction"
+    },
+    {
+      "id": "py.mutable-default",
+      "front": "¿Qué problema tiene `def add(item, items=[])`?",
+      "back": "El valor por defecto se evalúa una vez, al definir la función: todas las llamadas comparten la misma lista. Usar `items=None` y crearla adentro.",
+      "difficulty": "intermediate",
+      "tags": ["funciones"],
+      "lessonId": "python.idiomatic"
+    },
+    {
+      "id": "py.generator",
+      "front": "¿Para qué sirve un generador?",
+      "back": "Produce valores de a uno con `yield`, bajo demanda: procesa flujos enormes con memoria constante. Se consume una sola vez.",
+      "difficulty": "intermediate",
+      "tags": ["generadores"],
+      "lessonId": "python.idiomatic"
+    },
+    {
+      "id": "py.decorator",
+      "front": "¿Qué es un decorador?",
+      "back": "Una función que recibe una función y devuelve otra que la envuelve. `@retry(3)` equivale a `f = retry(3)(f)`. `functools.wraps` conserva el nombre y la documentación.",
+      "difficulty": "intermediate",
+      "tags": ["decoradores"],
+      "lessonId": "python.idiomatic"
+    },
+    {
+      "id": "py.type-hints",
+      "front": "¿Las anotaciones de tipo se verifican al ejecutar?",
+      "back": "No. Las verifican herramientas como mypy o pyright. Librerías como Pydantic sí las usan en runtime para validar.",
+      "difficulty": "basic",
+      "tags": ["tipado"],
+      "lessonId": "python.typing-errors"
+    },
+    {
+      "id": "py.gil",
+      "front": "¿Qué impacto tiene el GIL?",
+      "back": "En el CPython estándar, un solo hilo ejecuta bytecode Python a la vez: threads sirven para I/O, no para CPU. Para CPU: procesos. Desde 3.14 hay un build sin GIL con soporte oficial, pero no es el predeterminado.",
+      "difficulty": "advanced",
+      "tags": ["concurrencia"],
+      "lessonId": "python.concurrency"
+    },
+    {
+      "id": "py.blocking-loop",
+      "front": "¿Qué pasa si llamás a `time.sleep` o `requests.get` dentro de una función async?",
+      "back": "Bloquea el event loop: ninguna otra tarea avanza. Usar `asyncio.sleep`, `httpx.AsyncClient` o `asyncio.to_thread`.",
+      "difficulty": "intermediate",
+      "tags": ["asyncio"],
+      "lessonId": "python.concurrency"
+    },
+    {
+      "id": "py.fastapi-def-async",
+      "front": "FastAPI: endpoint `def` vs `async def`.",
+      "back": "`async def` corre en el event loop y debe usar sólo operaciones async. `def` corre en un pool de threads y admite librerías bloqueantes.",
+      "difficulty": "intermediate",
+      "tags": ["fastapi"],
+      "lessonId": "python.fastapi"
+    },
+    {
+      "id": "py.pytest-fixture",
+      "front": "¿Qué es una fixture de pytest?",
+      "back": "Una función que prepara datos o recursos y se inyecta en los tests por el nombre del parámetro; con `yield` hace limpieza y se comparte con conftest.py.",
+      "difficulty": "basic",
+      "tags": ["testing"],
+      "lessonId": "python.fastapi"
+    }
+  ]
+}

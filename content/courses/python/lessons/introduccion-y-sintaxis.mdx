@@ -1,0 +1,265 @@
+---
+id: python.introduction
+moduleId: python.intro
+title: "Introducción a Python: qué es, cómo se ejecuta y la sintaxis esencial"
+description: "Qué es Python, cómo se ejecuta un programa, qué versión usar, entornos virtuales y la sintaxis necesaria para programar: tipos, variables, control de flujo, funciones, strings y las colecciones básicas."
+difficulty: basic
+order: 1
+objectives:
+  - "Explicar qué es Python, qué es CPython y cómo se ejecuta un programa."
+  - "Crear un entorno virtual e instalar dependencias."
+  - "Usar los tipos básicos, el control de flujo y las funciones."
+  - "Trabajar con strings, f-strings, listas, tuplas, diccionarios y sets."
+  - "Reconocer las diferencias de Python con lenguajes como Java, C# o TypeScript."
+prerequisites: []
+estimatedMinutes: 45
+tags: ["python", "introducción", "sintaxis", "venv"]
+version: "1.0.0"
+references:
+  - title: "The Python Tutorial"
+    url: "https://docs.python.org/3/tutorial/index.html"
+  - title: "Python — Download and release status"
+    url: "https://www.python.org/downloads/"
+  - title: "Python docs — venv"
+    url: "https://docs.python.org/3/library/venv.html"
+  - title: "PEP 8 — Style Guide for Python Code"
+    url: "https://peps.python.org/pep-0008/"
+  - title: "Docker Hub — python (imagen oficial)"
+    url: "https://hub.docker.com/_/python"
+interviewQuestions:
+  - question: "¿Python es interpretado o compilado?"
+    keyPoints:
+      - "CPython compila el código fuente a bytecode (.pyc) y lo ejecuta en una máquina virtual."
+      - "No hay un paso de compilación separado visible para el desarrollador; por eso se lo llama interpretado."
+      - "Existen otras implementaciones, como PyPy, con compilación JIT."
+  - question: "¿Qué diferencia hay entre una lista y una tupla?"
+    keyPoints:
+      - "La lista es mutable; la tupla es inmutable."
+      - "Las tuplas se usan para registros de tamaño fijo y pueden ser claves de diccionario si sus elementos son hashables."
+      - "Las listas se usan para colecciones que crecen o cambian."
+  - question: "¿Qué tipos pueden ser claves de un diccionario?"
+    keyPoints:
+      - "Cualquier objeto hashable: int, str, tuplas de hashables, frozenset, etc."
+      - "Las listas y los diccionarios no, porque son mutables y no hashables."
+      - "El diccionario es una tabla hash: acceso O(1) promedio y, desde Python 3.7, conserva el orden de inserción."
+summary:
+  - "Python es dinámico y fuertemente tipado: las variables no declaran tipo, pero no hay conversiones implícitas entre str e int."
+  - "La indentación define los bloques; no hay llaves ni punto y coma."
+  - "Usá un entorno virtual por proyecto (python -m venv o uv)."
+  - "Tipos básicos: int (precisión arbitraria), float, bool, str, None."
+  - "f-strings para formatear: f'Total: {total:.2f}'."
+  - "list (mutable), tuple (inmutable), dict (hash, mantiene orden de inserción), set (sin duplicados)."
+  - "Las funciones aceptan argumentos por posición, por nombre y con valores por defecto."
+---
+
+## Qué es Python
+
+**Python** es un lenguaje de propósito general creado por Guido van Rossum, publicado en 1991 y hoy mantenido por la
+Python Software Foundation. Se destaca por su sintaxis legible y por un ecosistema enorme: es el lenguaje dominante en
+ciencia de datos, machine learning y automatización, y muy usado en backend (Django, FastAPI, Flask) y en
+infraestructura.
+
+La implementación de referencia es **CPython**: compila el código fuente a **bytecode** y lo ejecuta en su máquina
+virtual. No hay un paso de compilación visible, por eso se dice que es interpretado.
+
+| Característica | Python                                                        | Java / C#                     |
+| -------------- | ------------------------------------------------------------- | ----------------------------- |
+| Tipado         | Dinámico (se verifica en ejecución) con type hints opcionales | Estático                      |
+| Bloques        | Indentación                                                   | Llaves                        |
+| Ejecución      | Bytecode en la VM de CPython                                  | Bytecode en JVM / CLR con JIT |
+| Paquetes       | pip / uv, PyPI                                                | Maven / NuGet                 |
+
+**Versiones**: Python publica una versión nueva por año, en octubre, con cerca de cinco años de soporte. Las
+versiones vigentes y su estado se consultan en python.org/downloads. Usá una versión con soporte activo en proyectos
+nuevos.
+
+```bash
+# Sin instalar nada: la imagen oficial de Docker
+docker run --rm -it python:3.14 python
+```
+
+## Entornos virtuales y dependencias
+
+Cada proyecto tiene sus dependencias aisladas en un **entorno virtual**, para no mezclar versiones entre proyectos:
+
+```bash
+python -m venv .venv            # crea el entorno
+source .venv/bin/activate        # Linux/macOS (en Windows: .venv\Scripts\activate)
+pip install fastapi              # instala en el entorno, no en el sistema
+pip freeze > requirements.txt
+```
+
+Hoy muchos equipos usan **uv**, una herramienta muy rápida que crea el entorno, resuelve dependencias y genera un
+lockfile a partir del `pyproject.toml` (`uv add fastapi`, `uv run app.py`).
+
+## Tipos y variables
+
+```python
+quantity = 3                 # int: precisión arbitraria, no hay desbordamiento
+price = 1250.50              # float (doble precisión)
+active = True                # bool: True / False con mayúscula
+name = "Zapatillas"          # str: inmutable, Unicode
+discount = None              # None: ausencia de valor
+
+type(quantity)               # <class 'int'>
+"3" + 3                      # TypeError: Python es dinámico pero fuertemente tipado
+int("3") + 3                 # 6
+```
+
+Las variables son **nombres que apuntan a objetos**: no se declara el tipo y el mismo nombre puede apuntar luego a
+otro objeto. La convención de nombres es `snake_case` para variables y funciones, y `PascalCase` para clases (PEP 8).
+
+<Callout type="warning" title="float y dinero">
+  `0.1 + 0.2 == 0.3` es `False`, igual que en otros lenguajes. Para montos usá `decimal.Decimal` o enteros en
+  centavos.
+</Callout>
+
+## Control de flujo
+
+La **indentación** (4 espacios por convención) define los bloques:
+
+```python
+if stock == 0:
+    status = "agotado"
+elif stock < 5:
+    status = "últimas unidades"
+else:
+    status = "disponible"
+
+for item in cart:                      # for recorre cualquier iterable
+    print(item)
+
+for index, item in enumerate(cart):    # índice y valor
+    print(index, item)
+
+for i in range(3):                     # 0, 1, 2
+    ...
+
+while retries < 3:
+    retries += 1                       # no existe ++
+
+# match (Python 3.10+): pattern matching estructural
+match event:
+    case {"type": "payment.approved", "amount": amount}:
+        register(amount)
+    case {"type": "payment.rejected"}:
+        notify_rejection()
+    case _:
+        log_unknown(event)
+```
+
+Valores **falsy**: `False`, `None`, `0`, `""`, `[]`, `{}`, `set()`. Se usa `if not items:` para preguntar si una
+lista está vacía. Los operadores lógicos son `and`, `or` y `not`; la comparación de identidad es `is` (`x is None`).
+
+## Funciones
+
+```python
+def total_cents(items: list[dict], discount_pct: float = 0) -> int:
+    """Suma los ítems y aplica un descuento porcentual."""
+    subtotal = sum(i["price_cents"] * i["quantity"] for i in items)
+    return round(subtotal * (1 - discount_pct / 100))
+
+total_cents(cart)                       # usa el valor por defecto
+total_cents(cart, discount_pct=10)      # argumento por nombre
+
+def log_event(name, *args, **kwargs):   # args: tupla posicional; kwargs: diccionario por nombre
+    print(name, args, kwargs)
+
+square = lambda x: x * x                # funciones anónimas de una expresión
+```
+
+Las anotaciones de tipo (`list[dict]`, `-> int`) **no se verifican en ejecución**: sirven para el editor y para
+herramientas como mypy, que veremos más adelante. Las funciones son objetos: se pueden pasar como argumento y devolver.
+
+## Strings
+
+```python
+customer = "Ana"
+total = 1234.5
+f"Hola {customer}, tu total es ${total:,.2f}"   # 'Hola Ana, tu total es $1,234.50'
+
+text = "  Zapatillas Running  "
+text.strip().lower()             # 'zapatillas running'
+"running" in text.lower()        # True
+"a,b,c".split(",")               # ['a', 'b', 'c']
+", ".join(["a", "b"])            # 'a, b'
+text[0:5]                        # slicing: desde el índice 0 hasta el 5 (exclusivo)
+```
+
+## Colecciones básicas
+
+| Tipo    | Literal      | Mutable | Uso                                                   |
+| ------- | ------------ | ------- | ----------------------------------------------------- |
+| `list`  | `[1, 2, 3]`  | Sí      | Secuencias que cambian                                |
+| `tuple` | `(1, 2)`     | No      | Registros de tamaño fijo, claves de diccionario       |
+| `dict`  | `{"sku": 1}` | Sí      | Tabla hash clave → valor; conserva orden de inserción |
+| `set`   | `{1, 2}`     | Sí      | Sin duplicados, pertenencia O(1)                      |
+
+```python
+cart = ["SKU-1", "SKU-2"]
+cart.append("SKU-3")
+cart[-1]                              # último elemento
+
+stock = {"SKU-1": 5, "SKU-2": 0}
+stock["SKU-3"] = 12
+stock.get("SKU-9", 0)                 # valor por defecto si no existe (stock["SKU-9"] lanza KeyError)
+for sku, qty in stock.items():
+    ...
+
+seen = set()
+seen.add("SKU-1")
+"SKU-1" in seen                       # True, O(1) promedio
+
+point = (10, 20)
+x, y = point                          # desempaquetado
+```
+
+## Comprobá lo aprendido
+
+<KnowledgeCheck
+  id="python.introduction.q1"
+  question="¿Qué pasa al ejecutar '3' + 3 en Python?"
+  options={[
+    { text: "Devuelve '33'.", explanation: "Eso pasaría en JavaScript; Python no convierte implícitamente." },
+    {
+      text: "Lanza TypeError.",
+      correct: true,
+      explanation: "Correcto. Python es dinámico pero fuertemente tipado.",
+    },
+    { text: "Devuelve 6.", explanation: "Habría que convertir con int('3')." },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="python.introduction.q2"
+  question="¿Cuál de estos objetos puede ser clave de un diccionario?"
+  options={[
+    { text: "Una lista ['a', 1].", explanation: "Las listas son mutables y no son hashables." },
+    {
+      text: "Una tupla ('a', 1).",
+      correct: true,
+      explanation: "Correcto. Una tupla de elementos hashables es hashable.",
+    },
+    { text: "Un diccionario.", explanation: "Los diccionarios son mutables y no son hashables." },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="python.introduction.q3"
+  question="¿Qué hacen las anotaciones de tipo como def f(x: int) -> int en tiempo de ejecución?"
+  options={[
+    { text: "Lanzan un error si x no es int.", explanation: "Python no las verifica al ejecutar." },
+    {
+      text: "Nada: son información para el editor y herramientas como mypy.",
+      correct: true,
+      explanation: "Correcto. Librerías como Pydantic sí pueden usarlas para validar, pero el lenguaje no.",
+    },
+    { text: "Convierten x a int automáticamente.", explanation: "No hay conversión automática." },
+  ]}
+/>
+
+## Resumen
+
+Python es dinámico, legible y con un ecosistema enorme. Con entornos virtuales, tipos básicos, indentación, funciones,
+f-strings y las cuatro colecciones (list, tuple, dict, set) ya podés escribir programas. En la próxima lección vemos lo
+que distingue al código Python idiomático: comprensiones, generadores, decoradores y clases.

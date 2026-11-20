@@ -1,0 +1,62 @@
+{
+  "id": "python",
+  "slug": "python",
+  "title": "Python para backend",
+  "description": "De la sintaxis de Python a una API con FastAPI: estructuras de datos, funciones, objetos, tipado, errores, proyectos, concurrencia con asyncio y testing con pytest.",
+  "areaId": "backend-languages",
+  "difficulty": "intermediate",
+  "order": 11,
+  "prerequisites": [],
+  "tags": ["python", "fastapi", "asyncio", "backend"],
+  "modules": [
+    {
+      "id": "python.intro",
+      "slug": "introduccion",
+      "title": "Introducción y sintaxis",
+      "description": "Qué es Python, cómo se ejecuta y la sintaxis necesaria para empezar a programar.",
+      "order": 0,
+      "topics": [
+        "Qué es Python e intérpretes",
+        "Versiones y entornos virtuales",
+        "Tipos básicos y variables",
+        "Control de flujo",
+        "Funciones",
+        "Strings y f-strings",
+        "Listas, tuplas, diccionarios y sets"
+      ]
+    },
+    {
+      "id": "python.language",
+      "slug": "lenguaje",
+      "title": "El lenguaje en profundidad",
+      "description": "Comprensiones, generadores, decoradores, clases, dataclasses, tipado y errores.",
+      "order": 1,
+      "topics": [
+        "Mutabilidad y referencias",
+        "Comprensiones y generadores",
+        "Closures y decoradores",
+        "Clases y métodos especiales",
+        "Dataclasses",
+        "Type hints y mypy",
+        "Excepciones y context managers",
+        "Paquetes, pyproject y uv"
+      ]
+    },
+    {
+      "id": "python.backend",
+      "slug": "backend",
+      "title": "Concurrencia y backend",
+      "description": "El GIL, threads, procesos y asyncio; APIs con FastAPI, Pydantic y pytest.",
+      "order": 2,
+      "topics": [
+        "El GIL y el modo sin GIL",
+        "threading, multiprocessing y concurrent.futures",
+        "asyncio",
+        "FastAPI y Pydantic",
+        "Inyección de dependencias en FastAPI",
+        "pytest y fixtures",
+        "Despliegue"
+      ]
+    }
+  ]
+}

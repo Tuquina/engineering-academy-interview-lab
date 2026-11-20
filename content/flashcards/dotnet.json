@@ -1,0 +1,88 @@
+{
+  "id": "dotnet",
+  "title": "C# y .NET",
+  "description": "El lenguaje, async/await y ASP.NET Core.",
+  "courseId": "dotnet",
+  "cards": [
+    {
+      "id": "net.clr",
+      "front": "¿Qué hace el CLR con el código C#?",
+      "back": "C# se compila a IL dentro de un assembly; el CLR lo carga, lo compila a código nativo con el JIT y administra la memoria con el garbage collector.",
+      "difficulty": "basic",
+      "tags": ["runtime"],
+      "lessonId": "dotnet.introduction"
+    },
+    {
+      "id": "net.lts",
+      "front": "Versiones LTS y STS de .NET.",
+      "back": "Una versión por año en noviembre: las pares son LTS (3 años de soporte) y las impares STS (2 años).",
+      "difficulty": "basic",
+      "tags": ["versiones"],
+      "lessonId": "dotnet.introduction"
+    },
+    {
+      "id": "net.value-reference",
+      "front": "Tipo de valor vs tipo de referencia.",
+      "back": "Valor (int, decimal, struct): asignar copia el valor. Referencia (class, string, arrays): asignar copia la referencia y ambas variables ven el mismo objeto.",
+      "difficulty": "basic",
+      "tags": ["tipos"],
+      "lessonId": "dotnet.types-linq"
+    },
+    {
+      "id": "net.deferred-linq",
+      "front": "¿Qué es la ejecución diferida de LINQ?",
+      "back": "Una consulta sobre IEnumerable se ejecuta al recorrerla, no al definirla; recorrerla dos veces la ejecuta dos veces. ToList materializa. Con IQueryable se traduce a SQL.",
+      "difficulty": "intermediate",
+      "tags": ["linq"],
+      "lessonId": "dotnet.types-linq"
+    },
+    {
+      "id": "net.record",
+      "front": "¿Para qué sirve un record en C#?",
+      "back": "Datos inmutables con igualdad por valor: DTOs, eventos, objetos de valor. `with` crea una copia con cambios.",
+      "difficulty": "basic",
+      "tags": ["records"],
+      "lessonId": "dotnet.types-linq"
+    },
+    {
+      "id": "net.result-blocking",
+      "front": "¿Por qué no usar `.Result` o `.Wait()` en código asíncrono?",
+      "back": "Bloquean un hilo esperando: pueden causar deadlocks con SynchronizationContext y agotar el thread pool en servidores. Async de punta a punta.",
+      "difficulty": "advanced",
+      "tags": ["async"],
+      "lessonId": "dotnet.async-memory"
+    },
+    {
+      "id": "net.throw",
+      "front": "`throw;` vs `throw ex;` dentro de un catch.",
+      "back": "`throw;` relanza conservando el stack trace original; `throw ex;` lo reinicia desde ese punto.",
+      "difficulty": "intermediate",
+      "tags": ["excepciones"],
+      "lessonId": "dotnet.async-memory"
+    },
+    {
+      "id": "net.lifetimes",
+      "front": "Lifetimes en ASP.NET Core.",
+      "back": "Transient: una instancia por resolución. Scoped: una por request (DbContext). Singleton: una para toda la aplicación. Nunca inyectes scoped en singleton (dependencia cautiva).",
+      "difficulty": "intermediate",
+      "tags": ["inyección de dependencias"],
+      "lessonId": "dotnet.aspnet-core"
+    },
+    {
+      "id": "net.middleware-order",
+      "front": "¿Por qué importa el orden de los middlewares?",
+      "back": "Se ejecutan en el orden registrado a la ida y en orden inverso a la vuelta: manejo de excepciones primero, autenticación antes de autorización, endpoints al final.",
+      "difficulty": "intermediate",
+      "tags": ["middleware"],
+      "lessonId": "dotnet.aspnet-core"
+    },
+    {
+      "id": "net.asnotracking",
+      "front": "¿Cuándo usar `AsNoTracking` en EF Core?",
+      "back": "En consultas de sólo lectura: evita el costo del change tracking. Para listados, mejor aún proyectar a DTOs con Select.",
+      "difficulty": "intermediate",
+      "tags": ["ef core"],
+      "lessonId": "dotnet.ef-core"
+    }
+  ]
+}

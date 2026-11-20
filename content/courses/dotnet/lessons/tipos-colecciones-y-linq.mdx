@@ -1,0 +1,229 @@
+---
+id: dotnet.types-linq
+moduleId: dotnet.language
+title: "Tipos, records, genéricos y LINQ"
+description: "Tipos de valor y de referencia, clases, structs, records e interfaces, herencia, genéricos con restricciones, las colecciones principales y LINQ con su ejecución diferida."
+difficulty: intermediate
+order: 2
+objectives:
+  - "Explicar la diferencia entre tipos de valor y de referencia y su impacto en la copia y la memoria."
+  - "Elegir entre class, struct y record."
+  - "Definir interfaces, herencia y genéricos con restricciones."
+  - "Elegir colecciones según su complejidad."
+  - "Consultar datos con LINQ y explicar la ejecución diferida."
+prerequisites: ["dotnet.introduction"]
+estimatedMinutes: 50
+tags: ["c#", "records", "genéricos", "linq", "colecciones"]
+version: "1.0.0"
+references:
+  - title: "Microsoft Learn — Value types"
+    url: "https://learn.microsoft.com/dotnet/csharp/language-reference/builtin-types/value-types"
+  - title: "Microsoft Learn — Records"
+    url: "https://learn.microsoft.com/dotnet/csharp/language-reference/builtin-types/record"
+  - title: "Microsoft Learn — Generics"
+    url: "https://learn.microsoft.com/dotnet/csharp/fundamentals/types/generics"
+  - title: "Microsoft Learn — LINQ overview"
+    url: "https://learn.microsoft.com/dotnet/csharp/linq/"
+interviewQuestions:
+  - question: "¿Qué diferencia hay entre una clase y un struct en C#?"
+    keyPoints:
+      - "La clase es un tipo de referencia: asignarla copia la referencia y vive en el heap."
+      - "El struct es un tipo de valor: asignarlo copia todos sus campos."
+      - "Los structs convienen para valores chicos e inmutables (un punto, un rango de fechas); los grandes se copian caro."
+      - "Un struct no admite herencia y su valor por defecto tiene todos los campos en cero."
+  - question: "¿Qué es la ejecución diferida en LINQ?"
+    keyPoints:
+      - "Las consultas sobre IEnumerable no se ejecutan al definirlas sino al recorrerlas."
+      - "Recorrer dos veces una consulta la ejecuta dos veces (con su costo)."
+      - "ToList o ToArray materializan el resultado."
+      - "Con IQueryable (Entity Framework), la consulta se traduce a SQL y se ejecuta en la base al materializar."
+  - question: "¿Cuándo usarías un record?"
+    keyPoints:
+      - "Para datos inmutables con igualdad por valor: DTOs, eventos, objetos de valor."
+      - "Genera constructor, propiedades init, Equals, GetHashCode, ToString y deconstrucción."
+      - "with crea una copia con cambios."
+      - "record struct es la variante de tipo de valor."
+summary:
+  - "Tipos de valor (int, decimal, struct) se copian; tipos de referencia (class, string, arrays) comparten la instancia."
+  - "record = datos inmutables con igualdad por valor y with para copiar con cambios."
+  - "Herencia simple de clases, múltiples interfaces; las interfaces pueden tener implementaciones por defecto."
+  - "Los genéricos de C# son reificados: existen en runtime, a diferencia de Java."
+  - "List, Dictionary, HashSet, Queue y PriorityQueue cubren la mayoría de los casos."
+  - "LINQ: Where, Select, GroupBy, OrderBy, Any, FirstOrDefault…"
+  - "IEnumerable se ejecuta al recorrer (ejecución diferida); ToList materializa."
+  - "IQueryable traduce la consulta (por ejemplo, a SQL con Entity Framework)."
+---
+
+## Tipos de valor y de referencia
+
+|            | Tipo de valor                                           | Tipo de referencia                                        |
+| ---------- | ------------------------------------------------------- | --------------------------------------------------------- |
+| Ejemplos   | `int`, `decimal`, `bool`, `DateTime`, `struct`, `enum`  | `class`, `string`, arrays, `delegate`, `record`           |
+| Asignar    | Copia el valor completo                                 | Copia la referencia (ambas variables ven el mismo objeto) |
+| Null       | No (salvo `int?`, que es `Nullable<int>`)               | Sí (marcado con `?` con nullable habilitado)              |
+| Dónde vive | Inline: en el stack o dentro del objeto que lo contiene | En el heap administrado                                   |
+
+```csharp
+var a = new Point(1, 2);   // struct
+var b = a;                 // copia
+b.X = 10;                  // a.X sigue siendo 1 (si Point es mutable)
+
+var c1 = new Cart();       // class
+var c2 = c1;               // misma instancia
+c2.Add("SKU-1");           // c1 también ve el ítem
+```
+
+Asignar un tipo de valor a `object` o a una interfaz lo **encapsula** en un objeto del heap (_boxing_), con su costo;
+por eso los genéricos (`List<int>`) son preferibles a colecciones de `object`.
+
+## Clases, structs, records e interfaces
+
+```csharp
+public interface IPaymentGateway
+{
+    Task<string> ChargeAsync(decimal amount, string token, CancellationToken ct);
+}
+
+public abstract class Payment                       // no se instancia
+{
+    public decimal Amount { get; init; }            // init: sólo se asigna al crear el objeto
+    public abstract string Describe();
+}
+
+public sealed class CardPayment : Payment           // sealed: no se puede heredar
+{
+    public int Installments { get; init; } = 1;
+    public override string Describe() => $"Tarjeta en {Installments} cuotas";
+}
+
+public record Money(decimal Amount, string Currency) // record posicional
+{
+    public Money Add(Money other) =>
+        Currency == other.Currency ? this with { Amount = Amount + other.Amount }
+                                   : throw new InvalidOperationException("Monedas distintas");
+}
+
+public readonly record struct DateRange(DateOnly From, DateOnly To);  // record de tipo de valor
+```
+
+| Elegí                      | Cuando                                                                   |
+| -------------------------- | ------------------------------------------------------------------------ |
+| `class`                    | Entidades con identidad y estado que cambia, servicios                   |
+| `record`                   | Datos inmutables con igualdad por valor: DTOs, eventos, objetos de valor |
+| `struct` / `record struct` | Valores chicos e inmutables que se crean en grandes cantidades           |
+
+Herencia simple de clases y múltiples interfaces, como en Java. `virtual`/`override` controlan qué se puede
+sobrescribir (por defecto, nada). Las interfaces pueden tener implementaciones por defecto desde C# 8.
+
+## Genéricos y colecciones
+
+```csharp
+public sealed class Page<T>
+{
+    public required IReadOnlyList<T> Items { get; init; }   // required (C# 11): obligatorio al crear
+    public string? NextCursor { get; init; }
+}
+
+public static T MaxBy<T, TKey>(IEnumerable<T> items, Func<T, TKey> key)
+    where TKey : IComparable<TKey>                           // restricción
+{ /* ... */ }
+```
+
+A diferencia de Java, los genéricos de .NET son **reificados**: `List<int>` y `List<string>` son tipos distintos en
+runtime y `List<int>` guarda enteros sin boxing.
+
+| Colección                            | Uso                | Complejidad típica           |
+| ------------------------------------ | ------------------ | ---------------------------- |
+| `List<T>`                            | Lista dinámica     | Índice O(1), `Contains` O(n) |
+| `Dictionary<TKey, TValue>`           | Clave → valor      | O(1) promedio                |
+| `HashSet<T>`                         | Sin duplicados     | `Contains` O(1) promedio     |
+| `Queue<T>` / `Stack<T>`              | FIFO / LIFO        | O(1)                         |
+| `PriorityQueue<TElement, TPriority>` | Heap               | O(log n)                     |
+| `SortedDictionary`                   | Clave ordenada     | O(log n)                     |
+| `ConcurrentDictionary`               | Acceso concurrente | O(1) promedio                |
+
+Exponé colecciones como `IReadOnlyList<T>` o `IEnumerable<T>` para que quien las recibe no las modifique.
+
+## LINQ
+
+**LINQ** (Language Integrated Query) agrega operadores de consulta a cualquier colección:
+
+```csharp
+var paidByCustomer = orders
+    .Where(o => o.Status == OrderStatus.Paid)
+    .GroupBy(o => o.CustomerId)
+    .Select(g => new { CustomerId = g.Key, Total = g.Sum(o => o.Total), Count = g.Count() })
+    .OrderByDescending(x => x.Total)
+    .Take(10)
+    .ToList();
+
+bool anyPending = orders.Any(o => o.Status == OrderStatus.Created);
+var first = orders.FirstOrDefault(o => o.Id == id);      // null si no hay
+var skus = orders.SelectMany(o => o.Items).Select(i => i.Sku).Distinct();
+```
+
+### Ejecución diferida
+
+Una consulta LINQ sobre `IEnumerable<T>` **no se ejecuta cuando se define**, sino cuando se recorre (`foreach`,
+`ToList`, `Count`, `First`…). Si la recorrés dos veces, se ejecuta dos veces.
+
+<MermaidDiagram
+  caption="IEnumerable ejecuta los operadores en memoria al recorrer; IQueryable arma un árbol de expresión que un proveedor (Entity Framework) traduce a SQL."
+  chart={`
+flowchart LR
+  Q["orders.Where(...).Select(...)"] --> E{"¿IEnumerable o IQueryable?"}
+  E -->|"IEnumerable"| M["Se ejecuta en memoria al recorrer"]
+  E -->|"IQueryable"| X["Árbol de expresión"]
+  X --> S["Entity Framework genera SQL"]
+  S --> DB[("Base de datos")]
+`}
+/>
+
+Con **`IQueryable<T>`** (Entity Framework), los mismos operadores no se ejecutan en memoria: arman un árbol de
+expresión que el proveedor traduce a SQL. Llamar a `ToList()` demasiado temprano trae toda la tabla a memoria y filtra
+después: un error clásico de performance.
+
+## Comprobá lo aprendido
+
+<KnowledgeCheck
+  id="dotnet.types-linq.q1"
+  question="var a = new Cart(); var b = a; b.Add(item). Cart es una clase. ¿Qué ve a?"
+  options={[
+    {
+      text: "No ve el ítem: b es una copia.",
+      explanation: "Las clases son tipos de referencia: no se copian al asignar.",
+    },
+    { text: "Ve el ítem: a y b referencian el mismo objeto.", correct: true, explanation: "Correcto." },
+    { text: "Error de compilación.", explanation: "Es código válido." },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="dotnet.types-linq.q2"
+  question="Definís var query = orders.Where(o => o.Total > 1000) y después la recorrés dos veces con foreach. ¿Cuántas veces se evalúa el filtro?"
+  options={[
+    { text: "Una: al definir la consulta.", explanation: "LINQ sobre IEnumerable usa ejecución diferida." },
+    {
+      text: "Dos: una por cada recorrido.",
+      correct: true,
+      explanation: "Correcto. Materializá con ToList si la vas a recorrer varias veces.",
+    },
+    { text: "Ninguna.", explanation: "Se evalúa al recorrer." },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="dotnet.types-linq.q3"
+  question="¿Qué hace la expresión price with { Amount = 200 } sobre un record?"
+  options={[
+    { text: "Modifica el record original.", explanation: "Los records posicionales son inmutables." },
+    { text: "Crea una copia del record con Amount cambiado.", correct: true, explanation: "Correcto." },
+    { text: "Compara dos records.", explanation: "La comparación se hace con == o Equals." },
+  ]}
+/>
+
+## Resumen
+
+Entender tipos de valor y de referencia explica la mitad de las preguntas de C# en entrevistas. Records para datos,
+clases para entidades, genéricos reificados, colecciones según su complejidad y LINQ con su ejecución diferida son la
+base del código C# idiomático.

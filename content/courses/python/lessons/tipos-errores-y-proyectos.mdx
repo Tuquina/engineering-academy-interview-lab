@@ -1,0 +1,256 @@
+---
+id: python.typing-errors
+moduleId: python.language
+title: "Tipado, errores y proyectos profesionales"
+description: "Type hints y mypy, excepciones y el estilo EAFP, context managers, módulos y paquetes, pyproject.toml, gestión de dependencias y logging: lo que separa un script de un proyecto mantenible."
+difficulty: intermediate
+order: 3
+objectives:
+  - "Anotar tipos, incluidos genéricos, Optional, uniones, Protocol y TypedDict, y verificarlos con mypy."
+  - "Lanzar, capturar y definir excepciones propias, y aplicar EAFP con criterio."
+  - "Usar y escribir context managers con with."
+  - "Organizar un proyecto en paquetes con pyproject.toml y un lockfile."
+  - "Configurar logging en lugar de usar print."
+prerequisites: ["python.idiomatic"]
+estimatedMinutes: 45
+tags: ["python", "type hints", "mypy", "excepciones", "pyproject", "logging"]
+version: "1.0.0"
+references:
+  - title: "Python docs — typing"
+    url: "https://docs.python.org/3/library/typing.html"
+  - title: "mypy documentation"
+    url: "https://mypy.readthedocs.io/en/stable/"
+  - title: "The Python Tutorial — Errors and Exceptions"
+    url: "https://docs.python.org/3/tutorial/errors.html"
+  - title: "Python Packaging User Guide — Writing pyproject.toml"
+    url: "https://packaging.python.org/en/latest/guides/writing-pyproject-toml/"
+  - title: "Python docs — Logging HOWTO"
+    url: "https://docs.python.org/3/howto/logging.html"
+interviewQuestions:
+  - question: "¿Qué es EAFP y cuándo conviene frente a LBYL?"
+    keyPoints:
+      - "EAFP (Easier to Ask Forgiveness than Permission): intentar la operación y capturar la excepción."
+      - "LBYL (Look Before You Leap): verificar antes de actuar."
+      - "EAFP evita condiciones de carrera entre la verificación y la acción (por ejemplo, con archivos)."
+      - "Se capturan excepciones específicas, nunca un except desnudo."
+  - question: "¿Qué ventajas trae agregar type hints a un proyecto Python?"
+    keyPoints:
+      - "Herramientas como mypy o pyright detectan errores antes de ejecutar."
+      - "Mejor autocompletado y refactors más seguros en el editor."
+      - "Documentan el contrato de cada función."
+      - "Librerías como Pydantic y FastAPI las usan en runtime para validar y documentar."
+  - question: "¿Qué es un context manager?"
+    keyPoints:
+      - "Un objeto que define qué hacer al entrar y al salir de un bloque with (__enter__ y __exit__)."
+      - "Garantiza la liberación de recursos aunque haya excepciones: archivos, conexiones, locks, transacciones."
+      - "Se puede escribir con una clase o con contextlib.contextmanager y yield."
+summary:
+  - "Los type hints no se verifican al ejecutar: mypy o pyright los verifican estáticamente."
+  - "X | None indica que puede faltar; Protocol define interfaces estructurales (como en TypeScript)."
+  - "Capturá excepciones específicas; except Exception sólo en el borde, y nunca except desnudo."
+  - "raise ... from e conserva la causa original."
+  - "with garantiza la liberación de recursos; contextlib.contextmanager simplifica escribir uno."
+  - "pyproject.toml declara el proyecto y sus dependencias; el lockfile fija las versiones exactas."
+  - "Usá logging con niveles y formato estructurado; print no es para producción."
+---
+
+## Type hints
+
+Python es dinámico, pero desde la versión 3.5 admite **anotaciones de tipo**. No cambian la ejecución: las verifican
+herramientas como **mypy** o **pyright**, y las aprovechan el editor y librerías como Pydantic.
+
+```python
+from typing import Protocol, TypedDict
+
+def find_customer(customer_id: str) -> "Customer | None":   # puede devolver None
+    ...
+
+def apply_discount(prices: list[int], pct: float) -> list[int]:
+    return [round(p * (1 - pct / 100)) for p in prices]
+
+class PaymentGateway(Protocol):                 # interfaz estructural: no hace falta heredar
+    def charge(self, amount_cents: int, token: str) -> str: ...
+
+class StripeGateway:                            # cumple el Protocol por tener el método
+    def charge(self, amount_cents: int, token: str) -> str:
+        ...
+
+class OrderPayload(TypedDict):                  # forma de un diccionario
+    sku: str
+    quantity: int
+
+def first[T](items: list[T]) -> T | None:       # genéricos con la sintaxis de Python 3.12
+    return items[0] if items else None
+```
+
+```bash
+uv run mypy --strict src/
+```
+
+`Protocol` funciona como las interfaces de TypeScript: la compatibilidad es **estructural**. Es la forma natural de
+definir puertos en una arquitectura hexagonal en Python.
+
+## Excepciones
+
+```python
+class OutOfStockError(Exception):
+    def __init__(self, sku: str, requested: int):
+        super().__init__(f"Sin stock suficiente de {sku} (pedido: {requested})")
+        self.sku = sku
+
+try:
+    inventory.reserve(sku, quantity)
+except OutOfStockError as error:
+    return {"status": "rejected", "reason": str(error)}
+except TimeoutError as error:
+    raise CheckoutError("El inventario no respondió") from error   # conserva la causa
+else:
+    payments.charge(order)          # sólo si no hubo excepción
+finally:
+    metrics.increment("checkout.attempt")
+```
+
+Python favorece el estilo **EAFP** (_Easier to Ask Forgiveness than Permission_): intentar la operación y manejar la
+excepción, en lugar de verificar todo antes (**LBYL**). Por ejemplo, abrir un archivo y capturar
+`FileNotFoundError` evita la condición de carrera de verificar que existe y que lo borren justo después.
+
+<Callout type="warning" title="Nunca un except desnudo">
+  `except:` sin tipo captura también `KeyboardInterrupt` y `SystemExit`. Capturá excepciones específicas, y
+  usá `except Exception` sólo en el borde de la aplicación, registrando el error.
+</Callout>
+
+## Context managers
+
+`with` garantiza que un recurso se libere al salir del bloque, aunque haya una excepción:
+
+```python
+with open("orders.csv", encoding="utf-8") as file:
+    rows = file.readlines()
+# el archivo ya está cerrado
+
+from contextlib import contextmanager
+
+@contextmanager
+def transaction(connection):
+    try:
+        yield connection
+        connection.commit()
+    except Exception:
+        connection.rollback()
+        raise
+
+with transaction(conn) as tx:
+    tx.execute("UPDATE stock SET quantity = quantity - 1 WHERE sku = %s", (sku,))
+```
+
+## Módulos, paquetes y pyproject.toml
+
+Un **módulo** es un archivo `.py`; un **paquete** es una carpeta de módulos. Un proyecto moderno se describe en
+`pyproject.toml`:
+
+```text
+shop/
+├── pyproject.toml
+├── uv.lock                 # versiones exactas de todo el árbol de dependencias
+├── src/shop/
+│   ├── __init__.py
+│   ├── orders/
+│   │   ├── domain.py
+│   │   └── service.py
+│   └── main.py
+└── tests/
+    └── test_orders.py
+```
+
+```toml
+[project]
+name = "shop"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = ["fastapi>=0.115", "sqlalchemy>=2.0"]
+
+[dependency-groups]
+dev = ["pytest", "mypy", "ruff"]
+```
+
+```python
+from shop.orders.service import OrderService        # import absoluto desde el paquete
+
+if __name__ == "__main__":                           # sólo se ejecuta al correr el archivo directamente
+    main()
+```
+
+Herramientas habituales: **uv** o **Poetry** para dependencias y lockfile, **ruff** para lint y formato, **mypy**
+para tipos y **pytest** para tests. El lockfile se commitea para que todos los entornos instalen lo mismo.
+
+## Logging
+
+`print` no tiene niveles, contexto ni destino configurable. En aplicaciones se usa `logging`:
+
+```python
+import logging
+
+logger = logging.getLogger(__name__)          # un logger por módulo
+
+logger.info("Pedido creado", extra={"order_id": order.id})
+logger.warning("Reintento %d de pago", attempt)  # formato perezoso: no arma el string si el nivel está apagado
+try:
+    process(order)
+except PaymentError:
+    logger.exception("Falló el cobro")         # incluye el stack trace
+```
+
+La configuración (nivel, formato JSON para producción, destino) se hace una vez al arrancar la aplicación.
+
+## Comprobá lo aprendido
+
+<KnowledgeCheck
+  id="python.typing-errors.q1"
+  question="Una función anotada como def total(x: int) -> int recibe el string '5' en ejecución. ¿Qué pasa?"
+  options={[
+    {
+      text: "Python lanza un TypeError al llamar a la función.",
+      explanation: "El intérprete no verifica las anotaciones.",
+    },
+    {
+      text: "Se ejecuta igual; el error lo detectaría mypy antes de ejecutar.",
+      correct: true,
+      explanation: "Correcto. Los type hints se verifican con herramientas estáticas.",
+    },
+    { text: "Convierte '5' a 5.", explanation: "No hay conversión automática." },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="python.typing-errors.q2"
+  question="¿Para qué sirve raise NuevoError(...) from error dentro de un except?"
+  options={[
+    { text: "Para ocultar el error original.", explanation: "Al contrario: lo conserva." },
+    {
+      text: "Para encadenar la excepción conservando la causa original en el traceback.",
+      correct: true,
+      explanation: "Correcto. Queda disponible en __cause__.",
+    },
+    { text: "Para reintentar la operación.", explanation: "No reintenta nada." },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="python.typing-errors.q3"
+  question="¿Qué garantiza un bloque with open(...) as f?"
+  options={[
+    { text: "Que el archivo exista.", explanation: "Si no existe, open lanza FileNotFoundError." },
+    {
+      text: "Que el archivo se cierre al salir del bloque, aunque haya una excepción.",
+      correct: true,
+      explanation: "Correcto.",
+    },
+    { text: "Que la lectura sea asíncrona.", explanation: "open es síncrono." },
+  ]}
+/>
+
+## Resumen
+
+Un proyecto Python profesional tiene tipos verificados con mypy, excepciones específicas y encadenadas, recursos
+administrados con with, un pyproject.toml con lockfile y logging configurado. Con eso, el siguiente paso es la
+concurrencia y un backend real.

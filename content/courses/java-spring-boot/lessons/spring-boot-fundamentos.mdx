@@ -1,0 +1,293 @@
+---
+id: java.spring-boot
+moduleId: java.spring
+title: "Spring Boot: inversión de control y APIs REST"
+description: "Qué es Spring y qué agrega Spring Boot; el contenedor de inversión de control, la inyección de dependencias, la auto-configuración, los controladores REST, la validación, el manejo de errores y la configuración por perfiles."
+difficulty: intermediate
+order: 5
+objectives:
+  - "Explicar inversión de control, beans y la inyección de dependencias por constructor."
+  - "Describir qué hace la auto-configuración y qué es un starter."
+  - "Construir una API REST con controladores, DTOs, validación y manejo de errores centralizado."
+  - "Configurar la aplicación con application.yml, propiedades tipadas y perfiles."
+  - "Organizar el código en capas o por módulos."
+prerequisites: ["java.objects-collections"]
+estimatedMinutes: 55
+tags: ["java", "spring boot", "inyección de dependencias", "rest"]
+version: "1.0.0"
+references:
+  - title: "Spring Boot — Reference Documentation"
+    url: "https://docs.spring.io/spring-boot/index.html"
+  - title: "Spring Framework — The IoC Container"
+    url: "https://docs.spring.io/spring-framework/reference/core/beans.html"
+  - title: "Spring Framework — Annotated Controllers"
+    url: "https://docs.spring.io/spring-framework/reference/web/webmvc/mvc-controller.html"
+  - title: "Spring Initializr"
+    url: "https://start.spring.io/"
+  - title: "Spring Boot — System Requirements"
+    url: "https://docs.spring.io/spring-boot/system-requirements.html"
+interviewQuestions:
+  - question: "¿Qué es la inversión de control y por qué Spring recomienda inyección por constructor?"
+    keyPoints:
+      - "En lugar de que un objeto cree sus dependencias, el contenedor las crea y se las pasa (inversión de control)."
+      - "La inyección por constructor hace explícitas las dependencias, permite campos final y facilita los tests sin el contenedor."
+      - "La inyección por campo (@Autowired en el atributo) oculta dependencias y obliga a usar reflexión en los tests."
+  - question: "¿Qué hace la auto-configuración de Spring Boot?"
+    keyPoints:
+      - "Configura beans automáticamente según las librerías presentes en el classpath y las propiedades definidas."
+      - "Por ejemplo, con el starter web y Jackson configura Tomcat, Spring MVC y la serialización JSON."
+      - "Las auto-configuraciones son condicionales (@ConditionalOnClass, @ConditionalOnMissingBean): un bean propio reemplaza al por defecto."
+  - question: "¿Cuáles son los scopes de un bean?"
+    keyPoints:
+      - "singleton (por defecto): una instancia por contenedor; debe ser sin estado o thread-safe."
+      - "prototype: una instancia nueva cada vez que se pide."
+      - "En aplicaciones web también request y session."
+summary:
+  - "Spring es un contenedor de inversión de control; Spring Boot agrega auto-configuración, starters y un servidor embebido."
+  - "Los beans se declaran con @Component, @Service, @Repository, @Controller o con métodos @Bean."
+  - "Inyectá por constructor; con un solo constructor no hace falta @Autowired."
+  - "Los beans singleton se comparten entre hilos: no guardes estado de una request en campos."
+  - "@RestController + DTOs (records) + @Valid para validar la entrada."
+  - "@RestControllerAdvice centraliza el manejo de errores; ProblemDetail sigue el RFC 9457."
+  - "application.yml, @ConfigurationProperties y perfiles (dev, prod) separan la configuración del código."
+---
+
+## Qué son Spring y Spring Boot
+
+**Spring Framework** es el framework más usado del ecosistema Java para aplicaciones empresariales. Su núcleo es un
+**contenedor de inversión de control (IoC)**: en lugar de que cada objeto cree sus dependencias con `new`, el
+contenedor crea los objetos (llamados **beans**), resuelve qué necesita cada uno y se los inyecta.
+
+**Spring Boot** se apoya en Spring y resuelve la parte tediosa:
+
+- **Auto-configuración**: configura beans según las librerías que hay en el classpath.
+- **Starters**: dependencias agrupadas (`spring-boot-starter-web`, `spring-boot-starter-data-jpa`…).
+- **Servidor embebido**: la aplicación es un `.jar` ejecutable con Tomcat adentro.
+- **Actuator**: health checks, métricas e información operativa.
+
+Spring Boot 4 (sobre Spring Framework 7) requiere **Java 17 o superior**. El punto de partida habitual es
+[Spring Initializr](https://start.spring.io/), que genera el proyecto con Maven o Gradle.
+
+```java
+@SpringBootApplication           // configuración + escaneo de componentes + auto-configuración
+public class ShopApplication {
+    public static void main(String[] args) {
+        SpringApplication.run(ShopApplication.class, args);
+    }
+}
+```
+
+## Beans e inyección de dependencias
+
+Las anotaciones de estereotipo marcan clases como beans: `@Component` (genérica), `@Service` (lógica de negocio),
+`@Repository` (acceso a datos, traduce excepciones de persistencia) y `@Controller`/`@RestController` (web).
+
+```java
+@Service
+public class CheckoutService {
+    private final InventoryClient inventory;
+    private final PaymentGateway payments;
+    private final OrderRepository orders;
+
+    // Con un único constructor, Spring lo usa para inyectar: no hace falta @Autowired
+    public CheckoutService(InventoryClient inventory, PaymentGateway payments, OrderRepository orders) {
+        this.inventory = inventory;
+        this.payments = payments;
+        this.orders = orders;
+    }
+
+    public Order checkout(CheckoutCommand command) { /* ... */ }
+}
+```
+
+**Inyectá por constructor**: las dependencias quedan explícitas, los campos pueden ser `final` y en un test unitario
+creás el servicio con `new` y fakes, sin levantar Spring.
+
+Para objetos que no son tuyos (un cliente HTTP, un SDK) se declara un método `@Bean` en una clase `@Configuration`:
+
+```java
+@Configuration
+public class HttpClientsConfig {
+    @Bean
+    RestClient paymentsClient(PaymentsProperties props) {
+        return RestClient.builder().baseUrl(props.baseUrl()).build();
+    }
+}
+```
+
+<Callout type="warning" title="Los beans son singleton y compartidos entre hilos">
+  Por defecto hay una sola instancia de cada bean para toda la aplicación, y la usan todas las requests al
+  mismo tiempo. Nunca guardes datos de una request (el usuario actual, un carrito) en un campo de un
+  `@Service`.
+</Callout>
+
+## Una API REST
+
+<MermaidDiagram
+  caption="Camino de una request en Spring MVC: el DispatcherServlet elige el controlador, que delega en el servicio; las excepciones se convierten en respuestas en un único lugar."
+  chart={`
+flowchart LR
+  C["Cliente HTTP"] --> F["Filtros (seguridad, logging)"]
+  F --> D["DispatcherServlet"]
+  D --> RC["@RestController"]
+  RC --> S["@Service"]
+  S --> R["Repository"]
+  R --> DB[("Base de datos")]
+  RC -. "excepción" .-> A["@RestControllerAdvice"]
+  A -. "ProblemDetail" .-> C
+`}
+/>
+
+```java
+public record CreateProductRequest(
+    @NotBlank String name,
+    @Positive long priceCents,
+    @NotBlank @Size(min = 3, max = 3) String currency) {}
+
+public record ProductResponse(String id, String name, long priceCents, String currency) {}
+
+@RestController
+@RequestMapping("/api/products")
+public class ProductController {
+    private final ProductService products;
+
+    public ProductController(ProductService products) {
+        this.products = products;
+    }
+
+    @GetMapping("/{id}")
+    public ProductResponse get(@PathVariable String id) {
+        return products.get(id);                                    // se serializa a JSON con Jackson
+    }
+
+    @PostMapping
+    public ResponseEntity<ProductResponse> create(@Valid @RequestBody CreateProductRequest request) {
+        ProductResponse created = products.create(request);
+        return ResponseEntity.created(URI.create("/api/products/" + created.id())).body(created);
+    }
+}
+```
+
+- Los **DTOs** (records) definen el contrato de la API: no expongas entidades JPA directamente.
+- `@Valid` dispara Bean Validation (`spring-boot-starter-validation`); si falla, Spring responde 400.
+- `@PathVariable`, `@RequestParam` y `@RequestBody` mapean las partes de la request.
+
+### Manejo de errores centralizado
+
+```java
+@RestControllerAdvice
+public class ApiErrors {
+    @ExceptionHandler(ProductNotFoundException.class)
+    ProblemDetail notFound(ProductNotFoundException e) {
+        return ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, e.getMessage());
+    }
+
+    @ExceptionHandler(InsufficientStockException.class)
+    ProblemDetail conflict(InsufficientStockException e) {
+        return ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, e.getMessage());
+    }
+}
+```
+
+`ProblemDetail` produce respuestas con el formato estándar de errores HTTP (RFC 9457): `type`, `title`, `status` y
+`detail`.
+
+## Configuración y perfiles
+
+```yaml
+# application.yml
+payments:
+  base-url: https://api.payments.example
+  timeout: 3s
+spring:
+  datasource:
+    url: ${DATABASE_URL}
+---
+spring.config.activate.on-profile: dev
+payments.base-url: http://localhost:8089
+```
+
+```java
+@ConfigurationProperties(prefix = "payments")
+public record PaymentsProperties(String baseUrl, Duration timeout) {}
+// Se registra con @EnableConfigurationProperties o @ConfigurationPropertiesScan
+```
+
+Las propiedades tipadas se validan al arrancar y se inyectan como cualquier bean. Los **perfiles** (`dev`, `test`,
+`prod`) activan configuración distinta por entorno con `SPRING_PROFILES_ACTIVE`; los secretos van en variables de
+entorno, nunca en el repositorio.
+
+## Cómo organizar el código
+
+La estructura clásica es por capas (controller → service → repository), pero en aplicaciones medianas suele ser más
+mantenible **por funcionalidad** (`orders`, `payments`, `catalog`), cada paquete con sus capas internas y una API
+pública mínima. Es la idea del monolito modular, que Spring Modulith ayuda a verificar. La arquitectura hexagonal
+encaja naturalmente: el dominio define interfaces (puertos) y Spring inyecta los adaptadores.
+
+## Comprobá lo aprendido
+
+<KnowledgeCheck
+  id="java.spring-boot.q1"
+  question="¿Por qué se recomienda la inyección por constructor en lugar de @Autowired en los campos?"
+  options={[
+    {
+      text: "Porque es más rápida en runtime.",
+      explanation: "La diferencia de rendimiento no es el motivo.",
+    },
+    {
+      text: "Porque hace explícitas las dependencias, permite campos final y facilita los tests sin Spring.",
+      correct: true,
+      explanation: "Correcto.",
+    },
+    {
+      text: "Porque @Autowired está deprecado.",
+      explanation: "No está deprecado; simplemente no hace falta con un único constructor.",
+    },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="java.spring-boot.q2"
+  question="Un @Service guarda en un campo el ID del usuario de la request actual. ¿Qué problema hay?"
+  options={[
+    {
+      text: "Ninguno, cada request crea su propio servicio.",
+      explanation: "Los beans son singleton por defecto: se comparten.",
+    },
+    {
+      text: "Todas las requests comparten esa instancia: un usuario puede ver datos de otro.",
+      correct: true,
+      explanation: "Correcto. Los beans singleton no deben guardar estado de una request.",
+    },
+    {
+      text: "Spring lanza un error al arrancar.",
+      explanation: "Spring no lo detecta; es un bug en runtime.",
+    },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="java.spring-boot.q3"
+  question="¿Qué pasa si una request llega con un body que no cumple las anotaciones de validación de un parámetro @Valid?"
+  options={[
+    {
+      text: "El controlador recibe el objeto igual.",
+      explanation: "Con @Valid, la validación se ejecuta antes de llamar al método.",
+    },
+    {
+      text: "Spring responde 400 Bad Request sin ejecutar el método.",
+      correct: true,
+      explanation: "Correcto. El error puede personalizarse en un @RestControllerAdvice.",
+    },
+    {
+      text: "Se guarda en la base con los campos vacíos.",
+      explanation: "La request se rechaza antes de llegar al servicio.",
+    },
+  ]}
+/>
+
+## Resumen
+
+Spring crea y conecta los beans; Spring Boot los configura automáticamente y empaqueta la aplicación con su servidor.
+Con inyección por constructor, DTOs validados, un manejador central de errores y configuración por perfiles tenés la
+base de cualquier API empresarial en Java.

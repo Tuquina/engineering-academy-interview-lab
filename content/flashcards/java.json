@@ -1,0 +1,96 @@
+{
+  "id": "java",
+  "title": "Java y Spring Boot",
+  "description": "El lenguaje, la JVM y Spring Boot.",
+  "courseId": "java-spring-boot",
+  "cards": [
+    {
+      "id": "java.jdk-jvm",
+      "front": "¿Qué diferencia hay entre el JDK y la JVM?",
+      "back": "La JVM ejecuta bytecode (carga de clases, JIT, garbage collector). El JDK incluye la JVM, la librería estándar y las herramientas de desarrollo: javac, jar, jshell.",
+      "difficulty": "basic",
+      "tags": ["jvm"],
+      "lessonId": "java.introduction"
+    },
+    {
+      "id": "java.string-equals",
+      "front": "¿Cómo se comparan dos String por contenido en Java?",
+      "back": "Con `equals`. `==` compara referencias (si son el mismo objeto) y puede dar resultados engañosos por el string pool.",
+      "difficulty": "basic",
+      "tags": ["strings"],
+      "lessonId": "java.introduction"
+    },
+    {
+      "id": "java.equals-hashcode",
+      "front": "¿Cuál es el contrato entre `equals` y `hashCode`?",
+      "back": "Si dos objetos son iguales según `equals`, deben tener el mismo `hashCode`. Romperlo hace que HashMap y HashSet no encuentren objetos o guarden duplicados.",
+      "difficulty": "intermediate",
+      "tags": ["colecciones"],
+      "lessonId": "java.objects-collections"
+    },
+    {
+      "id": "java.record",
+      "front": "¿Qué genera un `record` de Java?",
+      "back": "Constructor, accessors (sin prefijo get), `equals`, `hashCode` y `toString`. Es inmutable: ideal para DTOs y objetos de valor, no para entidades JPA.",
+      "difficulty": "basic",
+      "tags": ["records"],
+      "lessonId": "java.objects-collections"
+    },
+    {
+      "id": "java.stream-lazy",
+      "front": "¿Cuándo se ejecutan las operaciones intermedias de un Stream?",
+      "back": "Recién cuando hay una operación terminal (collect, sum, toList, findFirst). Son perezosas y un stream se consume una sola vez.",
+      "difficulty": "intermediate",
+      "tags": ["streams"],
+      "lessonId": "java.streams-exceptions"
+    },
+    {
+      "id": "java.checked-unchecked",
+      "front": "Excepción checked vs unchecked.",
+      "back": "Checked (hereda de Exception): obliga a declararla o capturarla, por ejemplo IOException. Unchecked (RuntimeException): no obliga, por ejemplo IllegalArgumentException.",
+      "difficulty": "basic",
+      "tags": ["excepciones"],
+      "lessonId": "java.streams-exceptions"
+    },
+    {
+      "id": "java.virtual-threads",
+      "front": "¿Qué resuelven los virtual threads (Java 21)?",
+      "back": "Permiten un hilo por request con escalabilidad cercana a la asíncrona: al bloquearse por I/O liberan el hilo del sistema operativo. No aceleran trabajo de CPU.",
+      "difficulty": "advanced",
+      "tags": ["concurrencia"],
+      "lessonId": "java.concurrency-jvm"
+    },
+    {
+      "id": "java.volatile",
+      "front": "¿`volatile` hace atómico a `count++`?",
+      "back": "No. Garantiza visibilidad entre hilos, no atomicidad de operaciones compuestas. Para eso: `AtomicLong`, `synchronized` o un `Lock`.",
+      "difficulty": "advanced",
+      "tags": ["concurrencia"],
+      "lessonId": "java.concurrency-jvm"
+    },
+    {
+      "id": "java.constructor-injection",
+      "front": "¿Por qué inyectar por constructor en Spring?",
+      "back": "Dependencias explícitas, campos final y tests sin levantar Spring. Con un único constructor no hace falta @Autowired.",
+      "difficulty": "basic",
+      "tags": ["spring"],
+      "lessonId": "java.spring-boot"
+    },
+    {
+      "id": "java.transactional-self-invocation",
+      "front": "¿Por qué `@Transactional` no tiene efecto al llamar a un método de la misma clase?",
+      "back": "Spring aplica la transacción con un proxy; una llamada interna con this no pasa por el proxy. Además, por defecto sólo hace rollback ante excepciones unchecked.",
+      "difficulty": "advanced",
+      "tags": ["spring", "transacciones"],
+      "lessonId": "java.spring-data"
+    },
+    {
+      "id": "java.n-plus-one",
+      "front": "¿Cómo se resuelve el N+1 en JPA?",
+      "back": "Trayendo la relación en la misma consulta: join fetch, @EntityGraph, proyecciones a DTO o batch fetching. Cambiar todo a EAGER no es la solución.",
+      "difficulty": "intermediate",
+      "tags": ["jpa"],
+      "lessonId": "java.spring-data"
+    }
+  ]
+}

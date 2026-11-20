@@ -1,0 +1,276 @@
+---
+id: dotnet.introduction
+moduleId: dotnet.intro
+title: "Introducción a C# y .NET: qué es, cómo se ejecuta y la sintaxis esencial"
+description: "Qué es .NET, cómo se compila y ejecuta un programa C#, qué versión usar, el dotnet CLI y la sintaxis necesaria para programar: tipos, nullable, control de flujo, pattern matching, métodos, clases, propiedades, strings y colecciones."
+difficulty: basic
+order: 1
+objectives:
+  - "Explicar qué es .NET, la relación entre C#, IL, el CLR y el SDK, y la política de versiones LTS y STS."
+  - "Crear, compilar y ejecutar un proyecto con el dotnet CLI."
+  - "Usar tipos, variables, nullable reference types y control de flujo con pattern matching."
+  - "Escribir métodos, clases y propiedades."
+  - "Trabajar con strings y colecciones básicas."
+prerequisites: []
+estimatedMinutes: 45
+tags: ["c#", ".net", "introducción", "sintaxis"]
+version: "1.0.0"
+references:
+  - title: "Microsoft Learn — A tour of C#"
+    url: "https://learn.microsoft.com/dotnet/csharp/tour-of-csharp/"
+  - title: "Microsoft Learn — Introduction to .NET"
+    url: "https://learn.microsoft.com/dotnet/core/introduction"
+  - title: ".NET — Support policy"
+    url: "https://dotnet.microsoft.com/platform/support/policy/dotnet-core"
+  - title: "Microsoft Learn — Nullable reference types"
+    url: "https://learn.microsoft.com/dotnet/csharp/nullable-references"
+  - title: "Microsoft Learn — dotnet CLI overview"
+    url: "https://learn.microsoft.com/dotnet/core/tools/"
+interviewQuestions:
+  - question: "¿Qué es el CLR y qué hace con el código C#?"
+    keyPoints:
+      - "C# se compila a IL (lenguaje intermedio) dentro de un assembly (.dll)."
+      - "El CLR (Common Language Runtime) carga el assembly y el compilador JIT traduce el IL a código nativo."
+      - "El CLR también administra la memoria con un garbage collector, la seguridad de tipos y las excepciones."
+      - "Existe compilación anticipada (Native AOT) para arranques más rápidos y binarios autocontenidos."
+  - question: "¿Qué diferencia hay entre las versiones LTS y STS de .NET?"
+    keyPoints:
+      - "Hay una versión mayor por año, en noviembre."
+      - "Las pares son LTS con 3 años de soporte; las impares son STS con 2 años."
+      - "En producción suele preferirse una LTS (por ejemplo, .NET 10)."
+  - question: "¿Qué son los nullable reference types?"
+    keyPoints:
+      - "Una característica (C# 8+) en la que el compilador distingue string (no admite null) de string? (puede ser null)."
+      - "Genera advertencias si se desreferencia algo que puede ser null o se asigna null donde no corresponde."
+      - "Es un análisis estático: en runtime una referencia puede seguir siendo null si se ignoran las advertencias."
+summary:
+  - "C# compila a IL; el CLR lo ejecuta con un JIT y un garbage collector."
+  - ".NET publica una versión por año: las pares son LTS (3 años), las impares STS (2 años)."
+  - "dotnet new, build, run y test cubren el ciclo de desarrollo."
+  - "Tipos de valor (int, decimal, bool, struct) y de referencia (string, clases, arrays)."
+  - "Con nullable habilitado, string no admite null y string? sí."
+  - "Pattern matching con switch expressions y is."
+  - "Propiedades con get/set reemplazan a los getters y setters de Java."
+  - "decimal es el tipo para dinero."
+---
+
+## Qué es .NET
+
+**.NET** es la plataforma de desarrollo de Microsoft, open source y multiplataforma (Windows, Linux y macOS). **C#**
+es su lenguaje principal: orientado a objetos, estáticamente tipado, con mucha influencia de Java y, con los años,
+características funcionales (LINQ, lambdas, records, pattern matching).
+
+| Pieza        | Qué es                                                                                              |
+| ------------ | --------------------------------------------------------------------------------------------------- |
+| C#           | El lenguaje.                                                                                        |
+| IL           | Lenguaje intermedio: el compilador de C# (Roslyn) genera IL dentro de un **assembly** (`.dll`).     |
+| CLR          | El runtime: carga assemblies, compila el IL a código nativo con el **JIT** y administra la memoria. |
+| BCL          | La librería base: colecciones, I/O, HTTP, JSON, criptografía.                                       |
+| SDK          | Compilador, CLI (`dotnet`) y plantillas.                                                            |
+| ASP.NET Core | El framework web.                                                                                   |
+
+<MermaidDiagram
+  caption="El compilador genera IL; el CLR lo compila a código nativo con el JIT al ejecutar (o por adelantado con Native AOT)."
+  chart={`
+flowchart LR
+  A["Program.cs"] -->|"compilador de C#"| B["App.dll (IL + metadatos)"]
+  B --> C["CLR"]
+  C -->|JIT| D["Código nativo"]
+  C --> E["Garbage collector"]
+  B -.->|"Native AOT"| F["Binario nativo autocontenido"]
+`}
+/>
+
+**Versiones**: sale una versión mayor por año, en noviembre. Las **pares son LTS** (3 años de soporte) y las
+**impares STS** (2 años). .NET 10 (noviembre de 2025) es la LTS vigente; en producción suele elegirse una LTS. El
+"**.NET Framework**" (hasta la 4.8) es la plataforma anterior, sólo para Windows: hoy se mantiene, pero los proyectos
+nuevos usan .NET moderno.
+
+## El dotnet CLI
+
+```bash
+# Sin instalar nada: la imagen oficial del SDK
+docker run --rm -it -v "$PWD":/app -w /app mcr.microsoft.com/dotnet/sdk:10.0 bash
+
+dotnet new console -n Shop      # crea un proyecto (.csproj)
+dotnet run                      # compila y ejecuta
+dotnet build
+dotnet new webapi -n Shop.Api   # una API con ASP.NET Core
+dotnet add package Npgsql       # agrega un paquete de NuGet
+dotnet test
+```
+
+```csharp
+// Program.cs: con top-level statements no hace falta declarar la clase ni Main
+var name = args.Length > 0 ? args[0] : "mundo";
+Console.WriteLine($"Hola, {name}!");
+```
+
+## Tipos y variables
+
+| Categoría | Tipos                          | Notas                                             |
+| --------- | ------------------------------ | ------------------------------------------------- |
+| Enteros   | `int`, `long`, `short`, `byte` | `int` es 32 bits, `long` 64                       |
+| Decimales | `double`, `float`, `decimal`   | **`decimal` para dinero**: base 10, 28-29 dígitos |
+| Otros     | `bool`, `char`, `string`       | `string` es un tipo de referencia inmutable       |
+
+```csharp
+int quantity = 3;
+var price = 1250.50m;              // m: literal decimal
+const int MaxRetries = 3;
+string? coupon = null;             // ? : puede ser null (con nullable habilitado)
+```
+
+**Nullable reference types** (C# 8, habilitado por defecto en los proyectos nuevos): el compilador distingue `string`
+(nunca null) de `string?` (puede ser null) y advierte si desreferenciás algo que podría ser null. Es un análisis
+estático; no cambia el runtime.
+
+```csharp
+int length = coupon?.Length ?? 0;  // ?. y ?? como en TypeScript
+coupon ??= "SINCUPON";             // asigna si es null
+```
+
+## Control de flujo y pattern matching
+
+```csharp
+if (stock == 0) status = "agotado";
+else if (stock < 5) status = "últimas unidades";
+else status = "disponible";
+
+for (var i = 0; i < 3; i++) { }
+foreach (var item in cart) { }
+while (retries < 3) retries++;
+
+// switch expression (C# 8+): devuelve un valor y debe cubrir todos los casos
+var label = status switch
+{
+    OrderStatus.Paid => "Pagado",
+    OrderStatus.Shipped or OrderStatus.Delivered => "Enviado",
+    _ => "Pendiente",
+};
+
+// Pattern matching con tipos y propiedades
+if (payment is CardPayment { Installments: > 1 } card)
+{
+    Console.WriteLine($"Pago en {card.Installments} cuotas");
+}
+```
+
+## Métodos, clases y propiedades
+
+```csharp
+public class Order
+{
+    private readonly List<OrderItem> _items = new();
+
+    public Order(string id, string customerId)          // constructor
+    {
+        Id = id;
+        CustomerId = customerId;
+    }
+
+    public string Id { get; }                           // propiedad de sólo lectura
+    public string CustomerId { get; }
+    public OrderStatus Status { get; private set; } = OrderStatus.Created;
+    public decimal Total => _items.Sum(i => i.Price * i.Quantity);   // propiedad calculada
+
+    public void AddItem(string sku, decimal price, int quantity = 1)  // parámetro opcional
+    {
+        if (quantity <= 0) throw new ArgumentOutOfRangeException(nameof(quantity));
+        _items.Add(new OrderItem(sku, price, quantity));
+    }
+}
+
+var order = new Order("o-1", "c-7");
+order.AddItem("SKU-1", 1500m, quantity: 2);             // argumento con nombre
+```
+
+- Las **propiedades** (`{ get; set; }`) reemplazan a los getters y setters de Java, y se usan como campos.
+- Modificadores de acceso: `public`, `private`, `protected`, `internal` (visible en el mismo assembly).
+- La convención es **PascalCase** para tipos, métodos y propiedades, y `_camelCase` para campos privados.
+- `namespace` organiza los tipos, como los paquetes de Java.
+
+## Strings y colecciones básicas
+
+```csharp
+var message = $"Total: {order.Total:C}";          // interpolación con formato de moneda
+var raw = """
+    Texto multilínea (C# 11+)
+    sin escapar "comillas".
+    """;
+"Zapatillas".Contains("lla", StringComparison.OrdinalIgnoreCase);
+string.Equals(a, b);                              // en C#, == en string compara contenido
+
+var skus = new List<string> { "SKU-1", "SKU-2" };
+skus.Add("SKU-3");
+
+var stock = new Dictionary<string, int> { ["SKU-1"] = 5 };
+if (stock.TryGetValue("SKU-9", out var qty)) { /* existe */ }
+
+int[] numbers = [1, 2, 3];                        // collection expressions (C# 12)
+```
+
+<Callout type="tip" title="Si venís de Java">
+  C# te va a resultar familiar: clases, interfaces, genéricos y excepciones funcionan de forma parecida. Las
+  diferencias que más se notan: propiedades en lugar de getters, `==` en `string` compara contenido, genéricos
+  **reificados** (existen en runtime), structs definidos por el usuario, `async/await` nativo y LINQ.
+</Callout>
+
+## Comprobá lo aprendido
+
+<KnowledgeCheck
+  id="dotnet.introduction.q1"
+  question="¿Qué genera el compilador de C# a partir del código fuente?"
+  options={[
+    {
+      text: "Código de máquina específico del procesador.",
+      explanation: "Eso hace Native AOT, no la compilación normal.",
+    },
+    {
+      text: "IL dentro de un assembly, que el CLR compila a nativo con el JIT.",
+      correct: true,
+      explanation: "Correcto.",
+    },
+    { text: "Bytecode para la JVM.", explanation: "La JVM es la plataforma de Java." },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="dotnet.introduction.q2"
+  question="¿Qué versión de .NET conviene para un proyecto que va a estar varios años en producción?"
+  options={[
+    { text: "La STS más reciente, porque es la más nueva.", explanation: "Tiene 2 años de soporte." },
+    {
+      text: "Una versión LTS, como .NET 10.",
+      correct: true,
+      explanation: "Correcto. Las LTS tienen 3 años de soporte.",
+    },
+    {
+      text: ".NET Framework 4.8.",
+      explanation: "Es la plataforma anterior, sólo para Windows; no para proyectos nuevos.",
+    },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="dotnet.introduction.q3"
+  question="Con nullable reference types habilitado, ¿qué indica string? en una declaración?"
+  options={[
+    {
+      text: "Que es un string opcional en la base de datos.",
+      explanation: "Es una anotación del lenguaje, no de la base.",
+    },
+    {
+      text: "Que la variable puede contener null y el compilador te obliga a considerarlo.",
+      correct: true,
+      explanation: "Correcto.",
+    },
+    { text: "Que el string es mutable.", explanation: "Los strings siempre son inmutables." },
+  ]}
+/>
+
+## Resumen
+
+C# compila a IL que ejecuta el CLR. Con el dotnet CLI, una versión LTS, tipos con nullable habilitado, switch
+expressions, propiedades y las colecciones básicas ya podés programar. En la próxima lección vemos el modelo de tipos
+en profundidad, LINQ y async/await.

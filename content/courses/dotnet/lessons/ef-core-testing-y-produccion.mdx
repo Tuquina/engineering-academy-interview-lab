@@ -1,0 +1,271 @@
+---
+id: dotnet.ef-core
+moduleId: dotnet.aspnet
+title: "Entity Framework Core, testing y producción"
+description: "Persistencia con Entity Framework Core: DbContext, entidades, migraciones, change tracking, consultas eficientes, el problema N+1, transacciones y concurrencia; testing con xUnit y WebApplicationFactory; y logging, health checks y contenedores en producción."
+difficulty: advanced
+order: 5
+objectives:
+  - "Mapear entidades con DbContext y versionar el esquema con migraciones."
+  - "Escribir consultas eficientes: proyecciones, AsNoTracking e Include sin N+1."
+  - "Manejar transacciones y concurrencia optimista."
+  - "Escribir tests unitarios y de integración con xUnit y WebApplicationFactory."
+  - "Preparar el servicio para producción con logging estructurado, health checks e imágenes de contenedor."
+prerequisites: ["dotnet.aspnet-core"]
+estimatedMinutes: 55
+tags: ["c#", "entity framework core", "testing", "xunit", "producción"]
+version: "1.0.0"
+references:
+  - title: "Microsoft Learn — Entity Framework Core overview"
+    url: "https://learn.microsoft.com/ef/core/"
+  - title: "Microsoft Learn — EF Core migrations"
+    url: "https://learn.microsoft.com/ef/core/managing-schemas/migrations/"
+  - title: "Microsoft Learn — Efficient querying (EF Core)"
+    url: "https://learn.microsoft.com/ef/core/performance/efficient-querying"
+  - title: "Microsoft Learn — Integration tests in ASP.NET Core"
+    url: "https://learn.microsoft.com/aspnet/core/test/integration-tests"
+  - title: "Microsoft Learn — Health checks in ASP.NET Core"
+    url: "https://learn.microsoft.com/aspnet/core/host-and-deploy/health-checks"
+interviewQuestions:
+  - question: "¿Qué es el change tracking de EF Core y cuándo usarías AsNoTracking?"
+    keyPoints:
+      - "El DbContext registra las entidades cargadas y detecta sus cambios para generar los UPDATE en SaveChanges."
+      - "Tiene un costo de memoria y CPU."
+      - "En consultas de sólo lectura, AsNoTracking (o proyectar a DTOs) evita ese costo."
+  - question: "¿Cómo evitás el problema N+1 con EF Core?"
+    keyPoints:
+      - "Ocurre al cargar una lista y acceder a relaciones que se consultan una por una (carga lazy)."
+      - "Se resuelve con Include para cargar relaciones, o proyectando con Select a un DTO que trae todo en una consulta."
+      - "AsSplitQuery evita la explosión de filas cuando se incluyen varias colecciones."
+      - "Revisar el SQL generado en los logs es parte del trabajo."
+  - question: "¿Cómo manejás la concurrencia en EF Core?"
+    keyPoints:
+      - "Concurrencia optimista con un token de concurrencia (rowversion en SQL Server, xmin o una columna de versión en PostgreSQL)."
+      - "SaveChanges lanza DbUpdateConcurrencyException si otro proceso modificó la fila."
+      - "Se resuelve recargando y reintentando o informando el conflicto al usuario."
+      - "Para operaciones masivas, ExecuteUpdate y ExecuteDelete ejecutan SQL directo sin cargar entidades."
+summary:
+  - "DbContext es la unidad de trabajo: consultas con LINQ y cambios confirmados con SaveChanges."
+  - "Las migraciones versionan el esquema (dotnet ef migrations add / database update)."
+  - "Proyectá a DTOs y usá AsNoTracking en lecturas."
+  - "Include o proyecciones para evitar el N+1; revisá el SQL generado."
+  - "SaveChanges es transaccional; BeginTransaction para varias operaciones."
+  - "Concurrencia optimista con tokens de concurrencia y DbUpdateConcurrencyException."
+  - "xUnit para tests; WebApplicationFactory levanta la API en memoria para tests de integración."
+  - "Logging estructurado con ILogger, health checks y contenedores con las imágenes oficiales."
+---
+
+## DbContext y entidades
+
+**Entity Framework Core** es el ORM oficial de .NET. El **`DbContext`** representa una sesión con la base y funciona
+como **unidad de trabajo**: registra los cambios y los confirma juntos en `SaveChanges`.
+
+```csharp
+public class ShopDbContext(DbContextOptions<ShopDbContext> options) : DbContext(options)
+{
+    public DbSet<Order> Orders => Set<Order>();
+    public DbSet<Product> Products => Set<Product>();
+
+    protected override void OnModelCreating(ModelBuilder model)
+    {
+        model.Entity<Order>(order =>
+        {
+            order.HasKey(o => o.Id);
+            order.Property(o => o.Status).HasConversion<string>().HasMaxLength(20);
+            order.HasMany(o => o.Items).WithOne().HasForeignKey(i => i.OrderId);
+            order.Property(o => o.Version).IsConcurrencyToken();
+        });
+    }
+}
+
+builder.Services.AddDbContext<ShopDbContext>(o =>
+    o.UseNpgsql(builder.Configuration.GetConnectionString("Shop")));   // Scoped por defecto
+```
+
+```csharp
+public async Task PayAsync(Guid orderId, CancellationToken ct)
+{
+    var order = await _db.Orders.SingleOrDefaultAsync(o => o.Id == orderId, ct)
+                ?? throw new OrderNotFoundException(orderId);
+    order.Pay();                         // regla de negocio en la entidad
+    await _db.SaveChangesAsync(ct);      // EF detecta el cambio (change tracking) y genera el UPDATE
+}
+```
+
+## Migraciones
+
+El esquema se versiona con **migraciones** generadas a partir del modelo:
+
+```bash
+dotnet ef migrations add AddOrderVersion    # genera la migración en código
+dotnet ef database update                    # la aplica
+dotnet ef migrations script --idempotent     # genera SQL para aplicar en el pipeline
+```
+
+En producción conviene aplicarlas desde el pipeline de despliegue (con un script SQL revisado o un _bundle_), no
+automáticamente al arrancar cada instancia, para evitar que varias réplicas migren al mismo tiempo.
+
+## Consultas eficientes
+
+<MermaidDiagram
+  caption="Una consulta LINQ sobre DbSet se traduce a SQL al materializarla; proyectar a un DTO trae sólo las columnas necesarias en una sola consulta."
+  chart={`
+flowchart LR
+  L["LINQ sobre DbSet (IQueryable)"] --> T["Traductor de EF Core"]
+  T --> S["SQL parametrizado"]
+  S --> DB[("PostgreSQL")]
+  DB --> M["Materialización: entidades con tracking o DTOs"]
+`}
+/>
+
+```csharp
+// Lectura: proyección a DTO, sin tracking implícito y sólo las columnas necesarias
+var summaries = await _db.Orders
+    .Where(o => o.CustomerId == customerId)
+    .OrderByDescending(o => o.CreatedAt)
+    .Select(o => new OrderSummary(o.Id, o.Status, o.Items.Sum(i => i.Price * i.Quantity), o.Items.Count))
+    .Take(20)
+    .ToListAsync(ct);
+
+// Cuando necesitás entidades para leer: AsNoTracking
+var products = await _db.Products.AsNoTracking().Where(p => p.Active).ToListAsync(ct);
+
+// Cargar una relación en la misma consulta
+var order = await _db.Orders.Include(o => o.Items).SingleAsync(o => o.Id == id, ct);
+```
+
+| Problema                                                    | Solución                                                                       |
+| ----------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| **N+1**: recorrer pedidos y acceder a sus ítems uno por uno | `Include` o proyección con `Select`                                            |
+| Traer columnas de más                                       | Proyectar a DTOs                                                               |
+| Explosión de filas al incluir varias colecciones            | `AsSplitQuery()`                                                               |
+| Tracking innecesario en lecturas                            | `AsNoTracking()`                                                               |
+| Actualizar o borrar miles de filas                          | `ExecuteUpdateAsync` / `ExecuteDeleteAsync` (EF Core 7+), sin cargar entidades |
+| Filtrar en memoria por llamar `ToList()` antes de `Where`   | Mantener `IQueryable` hasta el final                                           |
+
+Activá el log de SQL en desarrollo para ver qué consultas se generan: es la forma más rápida de detectar estos
+problemas.
+
+## Transacciones y concurrencia
+
+`SaveChanges` ya es **transaccional**: todos los cambios pendientes se confirman o se revierten juntos. Para agrupar
+varias operaciones:
+
+```csharp
+await using var tx = await _db.Database.BeginTransactionAsync(ct);
+// ... varias operaciones y SaveChangesAsync
+await tx.CommitAsync(ct);
+```
+
+**Concurrencia optimista**: con un token de concurrencia (una columna de versión, `xmin` en PostgreSQL o `rowversion`
+en SQL Server), EF agrega la versión al `WHERE` del `UPDATE`. Si otro proceso modificó la fila, `SaveChanges` lanza
+`DbUpdateConcurrencyException`, y se decide si recargar y reintentar o informar el conflicto.
+
+## Testing
+
+| Nivel       | Herramientas                                       | Qué prueba                                |
+| ----------- | -------------------------------------------------- | ----------------------------------------- |
+| Unitario    | xUnit (o NUnit) + fakes                            | Dominio y servicios sin infraestructura   |
+| Integración | `WebApplicationFactory` + PostgreSQL en contenedor | La API completa con su pipeline y su base |
+
+```csharp
+public class OrdersApiTests(ShopApiFactory factory) : IClassFixture<ShopApiFactory>
+{
+    [Fact]
+    public async Task Get_returns_404_for_unknown_order()
+    {
+        var client = factory.CreateClient();
+        var response = await client.GetAsync($"/orders/{Guid.NewGuid()}");
+        Assert.Equal(HttpStatusCode.NotFound, response.StatusCode);
+    }
+}
+
+public class ShopApiFactory : WebApplicationFactory<Program>
+{
+    protected override void ConfigureWebHost(IWebHostBuilder builder) =>
+        builder.UseSetting("ConnectionStrings:Shop", TestDatabase.ConnectionString);   // base de prueba (por ejemplo, con Testcontainers)
+}
+```
+
+`WebApplicationFactory` levanta la aplicación en memoria con un servidor de prueba: los tests recorren el mismo
+pipeline, middlewares e inyección de dependencias que producción. El proveedor en memoria de EF Core no reemplaza a una
+base real: no tiene transacciones ni las mismas restricciones.
+
+## Producción
+
+- **Logging estructurado** con `ILogger` y plantillas de mensaje (`"Pedido {OrderId} pagado"`), exportado con
+  OpenTelemetry o Serilog.
+- **Health checks**: `builder.Services.AddHealthChecks()` y `app.MapHealthChecks("/health")` para los probes del
+  orquestador; chequeos de dependencias como `AddNpgSql(...)` vienen de paquetes de la comunidad
+  (AspNetCore.HealthChecks.\*).
+- **Contenedores**: imagen multi-stage con `mcr.microsoft.com/dotnet/sdk` para compilar y `mcr.microsoft.com/dotnet/aspnet`
+  para ejecutar; el SDK también puede publicar imágenes con `dotnet publish /t:PublishContainer`.
+- **Apagado ordenado**: el host recibe SIGTERM y espera a que terminen las requests en curso durante un tiempo
+  configurable.
+- **Native AOT**: binarios con arranque muy rápido y menos memoria, con restricciones (sin reflexión dinámica
+  irrestricta); conviene para funciones serverless o microservicios muy chicos.
+
+## Comprobá lo aprendido
+
+<KnowledgeCheck
+  id="dotnet.ef-core.q1"
+  question="Un endpoint de listado llama a _db.Orders.ToListAsync() y después filtra con Where en memoria. ¿Qué problema hay?"
+  options={[
+    {
+      text: "Ninguno, EF optimiza el Where igual.",
+      explanation: "ToListAsync ya ejecutó la consulta trayendo toda la tabla.",
+    },
+    {
+      text: "Trae toda la tabla a memoria y filtra después.",
+      correct: true,
+      explanation: "Correcto. El Where debe ir antes de materializar para que se traduzca a SQL.",
+    },
+    { text: "No compila.", explanation: "Compila sin problemas." },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="dotnet.ef-core.q2"
+  question="Dos requests modifican el mismo pedido con un token de concurrencia configurado. ¿Qué pasa con la segunda?"
+  options={[
+    {
+      text: "Pisa silenciosamente los cambios de la primera.",
+      explanation: "Eso pasaría sin control de concurrencia.",
+    },
+    {
+      text: "SaveChanges lanza DbUpdateConcurrencyException.",
+      correct: true,
+      explanation: "Correcto. La aplicación decide si reintentar o informar el conflicto.",
+    },
+    {
+      text: "Queda bloqueada hasta que la primera termine.",
+      explanation: "La concurrencia optimista no bloquea: detecta el conflicto al guardar.",
+    },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="dotnet.ef-core.q3"
+  question="¿Qué ventaja tiene WebApplicationFactory para tests de integración?"
+  options={[
+    {
+      text: "Simula la base de datos sin código.",
+      explanation: "La base la tenés que proveer vos (idealmente real, en un contenedor).",
+    },
+    {
+      text: "Levanta la API en memoria con el mismo pipeline, middlewares y DI que producción.",
+      correct: true,
+      explanation: "Correcto.",
+    },
+    {
+      text: "Reemplaza a los tests unitarios.",
+      explanation: "Se complementan; los unitarios siguen siendo más rápidos.",
+    },
+  ]}
+/>
+
+## Resumen
+
+EF Core simplifica el acceso a datos con DbContext, LINQ y migraciones, pero hay que mirar el SQL que genera:
+proyecciones, AsNoTracking, Include sin N+1 y concurrencia optimista. Con tests de integración sobre
+WebApplicationFactory, logging estructurado, health checks y contenedores, la API está lista para producción.

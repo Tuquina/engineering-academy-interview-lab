@@ -1,0 +1,280 @@
+---
+id: go.introduction
+moduleId: go.intro
+title: "Introducción a Go: qué es, cómo se ejecuta y la sintaxis esencial"
+description: "Qué es Go y por qué se creó, su toolchain y los módulos, y toda la sintaxis necesaria para programar: variables, tipos, constantes, control de flujo, funciones con múltiples retornos, slices, maps y el manejo de errores como valores."
+difficulty: basic
+order: 1
+objectives:
+  - "Explicar qué es Go, qué problemas busca resolver y dónde se usa."
+  - "Crear un módulo, compilar y ejecutar un programa con el toolchain de Go."
+  - "Usar variables, tipos, constantes, control de flujo y funciones con múltiples retornos."
+  - "Trabajar con slices, maps y strings básicos."
+  - "Manejar errores como valores con el patrón if err != nil."
+prerequisites: []
+estimatedMinutes: 45
+tags: ["go", "golang", "introducción", "sintaxis"]
+version: "1.0.0"
+references:
+  - title: "A Tour of Go"
+    url: "https://go.dev/tour/"
+  - title: "Effective Go"
+    url: "https://go.dev/doc/effective_go"
+  - title: "Go — Release History"
+    url: "https://go.dev/doc/devel/release"
+  - title: "Go — Tutorial: Create a Go module"
+    url: "https://go.dev/doc/tutorial/create-module"
+  - title: "The Go Programming Language Specification"
+    url: "https://go.dev/ref/spec"
+interviewQuestions:
+  - question: "¿Por qué Go maneja los errores como valores en lugar de excepciones?"
+    keyPoints:
+      - "Las funciones devuelven el error como último valor y el llamador decide qué hacer en ese punto."
+      - "El flujo de control es explícito: no hay saltos ocultos como con las excepciones."
+      - "El costo es la verbosidad del if err != nil; el beneficio, que cada error se considera."
+      - "panic existe, pero se reserva para errores irrecuperables de programación."
+  - question: "¿Qué es el zero value en Go?"
+    keyPoints:
+      - 'Toda variable declarada sin valor recibe el valor cero de su tipo: 0, "", false, nil.'
+      - "No existen variables sin inicializar."
+      - "Un buen diseño hace que el zero value de un tipo sea útil (por ejemplo, sync.Mutex o bytes.Buffer)."
+  - question: "¿Qué ventajas tiene Go para servicios backend?"
+    keyPoints:
+      - "Compila a un binario estático, rápido de arrancar y fácil de desplegar en contenedores mínimos."
+      - "Concurrencia integrada en el lenguaje con goroutines y channels."
+      - "Lenguaje chico, librería estándar fuerte (net/http, encoding/json) y herramientas incluidas (fmt, test, vet)."
+summary:
+  - "Go es compilado, estáticamente tipado, con garbage collector y concurrencia integrada."
+  - "Cada major release se publica cada seis meses y se soportan las dos últimas."
+  - "Un módulo (go.mod) agrupa paquetes; go run, go build, go test y go fmt vienen incluidos."
+  - ":= declara e infiere dentro de funciones; var declara con zero value."
+  - "for es el único bucle; if y switch pueden tener una sentencia de inicialización."
+  - "Las funciones pueden devolver varios valores; el error va último."
+  - "Los slices son vistas dinámicas sobre arrays; los maps son tablas hash."
+  - "Los errores son valores: if err != nil { return ..., err }."
+---
+
+## Qué es Go
+
+**Go** (también llamado Golang) es un lenguaje creado en Google por Robert Griesemer, Rob Pike y Ken Thompson y
+publicado como open source en 2009. Nació para resolver problemas concretos de los grandes sistemas: compilaciones
+lentas, dependencias difíciles de manejar y la dificultad de escribir software concurrente.
+
+Sus decisiones de diseño:
+
+- **Compilado y estáticamente tipado**, con compilación muy rápida a un **binario nativo** sin dependencias externas.
+- **Garbage collector** de baja latencia.
+- **Concurrencia en el lenguaje**: goroutines y channels.
+- **Simplicidad deliberada**: pocas palabras clave, una sola forma de formatear el código (`gofmt`), sin herencia de
+  clases ni excepciones.
+
+Gran parte de la infraestructura cloud está escrita en Go: Docker, Kubernetes, Terraform, Prometheus. Es muy usado en
+APIs, microservicios, herramientas de línea de comandos y sistemas de red.
+
+**Versiones**: hay una versión mayor cada seis meses (febrero y agosto) y se soportan las dos más recientes. La
+compatibilidad hacia atrás es una promesa del lenguaje (_Go 1 compatibility_): el código escrito para Go 1.x sigue
+compilando en versiones nuevas.
+
+## Toolchain y módulos
+
+```bash
+# Sin instalar nada: la imagen oficial
+docker run --rm -it -v "$PWD":/app -w /app golang:1.27 sh
+
+go mod init github.com/acme/shop   # crea go.mod: el nombre del módulo y la versión de Go
+go run .                            # compila y ejecuta
+go build -o shop .                  # genera el binario
+go test ./...                       # ejecuta los tests de todos los paquetes
+go fmt ./...                        # formatea (todo el código Go se ve igual)
+go vet ./...                        # análisis estático de errores comunes
+go get github.com/jackc/pgx/v5      # agrega una dependencia (queda en go.mod y go.sum)
+```
+
+Un **módulo** es un conjunto de paquetes versionados juntos, descripto en `go.mod`; `go.sum` guarda los hashes de las
+dependencias para verificar que no cambien.
+
+```go
+// main.go
+package main
+
+import "fmt"
+
+func main() {
+    fmt.Println("Hola, mundo")
+}
+```
+
+Todo archivo pertenece a un **paquete**; el paquete `main` con la función `main` es el punto de entrada de un
+ejecutable.
+
+## Variables, tipos y constantes
+
+```go
+var stock int               // zero value: 0
+var name string             // zero value: ""
+price := 1250               // := declara e infiere (sólo dentro de funciones)
+total, currency := 3000, "ARS"
+
+const MaxRetries = 3
+const (
+    StatusPending = "PENDING"
+    StatusPaid    = "PAID"
+)
+```
+
+| Tipo           | Ejemplo                                                     |
+| -------------- | ----------------------------------------------------------- |
+| Enteros        | `int`, `int64`, `uint8` (= `byte`)                          |
+| Punto flotante | `float64`                                                   |
+| Texto          | `string` (inmutable, UTF-8), `rune` (un code point Unicode) |
+| Booleano       | `bool`                                                      |
+
+- No hay conversiones implícitas: `float64(quantity) * price` hay que escribirlo.
+- Toda variable tiene un **zero value**: no existen variables sin inicializar.
+- Las variables y los imports **sin usar son errores de compilación**.
+- La visibilidad se define por la **mayúscula inicial**: `Total` se exporta fuera del paquete, `total` no.
+
+## Control de flujo
+
+```go
+if stock == 0 {
+    status = "agotado"
+} else if stock < 5 {
+    status = "últimas unidades"
+}
+
+// if con sentencia de inicialización: err sólo existe dentro del if
+if err := validate(order); err != nil {
+    return err
+}
+
+for i := 0; i < 3; i++ { }        // for clásico
+for retries < 3 { retries++ }     // como while
+for { break }                     // bucle infinito
+for index, item := range cart { } // recorre slices, maps, strings y channels
+
+switch status {
+case "PAID", "SHIPPED":
+    notify(order)                 // no hay fall-through implícito
+default:
+    log.Println("estado sin acción")
+}
+```
+
+`for` es el **único bucle** de Go. `defer` agenda una llamada para cuando la función termine (por ejemplo, cerrar un
+archivo), y se ejecuta aunque haya un error o un panic.
+
+## Funciones con múltiples retornos
+
+```go
+func divide(totalCents int64, parts int) (int64, error) {
+    if parts <= 0 {
+        return 0, fmt.Errorf("partes inválidas: %d", parts)
+    }
+    return totalCents / int64(parts), nil
+}
+
+share, err := divide(10000, 3)
+if err != nil {
+    return err
+}
+_, err = divide(10000, 0)   // _ descarta un valor que no se usa
+```
+
+Las funciones son valores: se pasan como argumentos y pueden ser closures.
+
+## Slices, maps y strings
+
+```go
+skus := []string{"SKU-1", "SKU-2"}       // slice: secuencia dinámica
+skus = append(skus, "SKU-3")             // append devuelve el slice resultante
+first := skus[0]
+subset := skus[1:3]                      // sub-slice: comparte el array de fondo
+len(skus)
+
+stock := map[string]int{"SKU-1": 5}
+stock["SKU-2"] = 0
+qty, ok := stock["SKU-9"]                // ok == false si la clave no existe (qty queda en 0)
+delete(stock, "SKU-1")
+for sku, qty := range stock { }          // el orden de iteración de un map no está definido
+
+name := "Café"
+len(name)                                // 5: bytes en UTF-8, no caracteres
+for _, r := range name { }               // range sobre un string recorre runes
+```
+
+## Errores como valores
+
+Go **no tiene excepciones** para el flujo normal. Las funciones que pueden fallar devuelven un `error` como último
+valor, y quien llama decide qué hacer en ese punto:
+
+```go
+order, err := repo.FindOrder(ctx, id)
+if err != nil {
+    return fmt.Errorf("buscar pedido %s: %w", id, err)   // %w envuelve conservando la causa
+}
+```
+
+Es más verboso que un `try/catch`, pero hace explícito cada punto de falla. `panic` existe, pero se reserva para
+errores irrecuperables (un bug, un estado imposible), no para validaciones ni errores esperables.
+
+<Callout type="tip" title="Leer Go con mentalidad de Java, C# o TypeScript">
+  No busques clases, herencia ni excepciones: Go usa structs con métodos, interfaces implícitas, composición y
+  errores como valores. Las próximas lecciones muestran cómo se modela con esas piezas.
+</Callout>
+
+## Comprobá lo aprendido
+
+<KnowledgeCheck
+  id="go.introduction.q1"
+  question="¿Qué pasa si declarás una variable dentro de una función y no la usás?"
+  options={[
+    { text: "Un warning del compilador.", explanation: "En Go es un error, no un warning." },
+    {
+      text: "Un error de compilación.",
+      correct: true,
+      explanation: "Correcto. Lo mismo ocurre con los imports sin usar.",
+    },
+    { text: "Nada.", explanation: "El compilador lo rechaza." },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="go.introduction.q2"
+  question="value, ok := stock[key] con una clave que no existe en el map. ¿Qué valen value y ok?"
+  options={[
+    {
+      text: "Panic por clave inexistente.",
+      explanation: "Leer una clave inexistente de un map no produce panic.",
+    },
+    {
+      text: "value es el zero value (0) y ok es false.",
+      correct: true,
+      explanation: "Correcto. El segundo valor permite distinguir ausencia de un 0 real.",
+    },
+    { text: "value es nil y ok es true.", explanation: "Un int no puede ser nil." },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="go.introduction.q3"
+  question="¿Cómo se exporta una función para que otro paquete pueda usarla?"
+  options={[
+    { text: "Con la palabra clave public.", explanation: "Go no tiene modificadores de acceso." },
+    {
+      text: "Empezando su nombre con mayúscula.",
+      correct: true,
+      explanation: "Correcto. Los identificadores con mayúscula inicial se exportan.",
+    },
+    {
+      text: "Agregándola a go.mod.",
+      explanation: "go.mod declara el módulo y sus dependencias, no exportaciones.",
+    },
+  ]}
+/>
+
+## Resumen
+
+Go es un lenguaje compilado, simple y pensado para servicios concurrentes. Con el toolchain, `:=`, el zero value, el
+único `for`, las funciones con múltiples retornos, slices, maps y los errores como valores ya podés escribir programas.
+Lo siguiente es modelar con structs, interfaces y genéricos.

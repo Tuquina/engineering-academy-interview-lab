@@ -1,0 +1,272 @@
+---
+id: python.fastapi
+moduleId: python.backend
+title: "APIs con FastAPI, Pydantic y pytest"
+description: "Construir una API REST con FastAPI: modelos de Pydantic, validación, inyección de dependencias, endpoints sync y async, errores, acceso a datos, testing con pytest y despliegue."
+difficulty: intermediate
+order: 5
+objectives:
+  - "Construir endpoints con FastAPI y validar la entrada y la salida con Pydantic."
+  - "Usar la inyección de dependencias de FastAPI para sesiones, autenticación y servicios."
+  - "Elegir entre endpoints def y async def."
+  - "Escribir tests con pytest, fixtures y el TestClient."
+  - "Ubicar Django y Flask, y conocer cómo se despliega una aplicación ASGI."
+prerequisites: ["python.concurrency"]
+estimatedMinutes: 55
+tags: ["python", "fastapi", "pydantic", "pytest", "apis"]
+version: "1.0.0"
+references:
+  - title: "FastAPI — Tutorial"
+    url: "https://fastapi.tiangolo.com/tutorial/"
+  - title: "FastAPI — Dependencies"
+    url: "https://fastapi.tiangolo.com/tutorial/dependencies/"
+  - title: "FastAPI — Concurrency and async / await"
+    url: "https://fastapi.tiangolo.com/async/"
+  - title: "Pydantic — Models"
+    url: "https://docs.pydantic.dev/latest/concepts/models/"
+  - title: "pytest — Fixtures"
+    url: "https://docs.pytest.org/en/stable/how-to/fixtures.html"
+interviewQuestions:
+  - question: "¿Qué diferencia hay entre definir un endpoint con def y con async def en FastAPI?"
+    keyPoints:
+      - "Los endpoints async def corren en el event loop: deben usar sólo operaciones async y no bloquear."
+      - "Los endpoints def se ejecutan en un pool de threads, así que pueden usar librerías bloqueantes."
+      - "Un async def con una llamada bloqueante frena a todas las requests."
+  - question: "¿Qué aporta Pydantic en una API?"
+    keyPoints:
+      - "Valida y convierte los datos de entrada a partir de los type hints."
+      - "Devuelve errores detallados (FastAPI responde 422 automáticamente)."
+      - "Define la forma de la respuesta y evita exponer campos internos con response_model."
+      - "FastAPI genera la documentación OpenAPI a partir de esos modelos."
+  - question: "¿Cómo funcionan las fixtures de pytest?"
+    keyPoints:
+      - "Son funciones que preparan datos o recursos y se inyectan en los tests por el nombre del parámetro."
+      - "Tienen scope (function, module, session) y pueden hacer limpieza con yield."
+      - "Se comparten entre archivos con conftest.py."
+summary:
+  - "FastAPI define endpoints con decoradores y type hints; genera OpenAPI y documentación interactiva."
+  - "Pydantic valida la entrada (422 si falla) y define la forma de la salida con response_model."
+  - "Depends inyecta sesiones de base, el usuario autenticado y servicios; en los tests se reemplazan con dependency_overrides."
+  - "async def sólo con librerías async; def para código bloqueante (corre en un pool de threads)."
+  - "HTTPException para errores HTTP; exception handlers para traducir errores de dominio."
+  - "pytest con fixtures y TestClient para probar la API sin levantar un servidor."
+  - "En producción se ejecuta con un servidor ASGI como Uvicorn, detrás de un proxy o en contenedores."
+---
+
+## El ecosistema web de Python
+
+| Framework   | Estilo                                              | Cuándo                                             |
+| ----------- | --------------------------------------------------- | -------------------------------------------------- |
+| **Django**  | "Baterías incluidas": ORM, admin, auth, migraciones | Aplicaciones completas con panel de administración |
+| **Flask**   | Micro-framework síncrono (WSGI)                     | Servicios simples, mucho código existente          |
+| **FastAPI** | API moderna sobre ASGI, async, tipado               | APIs JSON, microservicios, servicios de IA         |
+
+FastAPI se apoya en **Starlette** (la capa web ASGI) y **Pydantic** (validación de datos). Su idea central: los
+**type hints** de los parámetros definen la validación, la conversión y la documentación.
+
+## Primer servicio
+
+```python
+from fastapi import FastAPI, HTTPException, status
+from pydantic import BaseModel, Field
+
+app = FastAPI(title="Catálogo")
+
+class ProductIn(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    price_cents: int = Field(gt=0)
+    currency: str = Field(pattern=r"^[A-Z]{3}$")
+
+class ProductOut(BaseModel):
+    id: str
+    name: str
+    price_cents: int
+    currency: str
+
+@app.post("/products", response_model=ProductOut, status_code=status.HTTP_201_CREATED)
+def create_product(product: ProductIn) -> ProductOut:
+    return catalog.create(product)
+
+@app.get("/products/{product_id}", response_model=ProductOut)
+def get_product(product_id: str) -> ProductOut:
+    product = catalog.get(product_id)
+    if product is None:
+        raise HTTPException(status_code=404, detail="Producto no encontrado")
+    return product
+```
+
+```bash
+uvicorn app.main:app --reload   # desarrollo
+# Documentación interactiva generada automáticamente en /docs (Swagger UI) y /redoc
+```
+
+- Si el body no cumple el modelo, FastAPI responde **422** con el detalle de cada error, sin ejecutar la función.
+- `response_model` filtra la salida: aunque el objeto interno tenga más campos (un costo, un hash), sólo viaja lo
+  declarado.
+- Los parámetros de ruta (`product_id`) y de query (`limit: int = 20`) también se validan por su tipo.
+
+## Inyección de dependencias
+
+`Depends` declara qué necesita un endpoint; FastAPI lo resuelve en cada request:
+
+```python
+from typing import Annotated
+from fastapi import Depends, Header
+
+def get_session():
+    session = SessionLocal()
+    try:
+        yield session               # se entrega al endpoint
+    finally:
+        session.close()             # se ejecuta al terminar la request
+
+def current_user(authorization: Annotated[str, Header()], session=Depends(get_session)) -> User:
+    user = auth.verify(authorization, session)
+    if user is None:
+        raise HTTPException(status_code=401, detail="No autenticado")
+    return user
+
+SessionDep = Annotated[Session, Depends(get_session)]
+UserDep = Annotated[User, Depends(current_user)]
+
+@app.get("/orders")
+def list_orders(session: SessionDep, user: UserDep, limit: int = 20):
+    return orders_repository.list_for(session, user.id, limit)
+```
+
+Las dependencias se encadenan (`current_user` usa la sesión) y en los tests se reemplazan con
+`app.dependency_overrides`, sin tocar el código de los endpoints.
+
+<MermaidDiagram
+  caption="FastAPI resuelve las dependencias antes de llamar al endpoint y ejecuta su limpieza al terminar la request."
+  chart={`
+flowchart LR
+  R["Request HTTP"] --> V["Validación de parámetros y body (Pydantic)"]
+  V --> D["Resolver dependencias: sesión, usuario"]
+  D --> E["Endpoint"]
+  E --> S["Serializar con response_model"]
+  S --> L["Limpieza de dependencias con yield"]
+  V -. "datos inválidos" .-> X["422 con el detalle"]
+`}
+/>
+
+## def o async def
+
+| Endpoint    | Dónde corre           | Usalo cuando                                                             |
+| ----------- | --------------------- | ------------------------------------------------------------------------ |
+| `async def` | En el event loop      | Todo lo que hace es async (httpx.AsyncClient, asyncpg, SQLAlchemy async) |
+| `def`       | En un pool de threads | Usa librerías bloqueantes (un ORM síncrono, un SDK sin soporte async)    |
+
+Mezclar mal es el error más común: un `async def` que llama a una librería bloqueante frena a **todas** las requests.
+
+## Errores de dominio
+
+```python
+from fastapi import Request
+from fastapi.responses import JSONResponse
+
+class OutOfStockError(Exception):
+    def __init__(self, sku: str):
+        self.sku = sku
+
+@app.exception_handler(OutOfStockError)
+async def out_of_stock_handler(request: Request, error: OutOfStockError):
+    return JSONResponse(status_code=409, content={"error": "out_of_stock", "sku": error.sku})
+```
+
+El dominio lanza sus propias excepciones y la capa web las traduce a HTTP en un solo lugar.
+
+## Acceso a datos
+
+Las opciones más usadas son **SQLAlchemy 2.0** (ORM y query builder, síncrono o async) con **Alembic** para
+migraciones, o **SQLModel**, que combina SQLAlchemy y Pydantic. Las mismas reglas que en cualquier stack: consultas
+parametrizadas, transacciones cortas, cuidado con el N+1 y migraciones versionadas.
+
+## Testing con pytest
+
+```python
+# tests/conftest.py
+import pytest
+from fastapi.testclient import TestClient
+from app.main import app, get_session
+
+@pytest.fixture
+def client(test_session):                     # test_session: otra fixture con una base de prueba
+    app.dependency_overrides[get_session] = lambda: test_session
+    yield TestClient(app)
+    app.dependency_overrides.clear()
+
+# tests/test_products.py
+def test_rejects_negative_price(client):
+    response = client.post("/products", json={"name": "Remera", "price_cents": -1, "currency": "ARS"})
+    assert response.status_code == 422
+
+@pytest.mark.parametrize("currency", ["ARS", "USD", "EUR"])
+def test_creates_product(client, currency):
+    response = client.post("/products", json={"name": "Remera", "price_cents": 1500, "currency": currency})
+    assert response.status_code == 201
+    assert response.json()["currency"] == currency
+```
+
+- Las **fixtures** se inyectan por nombre; con `yield` hacen limpieza; `conftest.py` las comparte.
+- `parametrize` ejecuta el mismo test con distintos datos.
+- Para integración, una base PostgreSQL real en un contenedor (testcontainers para Python o Docker Compose).
+
+## Despliegue
+
+FastAPI es una aplicación **ASGI**: se ejecuta con un servidor como **Uvicorn** (varios workers con
+`uvicorn --workers N` o un process manager), en un contenedor detrás de un balanceador. La configuración llega por
+variables de entorno (`pydantic-settings` las valida al arrancar) y el trabajo pesado o lento se delega a workers con
+una cola.
+
+## Comprobá lo aprendido
+
+<KnowledgeCheck
+  id="python.fastapi.q1"
+  question="Un POST llega con price_cents como 'abc' y el modelo declara price_cents: int. ¿Qué responde FastAPI?"
+  options={[
+    { text: "500, porque falla la función.", explanation: "La función ni siquiera se ejecuta." },
+    {
+      text: "422 con el detalle del error de validación.",
+      correct: true,
+      explanation: "Correcto. Pydantic valida antes de llamar al endpoint.",
+    },
+    { text: "200, guardando 0.", explanation: "No hay conversión silenciosa de un string inválido." },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="python.fastapi.q2"
+  question="Tu endpoint usa un SDK que sólo tiene funciones bloqueantes. ¿Cómo lo declarás?"
+  options={[
+    {
+      text: "Con async def, así es más rápido.",
+      explanation: "Las llamadas bloqueantes frenarían el event loop.",
+    },
+    { text: "Con def: FastAPI lo ejecuta en un pool de threads.", correct: true, explanation: "Correcto." },
+    { text: "No se puede usar en FastAPI.", explanation: "Se puede, con endpoints def o asyncio.to_thread." },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="python.fastapi.q3"
+  question="¿Cómo reemplazás la sesión de base de datos real por una de prueba en los tests de FastAPI?"
+  options={[
+    { text: "Editando el código del endpoint.", explanation: "No hace falta tocar el endpoint." },
+    {
+      text: "Con app.dependency_overrides.",
+      correct: true,
+      explanation: "Correcto. Reemplaza cualquier dependencia declarada con Depends.",
+    },
+    {
+      text: "Con una variable global.",
+      explanation: "Funciona mal con tests en paralelo y no es necesario.",
+    },
+  ]}
+/>
+
+## Resumen
+
+FastAPI convierte los type hints en validación, documentación e inyección de dependencias. Con Pydantic en los bordes,
+excepciones de dominio traducidas a HTTP, el uso correcto de def y async def, y tests con pytest y fixtures, tenés un
+backend Python listo para un entorno profesional.

@@ -1,0 +1,317 @@
+---
+id: java.introduction
+moduleId: java.intro
+title: "Introducción a Java: qué es, cómo se ejecuta y la sintaxis esencial"
+description: "Qué es Java, cómo funcionan el JDK y la JVM, qué versiones usar y toda la sintaxis necesaria para escribir programas: tipos, variables, control de flujo, métodos, clases, strings, arrays y un proyecto con Maven."
+difficulty: basic
+order: 1
+objectives:
+  - "Explicar qué es Java y la relación entre el código fuente, el bytecode, la JVM y el JDK."
+  - "Elegir una versión LTS y compilar y ejecutar un programa."
+  - "Usar tipos primitivos y de referencia, variables, operadores y control de flujo."
+  - "Escribir métodos y clases simples, y trabajar con strings y arrays."
+  - "Entender la estructura de un proyecto Maven."
+prerequisites: []
+estimatedMinutes: 45
+tags: ["java", "introducción", "jvm", "sintaxis", "maven"]
+version: "1.0.0"
+references:
+  - title: "Dev.java — Learn Java"
+    url: "https://dev.java/learn/"
+  - title: "The Java Tutorials — Language Basics"
+    url: "https://docs.oracle.com/javase/tutorial/java/nutsandbolts/index.html"
+  - title: "Java Language Specification"
+    url: "https://docs.oracle.com/javase/specs/"
+  - title: "Apache Maven — Maven in 5 Minutes"
+    url: "https://maven.apache.org/guides/getting-started/maven-in-five-minutes.html"
+  - title: "Docker Hub — eclipse-temurin (imagen oficial de OpenJDK)"
+    url: "https://hub.docker.com/_/eclipse-temurin"
+interviewQuestions:
+  - question: "¿Qué diferencia hay entre el JDK, el JRE y la JVM?"
+    keyPoints:
+      - "La JVM es la máquina virtual que ejecuta bytecode (carga de clases, JIT, garbage collector)."
+      - "El JRE es la JVM más la librería estándar necesaria para ejecutar programas."
+      - "El JDK incluye el JRE más las herramientas de desarrollo: javac, jar, jshell, jdb, etc."
+      - "Desde Java 11 Oracle dejó de publicar un JRE separado; otras distribuciones (como Eclipse Temurin) siguen ofreciendo imágenes JRE para ejecutar aplicaciones."
+  - question: "¿Java pasa los argumentos por valor o por referencia?"
+    keyPoints:
+      - "Siempre por valor."
+      - "Con objetos, el valor que se copia es la referencia: el método puede modificar el objeto, pero no reasignar la variable del llamador."
+      - 'Por eso un método no puede "intercambiar" dos objetos del llamador reasignando parámetros.'
+  - question: "¿Por qué se compara Strings con equals y no con ==?"
+    keyPoints:
+      - "== compara referencias (si son el mismo objeto), no el contenido."
+      - "equals compara el contenido de los caracteres."
+      - "Los literales pueden compartir instancia por el string pool, por eso == a veces parece funcionar y es un bug sutil."
+summary:
+  - "Java compila a bytecode (.class) que ejecuta la JVM en cualquier plataforma; el JIT lo optimiza en tiempo de ejecución."
+  - "En producción se usan versiones LTS: 17, 21 y 25 son las LTS más recientes."
+  - "Tipos primitivos (int, long, double, boolean, char…) guardan valores; los tipos de referencia apuntan a objetos."
+  - "var infiere el tipo de variables locales, pero Java sigue siendo estáticamente tipado."
+  - "Todo código vive dentro de clases; el punto de entrada es main."
+  - "Strings son inmutables y se comparan con equals; StringBuilder se usa para concatenar en bucles."
+  - "Maven y Gradle gestionan dependencias, compilación, tests y empaquetado."
+---
+
+## Qué es Java
+
+**Java** es un lenguaje de propósito general, orientado a objetos y **estáticamente tipado**, creado por Sun
+Microsystems en 1995 y hoy mantenido por Oracle y la comunidad en el proyecto **OpenJDK**. Es uno de los lenguajes
+más usados en backend empresarial: bancos, e-commerce, telecomunicaciones y gran parte de los sistemas que procesan
+pagos, pedidos o reservas corren sobre la **JVM**.
+
+Su promesa original fue "escribir una vez, ejecutar en cualquier lado": el código no se compila a código de máquina
+de un sistema operativo, sino a **bytecode**, que ejecuta la Java Virtual Machine.
+
+| Pieza        | Qué es                                                                                         |
+| ------------ | ---------------------------------------------------------------------------------------------- |
+| `javac`      | Compilador: transforma archivos `.java` en archivos `.class` con bytecode.                     |
+| JVM          | Máquina virtual que carga clases, interpreta y compila (JIT) el bytecode y administra memoria. |
+| JDK          | Kit de desarrollo: JVM, librería estándar y herramientas (`javac`, `jar`, `jshell`, `jdb`).    |
+| Distribución | Builds del JDK de distintos proveedores: Eclipse Temurin, Amazon Corretto, Oracle, Azul.       |
+
+<MermaidDiagram
+  caption="De código fuente a ejecución: el compilador genera bytecode y la JVM lo ejecuta, primero interpretado y luego compilado por el JIT."
+  chart={`
+flowchart LR
+  A["Main.java (código fuente)"] -->|javac| B["Main.class (bytecode)"]
+  B --> C["JVM: class loader"]
+  C --> D["Intérprete"]
+  D -->|"métodos calientes"| E["JIT: código nativo optimizado"]
+  C --> F["Heap y garbage collector"]
+`}
+/>
+
+### Versiones
+
+Java publica una versión nueva cada seis meses. Cada dos años una es **LTS** (Long-Term Support): recibe
+actualizaciones durante años y es la que se usa en producción. Las LTS más recientes son **Java 17** (2021),
+**Java 21** (2023) y **Java 25** (2025). Spring Boot 4 requiere al menos Java 17.
+
+Para este curso podés usar la imagen oficial `eclipse-temurin` de Docker, sin instalar nada en tu máquina:
+
+```bash
+docker run --rm -it -v "$PWD":/app -w /app eclipse-temurin:21-jdk jshell
+```
+
+`jshell` es una consola interactiva (REPL) ideal para probar sintaxis.
+
+## Tu primer programa
+
+```java
+// Main.java
+public class Main {
+    public static void main(String[] args) {
+        String name = args.length > 0 ? args[0] : "mundo";
+        System.out.println("Hola, " + name + "!");
+    }
+}
+```
+
+```bash
+javac Main.java     # genera Main.class
+java Main Ana       # Hola, Ana!
+java Main.java Ana  # desde Java 11 se puede ejecutar un archivo fuente directamente
+```
+
+Puntos a notar:
+
+- **Todo vive dentro de una clase.** El archivo se llama igual que la clase pública que contiene.
+- `public static void main(String[] args)` es el punto de entrada. `static` significa que pertenece a la clase y
+  no a una instancia.
+- Cada sentencia termina en `;` y los bloques van entre llaves.
+
+## Tipos y variables
+
+Java tiene dos familias de tipos:
+
+| Primitivos                     | Tamaño             | Ejemplo                        |
+| ------------------------------ | ------------------ | ------------------------------ |
+| `boolean`                      | —                  | `boolean active = true;`       |
+| `byte`, `short`, `int`, `long` | 8, 16, 32, 64 bits | `long total = 3_000_000_000L;` |
+| `float`, `double`              | 32, 64 bits        | `double rate = 0.21;`          |
+| `char`                         | 16 bits (UTF-16)   | `char initial = 'A';`          |
+
+Todo lo demás son **tipos de referencia**: `String`, arrays, clases e interfaces. Una variable de referencia guarda
+una referencia a un objeto en el heap, o `null`.
+
+```java
+int quantity = 3;                 // primitivo
+Integer boxed = quantity;         // autoboxing: el wrapper es un objeto y puede ser null
+var price = 1250.50;              // var infiere double (sólo en variables locales)
+final String currency = "ARS";    // final: no se puede reasignar
+```
+
+<Callout type="warning" title="No uses double para dinero">
+  `double` es binario de punto flotante: `0.1 + 0.2` no da exactamente `0.3`. Para montos usá `BigDecimal` o
+  enteros en la unidad mínima (centavos como `long`).
+</Callout>
+
+`var` no hace a Java dinámico: el tipo se infiere en compilación y no cambia. Los wrappers (`Integer`, `Long`,
+`Double`…) existen porque las colecciones sólo guardan objetos; cuidado con comparar wrappers con `==` y con el
+`NullPointerException` al desempaquetar un `null`.
+
+## Control de flujo
+
+```java
+if (stock == 0) {
+    status = "agotado";
+} else if (stock < 5) {
+    status = "últimas unidades";
+} else {
+    status = "disponible";
+}
+
+for (int i = 0; i < items.length; i++) { /* ... */ }
+for (String item : items) { /* for-each sobre arrays y colecciones */ }
+while (retries < 3) { retries++; }
+
+// switch como expresión (Java 14+): sin fall-through y debe cubrir todos los casos
+String label = switch (status) {
+    case "PAID" -> "Pagado";
+    case "SHIPPED", "DELIVERED" -> "Enviado";
+    default -> "Pendiente";
+};
+```
+
+El `switch` con flechas devuelve un valor y no "cae" al caso siguiente, a diferencia del `switch` clásico con
+`case X:` y `break`.
+
+## Métodos y clases
+
+```java
+public class Order {
+    private final String id;          // campo privado: encapsulamiento
+    private long totalCents;
+
+    public Order(String id) {         // constructor
+        this.id = id;
+    }
+
+    public void addItem(long priceCents, int quantity) {
+        if (quantity <= 0) throw new IllegalArgumentException("Cantidad inválida");
+        totalCents += priceCents * quantity;
+    }
+
+    public long getTotalCents() {     // getter: convención JavaBeans
+        return totalCents;
+    }
+
+    public static Order empty(String id) {  // método estático "de fábrica"
+        return new Order(id);
+    }
+}
+
+Order order = new Order("o-1");
+order.addItem(1500, 2);
+System.out.println(order.getTotalCents()); // 3000
+```
+
+- Los modificadores de acceso son `public`, `protected`, sin modificador (visible en el paquete) y `private`.
+- Los métodos se pueden **sobrecargar**: mismo nombre, distintos parámetros.
+- Java pasa los argumentos **siempre por valor**. Con objetos, se copia la referencia: el método puede modificar el
+  objeto, pero no hacer que la variable del llamador apunte a otro.
+
+## Strings y arrays
+
+```java
+String a = "hola";
+String b = new String("hola");
+a == b;          // false: son objetos distintos
+a.equals(b);     // true: mismo contenido
+
+String text = "  Zapatillas Running  ";
+text.trim().toLowerCase().contains("running"); // true
+String.format("Total: %d centavos", 3000);
+String message = """
+    Bloque de texto (Java 15+):
+    respeta saltos de línea.
+    """;
+
+int[] stock = {5, 0, 12};
+stock.length;                 // 3 (los arrays tienen tamaño fijo)
+int[][] matrix = new int[3][4];
+```
+
+Los `String` son **inmutables**: cada operación devuelve uno nuevo. Para concatenar muchas veces en un bucle se usa
+`StringBuilder`, que evita crear miles de objetos intermedios.
+
+## Paquetes, imports y un proyecto con Maven
+
+Las clases se organizan en **paquetes** que siguen la estructura de carpetas (`com.shop.orders`). Un proyecto real no
+se compila con `javac` a mano: se usa **Maven** o **Gradle**, que descargan dependencias, compilan, ejecutan tests y
+empaquetan.
+
+```text
+shop/
+├── pom.xml                         # dependencias y configuración de Maven
+└── src/
+    ├── main/java/com/shop/App.java
+    └── test/java/com/shop/AppTest.java
+```
+
+```xml
+<dependency>
+  <groupId>org.junit.jupiter</groupId>
+  <artifactId>junit-jupiter</artifactId>
+  <scope>test</scope>
+</dependency>
+```
+
+Comandos habituales: `mvn test`, `mvn package` (genera el `.jar`) y `mvn spring-boot:run` en proyectos Spring Boot.
+Gradle cumple el mismo rol con un archivo `build.gradle(.kts)`.
+
+## Comprobá lo aprendido
+
+<KnowledgeCheck
+  id="java.introduction.q1"
+  question="¿Qué produce javac a partir de un archivo .java?"
+  options={[
+    {
+      text: "Código de máquina para el sistema operativo actual.",
+      explanation: "Eso hacen compiladores como el de C; javac genera bytecode.",
+    },
+    {
+      text: "Bytecode en archivos .class que ejecuta la JVM.",
+      correct: true,
+      explanation: "Correcto. La JVM lo interpreta y el JIT compila a código nativo lo que más se usa.",
+    },
+    {
+      text: "Un script que interpreta el navegador.",
+      explanation: "Java no se ejecuta en el navegador desde hace muchos años.",
+    },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="java.introduction.q2"
+  question="Dos variables String con el contenido 'abc', una creada con new String. ¿Qué compara correctamente su contenido?"
+  options={[
+    { text: "a == b", explanation: "== compara referencias: con new String son objetos distintos." },
+    { text: "a.equals(b)", correct: true, explanation: "Correcto. equals compara el contenido." },
+    {
+      text: "a.hashCode() == b.hashCode()",
+      explanation: "Dos strings distintos pueden tener el mismo hashCode; no prueba igualdad.",
+    },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="java.introduction.q3"
+  question="¿Qué tipo conviene para guardar montos de dinero?"
+  options={[
+    { text: "double", explanation: "El punto flotante binario introduce errores de redondeo." },
+    {
+      text: "BigDecimal o un long con centavos",
+      correct: true,
+      explanation: "Correcto. Ambos representan montos exactos.",
+    },
+    { text: "float", explanation: "Tiene todavía menos precisión que double." },
+  ]}
+/>
+
+## Resumen
+
+Java compila a bytecode que ejecuta la JVM; usá una versión LTS. La sintaxis gira alrededor de clases, tipos
+estáticos, primitivos y referencias. Con esto ya podés escribir programas: en la próxima lección vemos cómo modelar con
+objetos, interfaces, records y el Collections Framework.

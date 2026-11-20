@@ -1,0 +1,280 @@
+---
+id: go.concurrency
+moduleId: go.backend
+title: "Concurrencia en Go: goroutines, channels y context"
+description: "Goroutines y el scheduler de Go, channels con y sin buffer, select, sync.WaitGroup y Mutex, context para cancelación y timeouts, patrones como worker pool y fan-out, y cómo detectar data races y goroutine leaks."
+difficulty: advanced
+order: 4
+objectives:
+  - "Lanzar goroutines y esperarlas con WaitGroup o errgroup."
+  - "Comunicar goroutines con channels y combinar operaciones con select."
+  - "Propagar cancelación y timeouts con context."
+  - "Implementar un worker pool y limitar la concurrencia."
+  - "Detectar data races con -race y evitar goroutine leaks."
+prerequisites: ["go.slices-packages"]
+estimatedMinutes: 55
+tags: ["go", "concurrencia", "goroutines", "channels", "context"]
+version: "1.0.0"
+references:
+  - title: "A Tour of Go — Concurrency"
+    url: "https://go.dev/tour/concurrency/1"
+  - title: "Effective Go — Concurrency"
+    url: "https://go.dev/doc/effective_go#concurrency"
+  - title: "Go Blog — Go Concurrency Patterns: Context"
+    url: "https://go.dev/blog/context"
+  - title: "Go Blog — Go Concurrency Patterns: Pipelines and cancellation"
+    url: "https://go.dev/blog/pipelines"
+  - title: "Go — Data Race Detector"
+    url: "https://go.dev/doc/articles/race_detector"
+  - title: "The Go Memory Model"
+    url: "https://go.dev/ref/mem"
+interviewQuestions:
+  - question: "¿Qué es una goroutine y en qué se diferencia de un hilo del sistema operativo?"
+    keyPoints:
+      - "Es una función que se ejecuta de forma concurrente, administrada por el runtime de Go."
+      - "Empieza con un stack chico que crece según haga falta, así que se pueden tener cientos de miles."
+      - "El scheduler de Go multiplexa muchas goroutines sobre pocos hilos del sistema operativo (modelo M:N)."
+      - "Cuando una goroutine se bloquea en I/O, el scheduler ejecuta otras."
+  - question: "¿Qué diferencia hay entre un channel con y sin buffer?"
+    keyPoints:
+      - "Sin buffer: el envío espera a que alguien reciba (sincroniza a las dos goroutines)."
+      - "Con buffer: el envío sólo espera si el buffer está lleno."
+      - "Enviar a un channel cerrado produce panic; recibir de uno cerrado devuelve el zero value y ok en false."
+      - "Lo cierra el emisor, nunca el receptor."
+  - question: "¿Para qué sirve context.Context?"
+    keyPoints:
+      - "Propaga cancelación, deadlines y valores de alcance de request a través de llamadas y goroutines."
+      - "Un handler HTTP lo recibe de la request; si el cliente se desconecta, el contexto se cancela."
+      - "Las funciones que hacen I/O lo reciben como primer parámetro y lo pasan hacia abajo."
+      - "Hay que llamar al cancel que devuelven WithTimeout o WithCancel para liberar recursos."
+  - question: "¿Qué es un goroutine leak?"
+    keyPoints:
+      - "Una goroutine que queda bloqueada para siempre (esperando un channel que nadie usa), reteniendo memoria."
+      - "Se evita con contextos cancelables, channels con buffer adecuado o cerrando channels."
+      - "Se detecta observando el número de goroutines (runtime.NumGoroutine o pprof)."
+summary:
+  - "go f() lanza una goroutine; son livianas y las administra el scheduler de Go."
+  - "No compartas memoria para comunicarte: comunicate para compartir memoria (channels)."
+  - "Channel sin buffer = sincronización; con buffer = cola acotada."
+  - "select espera varias operaciones de channels a la vez, con timeouts o cancelación."
+  - "WaitGroup espera a un grupo; errgroup además propaga el primer error y cancela el resto."
+  - "Mutex protege estado compartido cuando un channel no es la herramienta natural."
+  - "context.Context es el primer parámetro de toda función con I/O."
+  - "go test -race detecta data races; toda goroutine necesita una forma clara de terminar."
+---
+
+## Goroutines
+
+Una **goroutine** es una función que se ejecuta de forma concurrente. Se lanza con la palabra `go`:
+
+```go
+go sendConfirmationEmail(order)   // no espera: la función sigue en paralelo
+```
+
+Las goroutines son mucho más livianas que los hilos del sistema operativo: empiezan con un stack chico que crece
+según haga falta. El **scheduler** de Go multiplexa muchas goroutines sobre pocos hilos del sistema (modelo M:N);
+cuando una se bloquea esperando I/O, ejecuta otra. Un servidor HTTP de Go atiende **cada request en su propia
+goroutine**.
+
+<MermaidDiagram
+  caption="El scheduler de Go reparte muchas goroutines entre pocos hilos del sistema operativo; cuando una espera I/O, otra toma su lugar."
+  chart={`
+flowchart LR
+  G1["goroutine: request 1"] --> S["Scheduler de Go"]
+  G2["goroutine: request 2"] --> S
+  G3["goroutine: request 3"] --> S
+  G4["goroutine: worker"] --> S
+  S --> T1["Hilo del SO 1"]
+  S --> T2["Hilo del SO 2"]
+  T1 --> C1["Núcleo de CPU"]
+  T2 --> C2["Núcleo de CPU"]
+`}
+/>
+
+Lanzar una goroutine es fácil; lo importante es **saber cuándo y cómo termina**. Para esperar a un grupo se usa
+`sync.WaitGroup`:
+
+```go
+var wg sync.WaitGroup
+for _, carrier := range carriers {
+    wg.Add(1)
+    go func() {                        // desde Go 1.22, cada iteración tiene su propia variable carrier
+        defer wg.Done()
+        quote(carrier)
+    }()
+}
+wg.Wait()                              // espera a que todas terminen
+```
+
+## Channels
+
+Un **channel** es un conducto tipado entre goroutines. El lema de Go: _no te comuniques compartiendo memoria;
+compartí memoria comunicándote_.
+
+```go
+results := make(chan Rate)          // sin buffer
+jobs := make(chan Order, 100)       // con buffer de 100
+
+results <- rate                     // enviar
+rate := <-results                   // recibir
+close(jobs)                         // lo cierra el emisor cuando no hay más datos
+for order := range jobs { }         // recibe hasta que el channel se cierra
+```
+
+| Operación | Channel sin buffer          | Con buffer                | Cerrado                                |
+| --------- | --------------------------- | ------------------------- | -------------------------------------- |
+| Enviar    | Espera a que alguien reciba | Espera sólo si está lleno | **panic**                              |
+| Recibir   | Espera a que alguien envíe  | Espera sólo si está vacío | Devuelve el zero value y `ok == false` |
+
+## select
+
+`select` espera varias operaciones de channels a la vez y ejecuta la primera que esté lista:
+
+```go
+select {
+case rate := <-results:
+    return rate, nil
+case <-time.After(2 * time.Second):
+    return Rate{}, errors.New("timeout del proveedor")
+case <-ctx.Done():
+    return Rate{}, ctx.Err()          // el llamador canceló
+}
+```
+
+## context: cancelación y timeouts
+
+`context.Context` propaga **cancelación**, **deadlines** y valores de alcance de request. Por convención es el
+**primer parámetro** de toda función que hace I/O:
+
+```go
+func (s *CheckoutService) Quote(ctx context.Context, cart Cart) (Rate, error) {
+    ctx, cancel := context.WithTimeout(ctx, 800*time.Millisecond)
+    defer cancel()                     // siempre: libera los recursos del contexto
+    return s.carrier.Rate(ctx, cart)   // el cliente HTTP y el driver de base respetan ctx
+}
+```
+
+En un servidor HTTP, `r.Context()` se cancela si el cliente se desconecta: todo lo que cuelga de ese contexto (consultas,
+llamadas a otros servicios) se corta en lugar de trabajar para nadie.
+
+## Patrones
+
+### Worker pool
+
+```go
+func processAll(ctx context.Context, orders []Order, workers int) error {
+    jobs := make(chan Order)
+    g, ctx := errgroup.WithContext(ctx)      // golang.org/x/sync/errgroup
+
+    for range workers {                       // Go 1.22+: range sobre un entero
+        g.Go(func() error {
+            for order := range jobs {
+                if err := invoice(ctx, order); err != nil {
+                    return err                // cancela ctx: los demás workers se detienen
+                }
+            }
+            return nil
+        })
+    }
+
+    g.Go(func() error {
+        defer close(jobs)
+        for _, order := range orders {
+            select {
+            case jobs <- order:
+            case <-ctx.Done():
+                return ctx.Err()
+            }
+        }
+        return nil
+    })
+    return g.Wait()                           // primer error, si lo hubo
+}
+```
+
+- **errgroup** espera a un grupo de goroutines, devuelve el primer error y cancela el contexto compartido.
+- Limitar el número de workers acota la presión sobre la base o el proveedor externo (backpressure).
+- `errgroup.Group.SetLimit(n)` es otra forma de limitar la concurrencia.
+
+### Mutex
+
+Cuando el estado compartido es simple (un contador, una caché en memoria), un `sync.Mutex` es más claro que un
+channel:
+
+```go
+type Cache struct {
+    mu    sync.RWMutex
+    items map[string]Product
+}
+
+func (c *Cache) Get(sku string) (Product, bool) {
+    c.mu.RLock()                    // varios lectores a la vez
+    defer c.mu.RUnlock()
+    p, ok := c.items[sku]
+    return p, ok
+}
+```
+
+## Data races y goroutine leaks
+
+Una **data race** ocurre cuando dos goroutines acceden a la misma memoria, al menos una escribe y no hay
+sincronización. El resultado es impredecible. El **race detector** las encuentra en ejecución:
+
+```bash
+go test -race ./...
+go run -race ./cmd/api
+```
+
+Un **goroutine leak** es una goroutine bloqueada para siempre, por ejemplo esperando enviar a un channel que ya nadie
+lee. Cada una retiene memoria. Se evitan dándole a toda goroutine una forma de terminar (cancelación por contexto,
+channels cerrados o con buffer suficiente) y se detectan con `pprof` observando la cantidad de goroutines.
+
+<Callout type="warning" title="La concurrencia no es gratis">
+  Más goroutines no siempre es más rápido: si todas compiten por la misma base de datos o el mismo lock, el
+  sistema se satura. Medí, limitá la concurrencia y propagá la cancelación.
+</Callout>
+
+## Comprobá lo aprendido
+
+<KnowledgeCheck
+  id="go.concurrency.q1"
+  question="¿Qué pasa al enviar un valor a un channel cerrado?"
+  options={[
+    { text: "Se descarta en silencio.", explanation: "No se descarta: es un error de programación." },
+    { text: "Panic.", correct: true, explanation: "Correcto. Por eso sólo el emisor cierra el channel." },
+    { text: "Se bloquea para siempre.", explanation: "Eso pasa al enviar a un channel nil." },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="go.concurrency.q2"
+  question="Un handler HTTP lanza una consulta lenta a la base y el cliente se desconecta. ¿Cómo evitás seguir trabajando para nadie?"
+  options={[
+    { text: "Con un time.Sleep después de la consulta.", explanation: "No cancela nada." },
+    {
+      text: "Pasando r.Context() a la consulta: se cancela al desconectarse el cliente.",
+      correct: true,
+      explanation: "Correcto. El driver respeta el contexto y corta la consulta.",
+    },
+    {
+      text: "No se puede: la consulta siempre termina.",
+      explanation: "Con context la consulta se puede cancelar.",
+    },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="go.concurrency.q3"
+  question="¿Qué herramienta detecta accesos concurrentes sin sincronización en Go?"
+  options={[
+    { text: "go vet", explanation: "Detecta otros errores comunes, pero no data races en ejecución." },
+    { text: "El race detector: go test -race o go run -race.", correct: true, explanation: "Correcto." },
+    { text: "gofmt", explanation: "Sólo formatea el código." },
+  ]}
+/>
+
+## Resumen
+
+Goroutines baratas, channels para comunicar, select para combinar, context para cancelar y sync para el estado
+compartido. La regla de oro: toda goroutine necesita una forma clara de terminar, y el race detector es parte del
+proceso normal de testing.

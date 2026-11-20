@@ -1,0 +1,294 @@
+---
+id: go.types
+moduleId: go.language
+title: "Structs, interfaces, errores y genéricos"
+description: "Cómo se modela en Go sin clases: structs, métodos, punteros y receptores, interfaces implícitas, composición por embedding, el manejo idiomático de errores y los genéricos."
+difficulty: intermediate
+order: 2
+objectives:
+  - "Modelar con structs y métodos, y elegir entre receptores por valor y por puntero."
+  - "Definir interfaces pequeñas que se satisfacen implícitamente."
+  - "Componer tipos con embedding."
+  - "Envolver errores y consultarlos con errors.Is y errors.As."
+  - "Escribir funciones y tipos genéricos con restricciones."
+prerequisites: ["go.introduction"]
+estimatedMinutes: 50
+tags: ["go", "structs", "interfaces", "errores", "genéricos"]
+version: "1.0.0"
+references:
+  - title: "A Tour of Go — Methods and interfaces"
+    url: "https://go.dev/tour/methods/1"
+  - title: "Go Blog — Working with Errors in Go 1.13"
+    url: "https://go.dev/blog/go1.13-errors"
+  - title: "Go Tutorial — Getting started with generics"
+    url: "https://go.dev/doc/tutorial/generics"
+  - title: "Go FAQ — Should I define methods on values or pointers?"
+    url: "https://go.dev/doc/faq#methods_on_values_or_pointers"
+interviewQuestions:
+  - question: "¿Cómo implementa un tipo una interfaz en Go?"
+    keyPoints:
+      - "Implícitamente: basta con tener los métodos que la interfaz declara, sin escribir implements."
+      - "Permite definir interfaces del lado del consumidor, pequeñas y específicas."
+      - "Proverbio de Go: aceptá interfaces, devolvé structs."
+  - question: "¿Cuándo usar un receptor por puntero y cuándo por valor?"
+    keyPoints:
+      - "Por puntero si el método modifica el struct, si el struct es grande o si contiene un Mutex."
+      - "Por valor para tipos chicos e inmutables."
+      - "Por consistencia, si un método del tipo usa puntero, en general todos lo usan."
+  - question: "¿Qué hacen errors.Is y errors.As?"
+    keyPoints:
+      - "errors.Is verifica si en la cadena de errores envueltos hay uno igual a un error centinela (por ejemplo, sql.ErrNoRows)."
+      - "errors.As busca en la cadena un error de un tipo concreto y lo asigna a una variable."
+      - "Funcionan porque fmt.Errorf con %w envuelve el error original."
+  - question: "¿Por qué una interfaz que contiene un puntero nil no es igual a nil?"
+    keyPoints:
+      - "Un valor de interfaz tiene dos partes: el tipo dinámico y el valor."
+      - "Si se asigna un puntero nil de un tipo concreto, el tipo no es nil, así que la interfaz no es nil."
+      - "Por eso las funciones deben devolver el literal nil como error, no una variable de tipo concreto en nil."
+summary:
+  - "Go no tiene clases: structs con métodos y composición por embedding."
+  - "Receptor por puntero para modificar o para structs grandes; por valor para tipos chicos."
+  - "Las interfaces se satisfacen implícitamente; preferí interfaces chicas definidas por quien las usa."
+  - "Aceptá interfaces, devolvé structs."
+  - "Envolvé errores con fmt.Errorf y %w; consultalos con errors.Is (centinelas) y errors.As (tipos)."
+  - "Una interfaz con un puntero nil adentro no es nil."
+  - "Genéricos (Go 1.18+): parámetros de tipo con restricciones como any, comparable o cmp.Ordered."
+---
+
+## Structs y métodos
+
+Go no tiene clases. Los datos se agrupan en **structs** y el comportamiento se agrega con **métodos**, que son
+funciones con un **receptor**:
+
+```go
+type Money struct {
+    Cents    int64
+    Currency string
+}
+
+type Order struct {
+    ID         string
+    CustomerID string
+    Items      []Item
+    Status     string
+}
+
+// Constructor por convención: una función NewX
+func NewOrder(id, customerID string) *Order {
+    return &Order{ID: id, CustomerID: customerID, Status: "CREATED"}
+}
+
+// Receptor por puntero: modifica el pedido
+func (o *Order) AddItem(item Item) {
+    o.Items = append(o.Items, item)
+}
+
+// Receptor por valor: sólo lee
+func (m Money) String() string {
+    return fmt.Sprintf("%s %.2f", m.Currency, float64(m.Cents)/100)
+}
+```
+
+## Punteros y receptores
+
+Go pasa todo **por valor**: pasar un struct copia todos sus campos. Un **puntero** (`*Order`) permite compartir y
+modificar el mismo valor. No hay aritmética de punteros, y el garbage collector se encarga de la memoria.
+
+| Receptor             | Cuándo                                                                       |
+| -------------------- | ---------------------------------------------------------------------------- |
+| Puntero `(o *Order)` | El método modifica el struct, el struct es grande o contiene un `sync.Mutex` |
+| Valor `(m Money)`    | Tipos chicos e inmutables                                                    |
+
+Por consistencia, si un método del tipo usa puntero, en general todos lo hacen.
+
+## Interfaces implícitas
+
+Una **interfaz** declara métodos. Un tipo la implementa **por el solo hecho de tener esos métodos**, sin declarar
+`implements`:
+
+```go
+type PaymentGateway interface {
+    Charge(ctx context.Context, amountCents int64, token string) (string, error)
+}
+
+type StripeGateway struct{ apiKey string }
+
+func (s *StripeGateway) Charge(ctx context.Context, amountCents int64, token string) (string, error) {
+    // llamaría a la API del proveedor
+    return "tx_123", nil
+}
+
+type CheckoutService struct {
+    payments PaymentGateway        // depende de la interfaz, no del proveedor
+}
+```
+
+Esto invierte la costumbre de Java o C#: las interfaces se definen **del lado de quien las usa** y suelen ser muy
+chicas. La librería estándar está llena de interfaces de uno o dos métodos (`io.Reader`, `io.Writer`, `fmt.Stringer`).
+El proverbio de Go lo resume: **aceptá interfaces, devolvé structs**.
+
+<Callout type="warning" title="Una interfaz con un puntero nil no es nil">
+  Un valor de interfaz guarda dos cosas: el **tipo dinámico** y el **valor**. Si una función devuelve una
+  variable `var err *MyError = nil` como `error`, el resultado tiene tipo `*MyError` y no es igual a `nil`: el
+  `if err != nil` del llamador es verdadero. Devolvé siempre el literal `nil` cuando no hay error.
+</Callout>
+
+## Composición con embedding
+
+En lugar de herencia, Go **incrusta** tipos: los campos y métodos del tipo incrustado quedan disponibles en el que lo
+contiene.
+
+```go
+type Timestamps struct {
+    CreatedAt time.Time
+    UpdatedAt time.Time
+}
+
+func (t *Timestamps) Touch() { t.UpdatedAt = time.Now() }
+
+type Product struct {
+    Timestamps                  // embedding: Product "tiene" Timestamps
+    SKU   string
+    Price Money
+}
+
+p := &Product{SKU: "SKU-1"}
+p.Touch()                       // método promovido desde Timestamps
+```
+
+No es herencia: un `Product` no es un `Timestamps` y no hay polimorfismo por subtipos; el polimorfismo se logra con
+interfaces.
+
+## Errores idiomáticos
+
+```go
+var ErrNotFound = errors.New("no encontrado")      // error centinela
+
+type ValidationError struct {                      // error con datos
+    Field string
+}
+func (e *ValidationError) Error() string { return "campo inválido: " + e.Field }
+
+func (r *Repo) Find(ctx context.Context, id string) (*Order, error) {
+    order, err := r.query(ctx, id)
+    if errors.Is(err, sql.ErrNoRows) {
+        return nil, ErrNotFound
+    }
+    if err != nil {
+        return nil, fmt.Errorf("repo.Find %s: %w", id, err)   // agrega contexto y conserva la causa
+    }
+    return order, nil
+}
+
+// Quien llama consulta la cadena de errores
+order, err := repo.Find(ctx, id)
+switch {
+case errors.Is(err, ErrNotFound):
+    http.Error(w, "pedido inexistente", http.StatusNotFound)
+case err != nil:
+    var validation *ValidationError
+    if errors.As(err, &validation) {
+        http.Error(w, validation.Error(), http.StatusBadRequest)
+        return
+    }
+    http.Error(w, "error interno", http.StatusInternalServerError)
+}
+```
+
+<MermaidDiagram
+  caption="Cada capa envuelve el error con contexto usando %w; errors.Is recorre la cadena hasta encontrar el centinela."
+  chart={`
+flowchart LR
+  A["sql.ErrNoRows"] -->|"repo devuelve ErrNotFound"| B["ErrNotFound"]
+  B -->|"servicio: fmt.Errorf con %w"| C["checkout: buscar pedido o-9: no encontrado"]
+  C -->|"handler: errors.Is con ErrNotFound"| D["HTTP 404"]
+`}
+/>
+
+- `%w` en `fmt.Errorf` **envuelve** el error; `%v` sólo copia su texto y rompe la cadena.
+- `errors.Is` compara con errores centinela; `errors.As` busca un tipo concreto.
+- `panic` y `recover` existen para lo irrecuperable; un servidor HTTP recupera los panics de cada request para no caer
+  entero.
+
+## Genéricos
+
+Desde **Go 1.18** hay parámetros de tipo con **restricciones**:
+
+```go
+import "cmp"
+
+func Max[T cmp.Ordered](values []T) (T, bool) {
+    var zero T
+    if len(values) == 0 {
+        return zero, false
+    }
+    best := values[0]
+    for _, v := range values[1:] {
+        if v > best {
+            best = v
+        }
+    }
+    return best, true
+}
+
+type Page[T any] struct {
+    Items      []T
+    NextCursor string
+}
+
+Max([]int64{1500, 900, 3000})   // 3000, true (T se infiere)
+```
+
+`any` acepta cualquier tipo; `comparable`, los que admiten `==` (y por lo tanto pueden ser claves de map);
+`cmp.Ordered`, los que admiten `<`. Los paquetes `slices` y `maps` de la librería estándar ya traen funciones genéricas
+como `slices.Sort`, `slices.Contains` y `maps.Keys`. La recomendación oficial: usar genéricos cuando se repite el mismo
+código para distintos tipos, no por defecto.
+
+## Comprobá lo aprendido
+
+<KnowledgeCheck
+  id="go.types.q1"
+  question="¿Qué hace falta para que StripeGateway implemente la interfaz PaymentGateway?"
+  options={[
+    {
+      text: "Declarar type StripeGateway implements PaymentGateway.",
+      explanation: "Go no tiene la palabra implements.",
+    },
+    {
+      text: "Que tenga los métodos que la interfaz declara, con las mismas firmas.",
+      correct: true,
+      explanation: "Correcto. La implementación es implícita.",
+    },
+    {
+      text: "Incrustar la interfaz en el struct.",
+      explanation:
+        "Satisface la interfaz por los métodos promovidos, pero si el valor incrustado es nil, llamar al método produce panic: no es la forma de implementarla.",
+    },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="go.types.q2"
+  question="Un repositorio devuelve fmt.Errorf con %v sobre sql.ErrNoRows. ¿Qué pasa con errors.Is(err, sql.ErrNoRows) en el llamador?"
+  options={[
+    { text: "Devuelve true.", explanation: "Con %v sólo se copia el texto; no se envuelve el error." },
+    { text: "Devuelve false: hay que usar %w para envolver.", correct: true, explanation: "Correcto." },
+    { text: "No compila.", explanation: "Compila; el problema es de comportamiento." },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="go.types.q3"
+  question="Un método debe modificar los campos de un struct. ¿Qué receptor usás?"
+  options={[
+    { text: "Por valor.", explanation: "Modificaría una copia." },
+    { text: "Por puntero.", correct: true, explanation: "Correcto." },
+    { text: "No importa.", explanation: "Con receptor por valor los cambios se pierden." },
+  ]}
+/>
+
+## Resumen
+
+En Go se modela con structs, métodos e interfaces implícitas, y se compone con embedding. Los errores se envuelven con
+contexto y se consultan con errors.Is y errors.As. Los genéricos existen para eliminar duplicación, no para reemplazar
+a las interfaces.

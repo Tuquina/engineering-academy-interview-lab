@@ -1,0 +1,40 @@
+{
+  "id": "backend-dotnet",
+  "slug": "backend-dotnet",
+  "title": "Backend Engineer con C# y .NET",
+  "description": "Para búsquedas de backend en .NET: C#, async/await, ASP.NET Core y Entity Framework Core, más datos, arquitectura y System Design.",
+  "audience": "Desarrolladores que apuntan a puestos de backend en empresas que trabajan con el ecosistema Microsoft.",
+  "order": 9,
+  "stages": [
+    {
+      "id": "bed.language",
+      "title": "El lenguaje y su framework",
+      "description": "De la sintaxis a un servicio REST con testing, en el ecosistema que piden las búsquedas.",
+      "goals": ["Programar con fluidez en el lenguaje", "Construir y testear una API lista para producción"],
+      "items": [{ "kind": "course", "courseId": "dotnet" }]
+    },
+    {
+      "id": "bed.data",
+      "title": "Datos: PostgreSQL y Redis",
+      "description": "Modelado, índices, transacciones, concurrencia y caching: lo mismo en cualquier lenguaje.",
+      "goals": ["Diseñar el modelo de datos y evitar condiciones de carrera"],
+      "items": [
+        { "kind": "course", "courseId": "postgresql" },
+        { "kind": "course", "courseId": "redis" }
+      ]
+    },
+    {
+      "id": "bed.design",
+      "title": "Arquitectura y System Design",
+      "description": "Principios, patrones y diseño de sistemas para entrevistas de backend.",
+      "goals": [
+        "Justificar decisiones de arquitectura",
+        "Resolver una entrevista de System Design por fases"
+      ],
+      "items": [
+        { "kind": "course", "courseId": "software-architecture" },
+        { "kind": "course", "courseId": "system-design" }
+      ]
+    }
+  ]
+}

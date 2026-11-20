@@ -1,0 +1,253 @@
+---
+id: java.concurrency-jvm
+moduleId: java.runtime
+title: "Concurrencia y la JVM"
+description: "Hilos, ExecutorService, CompletableFuture, sincronización, colecciones concurrentes y virtual threads; y cómo funciona la JVM por dentro: heap, stack, garbage collection y JIT."
+difficulty: advanced
+order: 4
+objectives:
+  - "Ejecutar tareas concurrentes con ExecutorService y CompletableFuture."
+  - "Explicar condiciones de carrera y resolverlas con synchronized, locks, atómicos o colecciones concurrentes."
+  - "Explicar qué son los virtual threads y cuándo convienen."
+  - "Describir la memoria de la JVM (heap y stacks) y cómo trabaja el garbage collector."
+  - "Diagnosticar problemas comunes: memory leaks, pausas de GC y deadlocks."
+prerequisites: ["java.streams-exceptions"]
+estimatedMinutes: 55
+tags: ["java", "concurrencia", "virtual threads", "jvm", "garbage collection"]
+version: "1.0.0"
+references:
+  - title: "The Java Tutorials — Concurrency"
+    url: "https://docs.oracle.com/javase/tutorial/essential/concurrency/index.html"
+  - title: "JEP 444: Virtual Threads"
+    url: "https://openjdk.org/jeps/444"
+  - title: "Java SE API — CompletableFuture"
+    url: "https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/util/concurrent/CompletableFuture.html"
+  - title: "HotSpot Virtual Machine Garbage Collection Tuning Guide"
+    url: "https://docs.oracle.com/en/java/javase/21/gctuning/index.html"
+interviewQuestions:
+  - question: "¿Qué es una condición de carrera y cómo la evitás en Java?"
+    keyPoints:
+      - "Ocurre cuando varios hilos leen y modifican estado compartido sin coordinación y el resultado depende del orden."
+      - "Ejemplo clásico: count++ no es atómico (leer, sumar, escribir)."
+      - "Soluciones: synchronized o Lock, clases atómicas (AtomicLong), colecciones concurrentes, o evitar estado compartido (inmutabilidad)."
+      - "volatile garantiza visibilidad entre hilos pero no atomicidad de operaciones compuestas."
+  - question: "¿Qué son los virtual threads y qué problema resuelven?"
+    keyPoints:
+      - "Hilos livianos administrados por la JVM (estables desde Java 21), montados sobre pocos hilos del sistema operativo."
+      - "Cuando un virtual thread se bloquea por I/O, libera el hilo de plataforma para otro."
+      - "Permiten el estilo bloqueante (un hilo por request) con escalabilidad cercana a la programación asíncrona."
+      - "No aceleran trabajo de CPU; conviene no hacer pooling de virtual threads y revisar bloqueos largos dentro de synchronized en versiones anteriores a Java 24."
+  - question: "¿Cómo funciona el garbage collector de la JVM?"
+    keyPoints:
+      - "Libera objetos que ya no son alcanzables desde las raíces (stacks, variables estáticas)."
+      - "Hipótesis generacional: la mayoría de los objetos muere joven, así que se recolecta seguido la generación joven."
+      - "G1 es el recolector por defecto en servidores; ZGC apunta a pausas muy cortas con heaps grandes."
+      - "Un memory leak en Java es retener referencias que ya no se usan (cachés sin límite, listeners)."
+summary:
+  - "Para concurrencia usá ExecutorService o virtual threads, no new Thread por cada tarea."
+  - "CompletableFuture compone tareas asíncronas: supplyAsync, thenApply, thenCombine, allOf."
+  - "count++ no es atómico: synchronized, Lock, AtomicLong o ConcurrentHashMap."
+  - "volatile da visibilidad, no atomicidad."
+  - "Virtual threads (Java 21): un hilo por request sin agotar hilos del sistema operativo en cargas de I/O."
+  - "Cada hilo tiene su stack; los objetos viven en el heap compartido, que limpia el garbage collector."
+  - "G1 es el recolector por defecto; ZGC prioriza pausas mínimas."
+  - "El JIT compila a código nativo los métodos más usados: por eso la JVM tarda en llegar a su mejor rendimiento (warm-up)."
+---
+
+## Hilos y executors
+
+Un **hilo** (`Thread`) es una línea de ejecución concurrente. Crear un hilo por tarea a mano es costoso y difícil de
+controlar; en su lugar se usa un **ExecutorService**, que administra un pool de hilos y una cola de tareas.
+
+```java
+try (ExecutorService executor = Executors.newFixedThreadPool(8)) {   // ExecutorService es AutoCloseable desde Java 19
+    Future<Invoice> invoice = executor.submit(() -> billing.createInvoice(orderId));
+    Future<Shipment> shipment = executor.submit(() -> logistics.schedule(orderId));
+    send(invoice.get(), shipment.get());   // get() bloquea hasta tener el resultado
+}
+```
+
+### CompletableFuture
+
+`CompletableFuture` permite **componer** tareas asíncronas sin bloquear en cada paso, parecido a las promesas de
+JavaScript:
+
+```java
+CompletableFuture<Product> product = CompletableFuture.supplyAsync(() -> catalog.find(sku), executor);
+CompletableFuture<Price> price = CompletableFuture.supplyAsync(() -> pricing.priceFor(sku), executor);
+
+CompletableFuture<ProductView> view = product
+    .thenCombine(price, ProductView::new)                    // combina dos resultados
+    .orTimeout(500, TimeUnit.MILLISECONDS)                   // Java 9+
+    .exceptionally(error -> ProductView.unavailable(sku));   // fallback
+```
+
+Pasá siempre tu propio executor: sin él se usa el `ForkJoinPool` común, compartido por toda la aplicación.
+
+## Condiciones de carrera y sincronización
+
+Cuando varios hilos modifican estado compartido, el resultado puede depender del orden de ejecución:
+
+```java
+class Counter {
+    private long count = 0;
+    void increment() { count++; }   // ¡no es atómico! leer, sumar y escribir son tres pasos
+}
+```
+
+Con dos hilos incrementando un millón de veces cada uno, el resultado suele ser menor a dos millones. Soluciones:
+
+| Herramienta                     | Uso                                                                              |
+| ------------------------------- | -------------------------------------------------------------------------------- |
+| `synchronized`                  | Un solo hilo a la vez dentro del bloque o método; también garantiza visibilidad. |
+| `ReentrantLock`                 | Como synchronized, con `tryLock`, timeouts y condiciones.                        |
+| `AtomicLong`, `AtomicReference` | Operaciones atómicas sin locks (compare-and-set).                                |
+| `ConcurrentHashMap`             | Mapa seguro para concurrencia con operaciones atómicas como `merge` y `compute`. |
+| Inmutabilidad                   | Objetos que no cambian no necesitan sincronización.                              |
+
+**`volatile`** garantiza que la escritura de un hilo sea **visible** para los demás, pero no hace atómicas las
+operaciones compuestas como `count++`.
+
+<Callout type="danger" title="Deadlock">
+  Si el hilo A toma el lock 1 y espera el 2, mientras el hilo B toma el 2 y espera el 1, ambos quedan
+  bloqueados para siempre. Se evita tomando los locks siempre en el mismo orden, usando timeouts (`tryLock`) o
+  diseñando sin estado compartido. Un thread dump (`jstack`) muestra los hilos bloqueados.
+</Callout>
+
+## Virtual threads
+
+Un hilo de plataforma corresponde a un hilo del sistema operativo: cada uno reserva memoria para su stack, y un
+servidor no puede tener cientos de miles. Durante años la respuesta fue la programación reactiva (callbacks, WebFlux).
+
+Los **virtual threads** (JEP 444, estables desde **Java 21**) son hilos livianos que administra la JVM. Muchos
+virtual threads se montan sobre pocos hilos de plataforma; cuando uno se bloquea esperando I/O (una consulta a la
+base, una llamada HTTP), libera el hilo de plataforma para otro.
+
+```java
+try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
+    List<Future<Rate>> rates = providers.stream()
+        .map(p -> executor.submit(() -> p.quote(shipment)))   // un virtual thread por proveedor
+        .toList();
+}
+```
+
+- Permiten escribir **código bloqueante simple** (un hilo por request) con escalabilidad similar a la asíncrona.
+- **No aceleran el cómputo de CPU**: sólo ayudan cuando el tiempo se va en esperar.
+- No se hace _pooling_ de virtual threads: se crea uno por tarea.
+- Spring Boot los habilita con `spring.threads.virtual.enabled=true`.
+
+## La memoria de la JVM
+
+<MermaidDiagram
+  caption="Cada hilo tiene su stack con variables locales y referencias; los objetos viven en el heap compartido, que administra el garbage collector."
+  chart={`
+flowchart LR
+  subgraph T1["Hilo 1: stack"]
+    A["order (referencia)"]
+  end
+  subgraph T2["Hilo 2: stack"]
+    B["cart (referencia)"]
+  end
+  subgraph H["Heap compartido"]
+    O["Objeto Order"]
+    C["Objeto Cart"]
+    X["Objeto sin referencias: candidato a GC"]
+  end
+  A --> O
+  B --> C
+  C --> O
+`}
+/>
+
+- **Stack**: uno por hilo; guarda los frames de los métodos con variables locales y referencias. Una recursión
+  infinita lo desborda (`StackOverflowError`).
+- **Heap**: compartido; ahí viven los objetos. Su tamaño se configura con `-Xms` y `-Xmx`, o como porcentaje de la
+  memoria del contenedor con `-XX:MaxRAMPercentage`.
+- **Metaspace**: metadatos de las clases cargadas.
+
+### Garbage collection
+
+El recolector libera los objetos que ya no son **alcanzables** desde las raíces (stacks, campos estáticos). Se basa
+en la **hipótesis generacional**: la mayoría de los objetos muere joven, así que la generación joven se recolecta
+seguido y barato, y los objetos que sobreviven pasan a la vieja.
+
+| Recolector | Cuándo                                                                |
+| ---------- | --------------------------------------------------------------------- |
+| G1         | Por defecto en servidores. Buen equilibrio entre throughput y pausas. |
+| ZGC        | Heaps grandes y pausas de muy pocos milisegundos.                     |
+| Parallel   | Máximo throughput en procesos batch, tolerando pausas más largas.     |
+
+Un **memory leak** en Java no es memoria sin liberar como en C, sino **referencias que se retienen sin querer**: una
+caché estática sin límite, listeners que nunca se quitan, `ThreadLocal` sin limpiar en pools de hilos. Se diagnostica
+con un heap dump y herramientas como Eclipse MAT o JDK Flight Recorder.
+
+### JIT
+
+La JVM empieza interpretando el bytecode y, a medida que detecta métodos "calientes", los compila a código nativo con
+optimizaciones basadas en cómo se usa el programa realmente. Por eso una aplicación Java tarda un poco en alcanzar su
+mejor rendimiento (_warm-up_), y por eso los benchmarks se hacen con JMH y no con un `System.nanoTime()` aislado.
+
+## Comprobá lo aprendido
+
+<KnowledgeCheck
+  id="java.concurrency-jvm.q1"
+  question="Dos hilos ejecutan count++ sobre un campo long compartido, un millón de veces cada uno. ¿Qué resultado es posible?"
+  options={[
+    {
+      text: "Siempre exactamente dos millones.",
+      explanation: "count++ no es atómico: se pierden incrementos.",
+    },
+    {
+      text: "Menos de dos millones, distinto en cada ejecución.",
+      correct: true,
+      explanation: "Correcto. Es una condición de carrera; se resuelve con AtomicLong o sincronización.",
+    },
+    {
+      text: "Un error de compilación.",
+      explanation: "Compila sin problemas: el error es de concurrencia en runtime.",
+    },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="java.concurrency-jvm.q2"
+  question="¿En qué tipo de servicio aportan más los virtual threads?"
+  options={[
+    {
+      text: "Un proceso que comprime videos usando toda la CPU.",
+      explanation: "No aceleran el cómputo de CPU.",
+    },
+    {
+      text: "Una API que pasa la mayor parte del tiempo esperando a la base y a otros servicios.",
+      correct: true,
+      explanation: "Correcto. Mientras esperan I/O liberan el hilo de plataforma.",
+    },
+    { text: "Un programa de un solo hilo.", explanation: "Sin concurrencia no hay nada que ganar." },
+  ]}
+/>
+
+<KnowledgeCheck
+  id="java.concurrency-jvm.q3"
+  question="¿Qué es un memory leak en una aplicación Java?"
+  options={[
+    {
+      text: "Memoria que el programador olvidó liberar con free.",
+      explanation: "En Java no se libera memoria a mano.",
+    },
+    {
+      text: "Objetos que siguen referenciados sin necesidad, por ejemplo en una caché estática sin límite.",
+      correct: true,
+      explanation: "Correcto. El GC no puede liberarlos porque siguen siendo alcanzables.",
+    },
+    {
+      text: "Cuando el garbage collector hace pausas largas.",
+      explanation: "Eso es un problema de latencia, no necesariamente un leak.",
+    },
+  ]}
+/>
+
+## Resumen
+
+Usá executors y CompletableFuture para concurrencia, protegé el estado compartido o evitalo, y considerá virtual
+threads para servicios con mucha I/O. Entender heap, stack, GC y JIT te permite explicar y diagnosticar problemas de
+memoria y latencia, una pregunta muy común en entrevistas de Java.

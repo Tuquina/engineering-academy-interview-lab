@@ -40,5 +40,12 @@
     "title": "Datos",
     "description": "PostgreSQL y Redis: modelado, índices, transacciones, concurrencia y caching.",
     "order": 6
+  },
+  {
+    "id": "backend-languages",
+    "slug": "lenguajes-backend",
+    "title": "Lenguajes para backend",
+    "description": "Java con Spring Boot, Python, Go y C# con .NET: de la sintaxis a un servicio en producción y las preguntas de entrevista de cada ecosistema.",
+    "order": 7
   }
 ]

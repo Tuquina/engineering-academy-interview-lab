@@ -1,0 +1,88 @@
+{
+  "id": "go",
+  "title": "Go",
+  "description": "El lenguaje, concurrencia y servicios HTTP.",
+  "courseId": "go",
+  "cards": [
+    {
+      "id": "go.zero-value",
+      "front": "¿Qué es el zero value en Go?",
+      "back": "El valor que recibe toda variable declarada sin valor: 0, \"\", false o nil según el tipo. No existen variables sin inicializar.",
+      "difficulty": "basic",
+      "tags": ["fundamentos"],
+      "lessonId": "go.introduction"
+    },
+    {
+      "id": "go.export",
+      "front": "¿Cómo se exporta un identificador en Go?",
+      "back": "Empezando su nombre con mayúscula. No hay public ni private.",
+      "difficulty": "basic",
+      "tags": ["paquetes"],
+      "lessonId": "go.introduction"
+    },
+    {
+      "id": "go.implicit-interfaces",
+      "front": "¿Cómo implementa un tipo una interfaz en Go?",
+      "back": "Implícitamente, con sólo tener sus métodos. Se recomiendan interfaces chicas definidas por quien las usa: aceptá interfaces, devolvé structs.",
+      "difficulty": "intermediate",
+      "tags": ["interfaces"],
+      "lessonId": "go.types"
+    },
+    {
+      "id": "go.wrap-errors",
+      "front": "¿Cómo se envuelve un error en Go conservando la causa?",
+      "back": "Con `fmt.Errorf(\"contexto: %w\", err)`. Después se consulta con `errors.Is` (centinelas) o `errors.As` (tipos). Con `%v` se pierde la cadena.",
+      "difficulty": "intermediate",
+      "tags": ["errores"],
+      "lessonId": "go.types"
+    },
+    {
+      "id": "go.slice-header",
+      "front": "¿Qué es un slice?",
+      "back": "Puntero a un array de fondo + longitud + capacidad. `append` puede reasignar el array, por eso siempre `s = append(s, x)`; los sub-slices comparten memoria.",
+      "difficulty": "intermediate",
+      "tags": ["slices"],
+      "lessonId": "go.slices-packages"
+    },
+    {
+      "id": "go.map-concurrency",
+      "front": "¿Se puede escribir en un map desde varias goroutines?",
+      "back": "No sin sincronización: el runtime puede abortar con fatal error. Usar sync.Mutex, sync.RWMutex o sync.Map.",
+      "difficulty": "intermediate",
+      "tags": ["maps", "concurrencia"],
+      "lessonId": "go.slices-packages"
+    },
+    {
+      "id": "go.goroutine",
+      "front": "Goroutine vs hilo del sistema operativo.",
+      "back": "La goroutine la administra el runtime de Go, empieza con un stack chico que crece y el scheduler multiplexa muchas sobre pocos hilos (M:N).",
+      "difficulty": "intermediate",
+      "tags": ["concurrencia"],
+      "lessonId": "go.concurrency"
+    },
+    {
+      "id": "go.closed-channel",
+      "front": "Enviar y recibir en un channel cerrado.",
+      "back": "Enviar produce panic. Recibir devuelve el zero value y ok == false. Lo cierra el emisor.",
+      "difficulty": "advanced",
+      "tags": ["channels"],
+      "lessonId": "go.concurrency"
+    },
+    {
+      "id": "go.context",
+      "front": "¿Para qué sirve context.Context?",
+      "back": "Propaga cancelación, deadlines y valores de request. Es el primer parámetro de toda función con I/O; siempre llamar al cancel de WithTimeout.",
+      "difficulty": "intermediate",
+      "tags": ["context"],
+      "lessonId": "go.concurrency"
+    },
+    {
+      "id": "go.server-timeouts",
+      "front": "¿Qué falta en un `http.Server` y un `http.Client` por defecto?",
+      "back": "Timeouts: el servidor por defecto no tiene ReadHeaderTimeout ni WriteTimeout y el cliente no tiene Timeout. Hay que configurarlos siempre.",
+      "difficulty": "advanced",
+      "tags": ["http", "producción"],
+      "lessonId": "go.http-services"
+    }
+  ]
+}
