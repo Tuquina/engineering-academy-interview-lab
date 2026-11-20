@@ -86,19 +86,19 @@ test.describe("laboratorios (Fase 3)", () => {
   });
 
   test("el SQL Lab ejecuta PostgreSQL en el navegador y corrige un ejercicio", async ({ page }) => {
-    const exercise = matter(read("sql/exercises/01-overdue-by-customer.md")).data as { solution: string };
-    await page.goto("/database-lab/overdue-by-customer");
+    const exercise = matter(read("sql/exercises/01-revenue-by-seller.md")).data as { solution: string };
+    await page.goto("/database-lab/revenue-by-seller");
     const check = page.getByRole("button", { name: /Comprobar/ });
     await expect(check).toBeEnabled({ timeout: 60_000 });
 
-    await setEditorValue(page, "/sql/sql.overdue-by-customer.sql", "SELECT full_name FROM customers;");
+    await setEditorValue(page, "/sql/sql.revenue-by-seller.sql", "SELECT name FROM sellers;");
     await check.click();
     await expect(page.getByRole("status")).toContainText(/columnas/, { timeout: 30_000 });
 
-    await setEditorValue(page, "/sql/sql.overdue-by-customer.sql", exercise.solution);
+    await setEditorValue(page, "/sql/sql.revenue-by-seller.sql", exercise.solution);
     await check.click();
     await expect(page.getByRole("status")).toHaveText(/¡Correcto!/, { timeout: 30_000 });
-    await expect(page.getByRole("cell", { name: "Elena Suárez" })).toBeVisible();
+    await expect(page.getByRole("cell", { name: "TecnoSur" })).toBeVisible();
   });
 
   test("el SQL Playground muestra errores de PostgreSQL con su posición", async ({ page }) => {

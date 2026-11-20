@@ -101,8 +101,8 @@ explícitamente y muestra el puntaje como autoevaluación.
 
 ## 5. Ejercicios SQL (`content/sql/exercises/NN-<slug>.md`)
 
-Corren contra PostgreSQL real (PGlite/WASM) en el navegador con el dataset `content/sql/dataset.sql` (fecha de
-referencia 2026-11-15). Dos modos:
+Corren contra PostgreSQL real (PGlite/WASM) en el navegador con el dataset `content/sql/dataset.sql` (un marketplace con
+catálogo, pedidos, pagos, envíos, reseñas y soporte, más un esquema chico de reservas; fecha de referencia 2026-11-15). Dos modos:
 
 - `mode: result` + `orderMatters`: compara el resultado de la consulta del usuario con el de `solution` (columnas,
   filas y, si corresponde, orden).
@@ -113,8 +113,8 @@ Ambos modos corren dentro de transacciones con `ROLLBACK`: el dataset nunca qued
 
 ```yaml
 ---
-id: sql.overdue-by-customer
-title: "Deuda vencida por cliente"
+id: sql.revenue-by-seller
+title: "Ventas por vendedor"
 difficulty: basic
 order: 1
 topics: ["joins", "agregaciones"]

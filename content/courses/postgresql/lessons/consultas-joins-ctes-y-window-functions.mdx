@@ -56,90 +56,97 @@ summary:
 
 ## ¿Qué problema resuelve?
 
-Las preguntas de negocio de una plataforma de cobranzas rara vez son "traer una fila por ID":
+Las preguntas de negocio reales rara vez son "traer una fila por ID":
 
-- ¿Cuál es la cuota impaga más antigua de cada cliente?
-- ¿Qué porcentaje de las promesas de cada agente se cumplió en los últimos 30 días?
-- ¿Cómo evolucionó el saldo de cada cartera mes a mes?
-- Dame la siguiente página de 50 deudores de una campaña, ordenados por saldo.
+- ¿Cuál es el último estado de cada envío? (logística)
+- ¿Qué porcentaje de los tickets de cada prioridad se respondió dentro del plazo? (soporte)
+- ¿Cómo evolucionaron las ventas de cada vendedor mes a mes? (e-commerce)
+- Dame la siguiente página de 50 jugadores del ranking, ordenados por puntaje. (juegos)
 
 Resolverlas en SQL (en lugar de traer miles de filas y procesarlas en la aplicación) es más rápido, consistente y
-simple. El **Database Lab** de la plataforma (`/database-lab`) tiene ejercicios con estas mismas preguntas; los ejemplos de
-window functions usan sus tablas (`loans`, `installments`) y se pueden ejecutar ahí tal cual. El resto usa el modelo
-de la lección de modelado.
+simple. El **Database Lab** de la plataforma (`/database-lab`) tiene ejercicios con preguntas de este tipo sobre el
+dataset de un marketplace. Los ejemplos de joins, subconsultas, CTEs y window functions de esta lección usan sus
+tablas (`customers`, `orders`, `order_items`, `products`, `sellers`, `payments`, `shipments`, `shipment_events`,
+`support_tickets`, `ticket_messages`) y se pueden ejecutar ahí tal cual.
 
 ## Joins
 
 <MermaidDiagram
-  caption="Qué conserva cada tipo de join entre clientes y deudas."
+  caption="Qué conserva cada tipo de join entre clientes y pedidos."
   chart={`
 flowchart LR
   subgraph INNER["INNER JOIN"]
-    I["Sólo clientes con deudas<br/>y sus deudas"]
+    I["Sólo clientes con pedidos<br/>y sus pedidos"]
   end
   subgraph LEFT["LEFT JOIN"]
-    L["Todos los clientes<br/>deudas o NULL"]
+    L["Todos los clientes<br/>pedidos o NULL"]
   end
   subgraph ANTI["Anti-join NOT EXISTS"]
-    A["Clientes sin<br/>ninguna deuda"]
+    A["Clientes sin<br/>ningún pedido"]
   end
 `}
 />
 
 ```sql
--- INNER: clientes con al menos una deuda vencida
+-- INNER: clientes con al menos un pedido cancelado
 SELECT DISTINCT c.id, c.full_name
   FROM customers c
-  JOIN debts d ON d.customer_id = c.id AND d.due_date < CURRENT_DATE;
+  JOIN orders o ON o.customer_id = c.id AND o.status = 'cancelled';
 
--- LEFT: todos los clientes, con la cantidad de deudas (0 si no tienen)
-SELECT c.id, c.full_name, count(d.id) AS debts   -- count(d.id) ignora los NULL
+-- LEFT: todos los clientes, con la cantidad de pedidos (0 si no tienen)
+SELECT c.id, c.full_name, count(o.id) AS orders   -- count(o.id) ignora los NULL
   FROM customers c
-  LEFT JOIN debts d ON d.customer_id = c.id
+  LEFT JOIN orders o ON o.customer_id = c.id
  GROUP BY c.id, c.full_name;
 
--- Anti-join: clientes que no fueron contactados en ninguna conversación
-SELECT c.id
+-- Anti-join: clientes que nunca abrieron un ticket de soporte
+SELECT c.id, c.full_name
   FROM customers c
- WHERE NOT EXISTS (SELECT 1 FROM conversations v WHERE v.customer_id = c.id);
+ WHERE NOT EXISTS (SELECT 1 FROM support_tickets t WHERE t.customer_id = c.id);
 ```
 
 Dos trampas clásicas:
 
 1. **Un filtro sobre la tabla derecha en el `WHERE` convierte un `LEFT JOIN` en `INNER`.** Si escribís
-   `LEFT JOIN debts d ... WHERE d.status = 'pending'`, los clientes sin deudas (con `d.status` en `NULL`)
-   desaparecen. El filtro va en el `ON`.
-2. **El join multiplica filas.** Si unís deudas con pagos (1:N) y sumás `balance_cents`, el saldo de una deuda se
-   cuenta una vez por cada pago:
+   `LEFT JOIN orders o ... WHERE o.status = 'delivered'`, los clientes sin pedidos entregados (con `o.status` en
+   `NULL` o con otro estado) desaparecen. El filtro va en el `ON`.
+2. **El join multiplica filas (fan-out).** Si unís productos con ítems vendidos y con reseñas (dos relaciones 1:N
+   del mismo producto), cada ítem se repite por cada reseña:
 
 ```sql
--- ❌ El saldo se suma una vez por cada pago de la deuda
-SELECT sum(d.balance_cents), sum(p.amount_cents)
-  FROM debts d LEFT JOIN payments p ON p.debt_id = d.id;
+-- ❌ Las unidades se suman una vez por cada reseña del producto, y las reseñas una vez por cada ítem
+SELECT p.name, sum(oi.quantity) AS units, count(r.id) AS reviews
+  FROM products p
+  LEFT JOIN order_items oi ON oi.product_id = p.id
+  LEFT JOIN reviews r ON r.product_id = p.id
+ GROUP BY p.id, p.name;
 
--- ✅ Agregar los pagos primero y unir después
-SELECT sum(d.balance_cents) AS balance, sum(coalesce(p.paid, 0)) AS paid
-  FROM debts d
-  LEFT JOIN (SELECT debt_id, sum(amount_cents) AS paid FROM payments GROUP BY debt_id) p ON p.debt_id = d.id;
+-- ✅ Agregar cada relación primero y unir después
+SELECT p.name, coalesce(s.units, 0) AS units, coalesce(rv.reviews, 0) AS reviews
+  FROM products p
+  LEFT JOIN (SELECT product_id, sum(quantity) AS units FROM order_items GROUP BY product_id) s
+         ON s.product_id = p.id
+  LEFT JOIN (SELECT product_id, count(*) AS reviews FROM reviews GROUP BY product_id) rv
+         ON rv.product_id = p.id;
 ```
 
 ## Subconsultas, EXISTS y LATERAL
 
 ```sql
--- Subconsulta escalar: el saldo de cada deuda junto con el promedio de su cliente
-SELECT d.id, d.balance_cents,
-       (SELECT avg(balance_cents) FROM debts x WHERE x.customer_id = d.customer_id) AS customer_avg
-  FROM debts d;
+-- Subconsulta escalar: el precio de cada producto junto con el promedio de su categoría
+SELECT p.name, p.price_cents,
+       (SELECT avg(x.price_cents) FROM products x WHERE x.category = p.category) AS category_avg
+  FROM products p;
 
--- LATERAL: para cada cliente, sus 3 pagos más recientes
-SELECT c.id, recent.amount_cents, recent.paid_at
-  FROM customers c
+-- LATERAL: para cada envío, sus 2 eventos de seguimiento más recientes
+SELECT s.id, recent.status, recent.occurred_at
+  FROM shipments s
   CROSS JOIN LATERAL (
-    SELECT p.amount_cents, p.paid_at
-      FROM payments p JOIN debts d ON d.id = p.debt_id
-     WHERE d.customer_id = c.id
-     ORDER BY p.paid_at DESC
-     LIMIT 3
+    SELECT e.status, e.occurred_at
+      FROM shipment_events e
+     WHERE e.shipment_id = s.id
+     ORDER BY e.occurred_at DESC
+     LIMIT 2
   ) recent;
 ```
 
@@ -152,27 +159,29 @@ Una **CTE** (`WITH`) da nombre a un resultado intermedio. Hace legibles las cons
 código:
 
 ```sql
-WITH promises_30d AS (
-  SELECT agent_id, status
-    FROM payment_promises
-   WHERE created_at >= CURRENT_DATE - INTERVAL '30 days'
+-- Porcentaje de tickets respondidos dentro de las 4 horas, por prioridad
+WITH first_response AS (
+  SELECT t.id, t.priority, t.created_at,
+         min(m.sent_at) FILTER (WHERE m.author = 'agent') AS responded_at
+    FROM support_tickets t
+    LEFT JOIN ticket_messages m ON m.ticket_id = t.id
+   GROUP BY t.id, t.priority, t.created_at
 ),
-by_agent AS (
-  SELECT agent_id,
+by_priority AS (
+  SELECT priority,
          count(*) AS total,
-         count(*) FILTER (WHERE status = 'kept') AS kept
-    FROM promises_30d
-   GROUP BY agent_id
+         count(*) FILTER (WHERE responded_at - created_at <= interval '4 hours') AS fast
+    FROM first_response
+   GROUP BY priority
 )
-SELECT a.name, b.total, b.kept, round(100.0 * b.kept / nullif(b.total, 0), 1) AS kept_pct
-  FROM by_agent b
-  JOIN agents a ON a.id = b.agent_id
- ORDER BY kept_pct DESC NULLS LAST;
+SELECT priority, total, fast, round(100.0 * fast / nullif(total, 0), 1) AS fast_pct
+  FROM by_priority
+ ORDER BY fast_pct DESC NULLS LAST;
 ```
 
 Desde PostgreSQL 12, el planificador puede **incorporar** las CTEs no recursivas a la consulta principal (ya no son
-una barrera de optimización por defecto). Las **CTEs recursivas** (`WITH RECURSIVE`) recorren jerarquías: un árbol
-de carteras, una cadena de reestructuraciones de deuda.
+una barrera de optimización por defecto). Las **CTEs recursivas** (`WITH RECURSIVE`) recorren jerarquías: el árbol
+de categorías de un catálogo, el organigrama de una empresa o la cadena de respuestas de un hilo de comentarios.
 
 ## Window functions
 
@@ -180,15 +189,14 @@ Una **window function** calcula un valor sobre un conjunto de filas relacionadas
 de `GROUP BY`):
 
 ```sql
--- Cuotas impagas con su posición, el acumulado y el vencimiento anterior, por cliente
-SELECT l.customer_id, i.id AS installment_id, i.due_date, i.amount_cents,
-       row_number() OVER w AS position,
-       sum(i.amount_cents) OVER w AS running_total,
-       lag(i.due_date) OVER w AS previous_due_date
-  FROM installments i
-  JOIN loans l ON l.id = i.loan_id
- WHERE i.paid_cents < i.amount_cents
-WINDOW w AS (PARTITION BY l.customer_id ORDER BY i.due_date);
+-- Pedidos de cada cliente con su número de compra, el gasto acumulado y la fecha de la compra anterior
+SELECT o.customer_id, o.id AS order_id, o.created_at, p.amount_cents,
+       row_number() OVER w AS purchase_number,
+       sum(p.amount_cents) OVER w AS running_total,
+       lag(o.created_at) OVER w AS previous_order_at
+  FROM orders o
+  JOIN payments p ON p.order_id = o.id
+WINDOW w AS (PARTITION BY o.customer_id ORDER BY o.created_at);
 ```
 
 <FlowDiagram
@@ -197,7 +205,7 @@ WINDOW w AS (PARTITION BY l.customer_id ORDER BY i.due_date);
       title: "PARTITION BY customer_id",
       detail: "Una ventana por cliente (como un grupo, sin colapsar filas).",
     },
-    { title: "ORDER BY due_date", detail: "Orden dentro de cada ventana." },
+    { title: "ORDER BY created_at", detail: "Orden dentro de cada ventana." },
     { title: "Función", detail: "row_number, rank, sum, avg, lag, lead, first_value..." },
     {
       title: "Resultado",
@@ -208,49 +216,49 @@ WINDOW w AS (PARTITION BY l.customer_id ORDER BY i.due_date);
   caption="Las window functions agregan contexto a cada fila sin perder el detalle."
 />
 
-| Función                                                        | Uso típico                                                  |
-| -------------------------------------------------------------- | ----------------------------------------------------------- |
-| `row_number()`                                                 | "La primera de cada grupo": la cuota impaga más antigua     |
-| `rank()`, `dense_rank()`                                       | Rankings con empates: agentes por recupero                  |
-| `sum(...) OVER (ORDER BY ...)`                                 | Acumulados: saldo acumulado mes a mes                       |
-| `lag()`, `lead()`                                              | Comparar con la fila anterior o siguiente: días entre pagos |
-| `avg(...) OVER (... ROWS BETWEEN 6 PRECEDING AND CURRENT ROW)` | Promedios móviles                                           |
+| Función                                                        | Uso típico                                                    |
+| -------------------------------------------------------------- | ------------------------------------------------------------- |
+| `row_number()`                                                 | "La primera de cada grupo": el último evento de cada envío    |
+| `rank()`, `dense_rank()`                                       | Rankings con empates: productos más vendidos por categoría    |
+| `sum(...) OVER (ORDER BY ...)`                                 | Acumulados: ventas acumuladas mes a mes                       |
+| `lag()`, `lead()`                                              | Comparar con la fila anterior o siguiente: días entre compras |
+| `avg(...) OVER (... ROWS BETWEEN 6 PRECEDING AND CURRENT ROW)` | Promedios móviles: lecturas de un sensor, ventas diarias      |
 
 El patrón "la primera fila de cada grupo" es muy frecuente:
 
 ```sql
--- Cuota impaga más antigua de cada cliente
+-- Último evento de seguimiento de cada envío
 SELECT *
   FROM (
-    SELECT i.*, row_number() OVER (PARTITION BY l.customer_id ORDER BY i.due_date) AS rn
-      FROM installments i JOIN loans l ON l.id = i.loan_id
-     WHERE i.paid_cents < i.amount_cents
+    SELECT e.*, row_number() OVER (PARTITION BY e.shipment_id ORDER BY e.occurred_at DESC) AS rn
+      FROM shipment_events e
   ) ranked
  WHERE rn = 1;
 
 -- Alternativa propia de PostgreSQL
-SELECT DISTINCT ON (l.customer_id) l.customer_id, i.id, i.due_date
-  FROM installments i JOIN loans l ON l.id = i.loan_id
- WHERE i.paid_cents < i.amount_cents
- ORDER BY l.customer_id, i.due_date;
+SELECT DISTINCT ON (e.shipment_id) e.shipment_id, e.status, e.occurred_at
+  FROM shipment_events e
+ ORDER BY e.shipment_id, e.occurred_at DESC;
 ```
 
 ## Paginación: OFFSET frente a keyset
 
+El ejemplo usa la tabla de puntajes de un juego en línea (`scores`, con millones de filas por temporada):
+
 ```sql
 -- OFFSET: simple, pero el costo crece con la página
-SELECT id, balance_cents FROM debts
- WHERE campaign_id = 7
- ORDER BY balance_cents DESC, id DESC
+SELECT player_id, points FROM scores
+ WHERE season_id = 7
+ ORDER BY points DESC, player_id DESC
  LIMIT 50 OFFSET 50000;           -- lee y descarta 50.000 filas
 
 -- Keyset: continuar desde el último elemento visto
-SELECT id, balance_cents FROM debts
- WHERE campaign_id = 7
-   AND (balance_cents, id) < ($1, $2)   -- valores de la última fila de la página anterior
- ORDER BY balance_cents DESC, id DESC
+SELECT player_id, points FROM scores
+ WHERE season_id = 7
+   AND (points, player_id) < ($1, $2)   -- valores de la última fila de la página anterior
+ ORDER BY points DESC, player_id DESC
  LIMIT 50;
--- Con un índice en (campaign_id, balance_cents DESC, id DESC), cada página cuesta lo mismo.
+-- Con un índice en (season_id, points DESC, player_id DESC), cada página cuesta lo mismo.
 ```
 
 | Aspecto                  | OFFSET                          | Keyset (cursor)                         |
@@ -288,14 +296,14 @@ explícito o el soporte avanzado del query builder.
 
 <KnowledgeCheck
   id="postgresql.queries.q1"
-  question="`SELECT c.id, count(d.id) FROM customers c LEFT JOIN debts d ON d.customer_id = c.id WHERE d.status = 'pending' GROUP BY c.id` no muestra a los clientes sin deudas. ¿Por qué?"
+  question="`SELECT c.id, count(o.id) FROM customers c LEFT JOIN orders o ON o.customer_id = c.id WHERE o.status = 'delivered' GROUP BY c.id` no muestra a los clientes sin pedidos entregados. ¿Por qué?"
   options={[
     {
       text: "Porque count no cuenta ceros.",
-      explanation: "count(d.id) devolvería 0; el problema es que esas filas se filtraron antes.",
+      explanation: "count(o.id) devolvería 0; el problema es que esas filas se filtraron antes.",
     },
     {
-      text: "Porque el filtro sobre d en el WHERE descarta las filas con d en NULL; debe ir en el ON del join.",
+      text: "Porque el filtro sobre o en el WHERE descarta las filas con o en NULL; debe ir en el ON del join.",
       correct: true,
       explanation: "Correcto. El WHERE convierte el LEFT JOIN en un INNER JOIN de hecho.",
     },
@@ -305,19 +313,19 @@ explícito o el soporte avanzado del query builder.
 
 <KnowledgeCheck
   id="postgresql.queries.q2"
-  question="Necesitás la cuota impaga más antigua de cada cliente. ¿Qué herramienta es la más directa?"
+  question="Necesitás el pedido más reciente de cada cliente, con todas sus columnas. ¿Qué herramienta es la más directa?"
   options={[
     {
-      text: "GROUP BY customer_id con min(due_date).",
-      explanation: "Da la fecha, pero no el resto de las columnas de esa cuota sin otro join.",
+      text: "GROUP BY customer_id con max(created_at).",
+      explanation: "Da la fecha, pero no el resto de las columnas de ese pedido sin otro join.",
     },
     {
-      text: "`row_number() OVER (PARTITION BY customer_id ORDER BY due_date)` y quedarse con rn = 1 (o DISTINCT ON).",
+      text: "`row_number() OVER (PARTITION BY customer_id ORDER BY created_at DESC)` y quedarse con rn = 1 (o DISTINCT ON).",
       correct: true,
       explanation: "Correcto. Es el patrón 'primera fila de cada grupo'.",
     },
     {
-      text: "Traer todas las cuotas y filtrar en TypeScript.",
+      text: "Traer todos los pedidos y filtrar en TypeScript.",
       explanation: "Mueve trabajo y datos innecesarios a la aplicación.",
     },
   ]}
@@ -325,7 +333,7 @@ explícito o el soporte avanzado del query builder.
 
 <KnowledgeCheck
   id="postgresql.queries.q3"
-  question="Una API lista deudores con `LIMIT 50 OFFSET n` y las páginas altas tardan varios segundos. ¿Qué cambiás?"
+  question="El ranking de un juego se pagina con `LIMIT 50 OFFSET n` y las páginas altas tardan varios segundos. ¿Qué cambiás?"
   options={[
     {
       text: "Subir el LIMIT para pedir menos páginas.",

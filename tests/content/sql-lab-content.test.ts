@@ -28,23 +28,29 @@ describe("SQL Lab", () => {
     const counts = Object.fromEntries(schema.map((t) => [t.name, t.rowCount]));
     expect(Object.keys(counts).sort()).toEqual(
       [
-        "agents",
-        "campaign_targets",
-        "campaigns",
-        "conversations",
         "customers",
-        "installments",
-        "loans",
-        "payment_promises",
+        "order_items",
+        "orders",
         "payments",
+        "products",
+        "reviews",
+        "room_bookings",
+        "rooms",
+        "sellers",
+        "shipment_events",
+        "shipments",
+        "support_tickets",
+        "ticket_messages",
       ].sort(),
     );
     expect(counts.customers).toBe(12);
-    expect(counts.installments).toBeGreaterThan(100);
+    expect(counts.orders).toBe(18);
+    expect(counts.payments).toBe(15);
+    expect(counts.shipment_events).toBeGreaterThan(40);
   }, 60_000);
 
   it("cada solución de referencia se corrige como correcta y devuelve datos", async () => {
-    expect(lab.exercises.length).toBeGreaterThanOrEqual(6);
+    expect(lab.exercises.length).toBeGreaterThanOrEqual(8);
     for (const exercise of lab.exercises) {
       const graded = await gradeSqlExercise(engine, exercise, exercise.solution);
       expect(graded.kind, exercise.id).toBe("graded");
@@ -62,34 +68,62 @@ describe("SQL Lab", () => {
       if (!outcome.ok) throw new Error(outcome.error.message);
       return lastResultSet(outcome.results)!;
     };
-    const overdue = await run("sql.overdue-by-customer");
-    expect(overdue.rows[0]).toEqual(["Elena Suárez", "1200000"]);
-    expect(overdue.rows.map((r) => r[0])).toContain("Julián Ortiz");
-    expect(overdue.rows.map((r) => r[0])).not.toContain("Diego Fernández");
+    const revenue = await run("sql.revenue-by-seller");
+    expect(revenue.rows[0]).toEqual(["TecnoSur", "34000000"]);
+    expect(revenue.rows.map((r) => r[0])).toEqual([
+      "TecnoSur",
+      "DeportesYa",
+      "Casa Nativa",
+      "Librería del Puerto",
+      "Verde Hogar",
+    ]);
 
-    const broken = await run("sql.broken-promises");
-    expect(broken.rows.map((r) => r[0]).sort()).toEqual([1, 2, 5, 6, 8]);
+    const late = await run("sql.late-shipments");
+    expect(late.rows.map((r) => Number(r[0])).sort((a, b) => a - b)).toEqual([2, 5, 7, 9, 11, 13]);
 
-    const campaigns = await run("sql.campaign-contact-rate");
-    expect(campaigns.rows.map((r) => [r[0], String(r[4])])).toEqual(
-      expect.arrayContaining([
-        ["Mora temprana octubre", "71.4"],
-        ["Recupero pyme", "75.0"],
-        ["Recordatorio preventivo", "25.0"],
-      ]),
-    );
+    const reviews = await run("sql.seller-sales-and-reviews");
+    expect(
+      reviews.rows
+        .find((r) => r[0] === "TecnoSur")
+        ?.slice(1, 4)
+        .map(Number),
+    ).toEqual([8, 5, 0]);
+    expect(reviews.rows.find((r) => r[0] === "Verde Hogar")?.[4]).toBeNull();
+
+    const sla = await run("sql.ticket-sla-breaches");
+    expect(sla.rows.map((r) => Number(r[0])).sort()).toEqual([2, 4, 7]);
+
+    const rooms = await run("sql.available-rooms");
+    expect(rooms.rows.map((r) => `${r[0]} ${r[1]}`)).toEqual([
+      "Hotel Bahía 102",
+      "Hotel Bahía 201",
+      "Posada del Cerro B",
+    ]);
   }, 60_000);
 
   it("detecta respuestas incorrectas típicas", async () => {
     const byId = (id: string) => lab.exercises.find((e) => e.id === id)!;
 
-    // Sin COALESCE se pierden las promesas sin ningún pago.
+    // Sin COALESCE se pierden los envíos que nunca se entregaron.
     const withoutCoalesce = await gradeSqlExercise(
       engine,
-      byId("sql.broken-promises"),
-      byId("sql.broken-promises").solution.replace("COALESCE((", "((").replace("), 0) <", ") <"),
+      byId("sql.late-shipments"),
+      byId("sql.late-shipments").solution.replace(
+        "COALESCE((d.delivered_at AT TIME ZONE 'UTC')::date, DATE '2026-11-15')",
+        "(d.delivered_at AT TIME ZONE 'UTC')::date",
+      ),
     );
     expect(withoutCoalesce.kind === "graded" && withoutCoalesce.outcome.correct).toBe(false);
+
+    // Con extremos cerrados (<= y >=) las estadías que sólo se tocan parecen superpuestas.
+    const closedRanges = await gradeSqlExercise(
+      engine,
+      byId("sql.available-rooms"),
+      byId("sql.available-rooms")
+        .solution.replace("b.check_in < DATE", "b.check_in <= DATE")
+        .replace("b.check_out > DATE", "b.check_out >= DATE"),
+    );
+    expect(closedRanges.kind === "graded" && closedRanges.outcome.correct).toBe(false);
 
     // Un INSERT sin ON CONFLICT falla en la segunda ejecución.
     const plainInsert = await gradeSqlExercise(
@@ -108,7 +142,7 @@ describe("SQL Lab", () => {
     await gradeSqlExercise(
       engine,
       lab.exercises.find((e) => e.id === "sql.idempotent-payment-insert")!,
-      "INSERT INTO payments (loan_id, provider, external_id, amount_cents, paid_at) VALUES (1, 'x', 'y', 1, now()) ON CONFLICT DO NOTHING",
+      "INSERT INTO payments (order_id, provider, external_id, amount_cents, paid_at) VALUES (17, 'x', 'y', 1, now()) ON CONFLICT DO NOTHING",
     );
     const after = await engine.execute("SELECT COUNT(*) FROM payments", { rollback: false });
     expect(after).toMatchObject({ ok: true });

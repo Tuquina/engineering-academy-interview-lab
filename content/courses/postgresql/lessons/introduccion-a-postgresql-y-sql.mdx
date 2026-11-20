@@ -57,9 +57,9 @@ summary:
 
 ## Qué vas a aprender en este curso
 
-En una plataforma de cobranzas, la base de datos es la **fuente de verdad**: deudas, pagos, promesas, campañas y
-eventos. Casi todos los bugs graves (pagos duplicados, saldos incorrectos, datos de un cliente visibles para otro)
-terminan en decisiones de modelado, consultas o transacciones. Este curso cubre lo que se espera de un backend senior.
+En cualquier backend, la base de datos es la **fuente de verdad**: los pedidos de un comercio, las reservas de un
+hotel, las inscripciones de una plataforma educativa o los movimientos de una billetera. Casi todos los bugs graves
+(pagos duplicados, stock negativo, una habitación vendida dos veces, datos de un cliente visibles para otro) terminan en decisiones de modelado, consultas o transacciones. Este curso cubre lo que se espera de un backend senior.
 
 | Módulo                       | Qué vas a poder hacer                                                                |
 | ---------------------------- | ------------------------------------------------------------------------------------ |
@@ -70,7 +70,8 @@ terminan en decisiones de modelado, consultas o transacciones. Este curso cubre 
 | Operación y seguridad        | Pooling, particionado, inyección SQL, Row Level Security y mantenimiento.            |
 
 La plataforma tiene un **Database Lab** (`/database-lab`) con PostgreSQL real ejecutándose en el navegador (PGlite) y
-un dataset de cobranzas: todo lo de este curso se puede probar ahí.
+el dataset de un marketplace (catálogo, pedidos, pagos, envíos, reseñas y soporte) más reservas de hotel: todo lo
+de este curso se puede probar ahí.
 
 ## Qué es PostgreSQL
 
@@ -95,13 +96,13 @@ docker exec -it collections-db psql -U postgres -d collections
 
 Comandos de `psql` que conviene conocer (empiezan con barra invertida y no son SQL):
 
-| Comando    | Qué hace                                           |
-| ---------- | -------------------------------------------------- |
-| `\dt`      | Lista las tablas                                   |
-| `\d debts` | Describe una tabla: columnas, índices, constraints |
-| `\x`       | Alterna la vista expandida (una columna por línea) |
-| `\timing`  | Muestra el tiempo de cada consulta                 |
-| `\q`       | Sale                                               |
+| Comando     | Qué hace                                           |
+| ----------- | -------------------------------------------------- |
+| `\dt`       | Lista las tablas                                   |
+| `\d orders` | Describe una tabla: columnas, índices, constraints |
+| `\x`        | Alterna la vista expandida (una columna por línea) |
+| `\timing`   | Muestra el tiempo de cada consulta                 |
+| `\q`        | Sale                                               |
 
 ## Tipos de datos esenciales
 
@@ -130,21 +131,21 @@ CREATE TABLE customers (
   created_at  timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE TABLE debts (
-  id             bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-  customer_id    bigint NOT NULL REFERENCES customers (id),
-  balance_cents  bigint NOT NULL CHECK (balance_cents >= 0),
-  due_date       date   NOT NULL,
-  status         text   NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'promised', 'paid'))
+CREATE TABLE orders (
+  id           bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  customer_id  bigint NOT NULL REFERENCES customers (id),
+  total_cents  bigint NOT NULL CHECK (total_cents >= 0),
+  placed_at    timestamptz NOT NULL DEFAULT now(),
+  status       text   NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'paid', 'shipped', 'cancelled'))
 );
 
 INSERT INTO customers (tenant_id, full_name, email)
 VALUES (1, 'Ana Pérez', 'ana@example.com')
 RETURNING id;                                   -- devuelve el ID generado
 
-UPDATE debts SET status = 'paid', balance_cents = 0 WHERE id = 42;
+UPDATE orders SET status = 'paid' WHERE id = 42;
 
-DELETE FROM debts WHERE id = 42;                -- sin WHERE borra TODO: cuidado
+DELETE FROM orders WHERE id = 42;               -- sin WHERE borra TODO: cuidado
 ```
 
 `RETURNING` (devolver las filas afectadas) es una de las comodidades más útiles de PostgreSQL: evita una segunda
@@ -153,12 +154,12 @@ consulta después de un `INSERT` o `UPDATE`.
 ## Consultar: SELECT
 
 ```sql
-SELECT c.full_name, d.balance_cents, d.due_date
-  FROM debts d
-  JOIN customers c ON c.id = d.customer_id
- WHERE d.status = 'pending'
-   AND d.due_date < CURRENT_DATE
- ORDER BY d.balance_cents DESC
+SELECT c.full_name, o.total_cents, o.placed_at
+  FROM orders o
+  JOIN customers c ON c.id = o.customer_id
+ WHERE o.status = 'pending'
+   AND o.placed_at < now() - interval '2 days'
+ ORDER BY o.total_cents DESC
  LIMIT 20;
 ```
 
@@ -181,14 +182,14 @@ flowchart LR
 ## Agregaciones: GROUP BY y HAVING
 
 ```sql
--- Deuda vencida por cliente, sólo clientes con más de $100.000 vencidos
-SELECT c.id, c.full_name, count(*) AS overdue_debts, sum(d.balance_cents) AS overdue_cents
-  FROM debts d
-  JOIN customers c ON c.id = d.customer_id
- WHERE d.due_date < CURRENT_DATE AND d.status <> 'paid'
+-- Compras del último año por cliente, sólo clientes que gastaron más de $100.000
+SELECT c.id, c.full_name, count(*) AS orders, sum(o.total_cents) AS spent_cents
+  FROM orders o
+  JOIN customers c ON c.id = o.customer_id
+ WHERE o.placed_at >= now() - interval '1 year' AND o.status <> 'cancelled'
  GROUP BY c.id, c.full_name
-HAVING sum(d.balance_cents) > 10000000
- ORDER BY overdue_cents DESC;
+HAVING sum(o.total_cents) > 10000000
+ ORDER BY spent_cents DESC;
 ```
 
 - `WHERE` filtra **filas** antes de agrupar; `HAVING` filtra **grupos** después.
@@ -223,12 +224,12 @@ import { Pool } from "pg";
 
 const pool = new Pool({ connectionString: process.env.DATABASE_URL });
 
-export async function findOverdueDebts(tenantId: number, limit: number) {
-  const { rows } = await pool.query<{ id: string; balance_cents: string; due_date: Date }>(
-    `SELECT d.id, d.balance_cents, d.due_date
-       FROM debts d JOIN customers c ON c.id = d.customer_id
-      WHERE c.tenant_id = $1 AND d.due_date < CURRENT_DATE
-      ORDER BY d.due_date
+export async function findPendingOrders(tenantId: number, limit: number) {
+  const { rows } = await pool.query<{ id: string; total_cents: string; placed_at: Date }>(
+    `SELECT o.id, o.total_cents, o.placed_at
+       FROM orders o JOIN customers c ON c.id = o.customer_id
+      WHERE c.tenant_id = $1 AND o.status = 'pending'
+      ORDER BY o.placed_at
       LIMIT $2`,
     [tenantId, limit], // los valores viajan separados del SQL: no hay inyección posible
   );
@@ -269,7 +270,7 @@ diagnosticar problemas de performance y concurrencia.
 
 <KnowledgeCheck
   id="postgresql.introduction.q1"
-  question="¿Qué tipo es el más adecuado para el saldo de una deuda?"
+  question="¿Qué tipo es el más adecuado para el total de un pedido?"
   options={[
     {
       text: "`double precision`",
@@ -303,7 +304,7 @@ diagnosticar problemas de performance y concurrencia.
 
 <KnowledgeCheck
   id="postgresql.introduction.q3"
-  question="Querés los clientes cuya deuda vencida total supera $100.000. ¿Dónde va la condición sobre la suma?"
+  question="Querés los clientes cuyas compras del último año suman más de $100.000. ¿Dónde va la condición sobre la suma?"
   options={[
     { text: "En el WHERE.", explanation: "WHERE se evalúa antes de agrupar: la suma todavía no existe." },
     {

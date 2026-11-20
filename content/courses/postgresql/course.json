@@ -2,7 +2,7 @@
   "id": "postgresql",
   "slug": "postgresql",
   "title": "PostgreSQL para backends de producción",
-  "description": "Modelado, índices, planner, transacciones y concurrencia, con datasets de cobranzas para practicar.",
+  "description": "Modelado, índices, planner, transacciones y concurrencia, con el dataset de un marketplace y de reservas para practicar.",
   "areaId": "data",
   "difficulty": "intermediate",
   "order": 1,

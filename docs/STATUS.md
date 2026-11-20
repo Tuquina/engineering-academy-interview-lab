@@ -107,11 +107,12 @@ en [guides/adding-exercises.md](guides/adding-exercises.md).
 - **Tests y corrección:** harness propio (`test`, `expect`, `mockFn`, `sleep`) compartido entre el navegador y
   Vitest; tests públicos y ocultos agrupados por categoría (correctitud, casos límite, robustez, concurrencia).
 - **Playground de TypeScript (`/lab`):** consola, JavaScript emitido y 3 ejemplos (`content/playground`).
-- **SQL Playground (`/database-lab`):** PostgreSQL real (PGlite/WASM) en un Web Worker con un dataset de cobranzas
-  (clientes, préstamos, cuotas, pagos, promesas, campañas, conversaciones), explorador de esquema, errores con
+- **SQL Playground (`/database-lab`):** PostgreSQL real (PGlite/WASM) en un Web Worker con el dataset de un
+  marketplace (catálogo, pedidos, pagos, envíos con eventos, reseñas y tickets de soporte) y reservas de hotel, explorador de esquema, errores con
   SQLSTATE y posición, timeout de 10 s con reinicio y "Restablecer dataset".
-- **6 ejercicios SQL autocorregidos** (`content/sql/exercises`): joins, window functions, subconsultas, `FILTER`,
-  `DISTINCT ON` y un `UPSERT` idempotente (modo `state`). La corrección compara contra la solución dentro de
+- **8 ejercicios SQL autocorregidos** (`content/sql/exercises`): joins, window functions, subconsultas y `NULL`,
+  fan-out con `FILTER`, `DISTINCT ON`, un `UPSERT` idempotente (modo `state`), intervalos para SLA y solapamiento de
+  rangos de fechas. La corrección compara contra la solución dentro de
   transacciones con `ROLLBACK`.
 - **Challenges (módulo `challenges`, `/challenges`):** 12 desafíos con filtros por tipo, tecnología, dificultad y tipo
   de entrevista; pistas progresivas, solución de referencia explicada y preguntas de seguimiento.

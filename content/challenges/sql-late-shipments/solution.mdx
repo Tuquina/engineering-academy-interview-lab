@@ -1,0 +1,24 @@
+## Enfoque
+
+Una subconsulta correlacionada busca, por envío, su evento `delivered`. Sin entrega devuelve `NULL`, y
+`NULL > promised_by` no es verdadero: el `COALESCE(entrega, DATE '2026-11-15')` hace que los envíos que nunca llegaron
+se comparen como "todavía no llegó hoy" en lugar de desaparecer del resultado.
+
+## Complejidad y rendimiento
+
+Sin índices, cada envío recorre todos los eventos: O(envíos × eventos). Con un índice
+`shipment_events (shipment_id, status)` (o uno parcial `WHERE status = 'delivered'`) cada subconsulta es una búsqueda
+puntual, aproximadamente O(envíos × log(eventos)).
+
+## Alternativas
+
+- `LEFT JOIN shipment_events e ON e.shipment_id = s.id AND e.status = 'delivered'` con `GROUP BY s.id` y la condición
+  en un `HAVING`. La condición `status = 'delivered'` tiene que ir en el `ON`: en el `WHERE` convertiría el `LEFT JOIN`
+  en un `JOIN` interno y perdería los envíos sin entrega.
+- Un `LEFT JOIN LATERAL` que trae la entrega de cada envío con `LIMIT 1`.
+
+## Para producción
+
+Guardar `delivered_at` en `shipments` al registrar el evento (en la misma transacción) evita buscar en la tabla de
+eventos en cada consulta. Un job idempotente que marque `delay_notified_at` (`UPDATE ... WHERE delay_notified_at IS
+NULL AND ...`) garantiza que cada cliente reciba un solo aviso aunque el job corra varias veces.

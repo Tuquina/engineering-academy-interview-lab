@@ -164,9 +164,9 @@ Security** agrega una **segunda barrera en la base**: aunque una consulta olvide
 de otro tenant.
 
 ```sql
-ALTER TABLE debts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE invoices ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY tenant_isolation ON debts
+CREATE POLICY tenant_isolation ON invoices
   USING (tenant_id = current_setting('app.tenant_id')::bigint)
   WITH CHECK (tenant_id = current_setting('app.tenant_id')::bigint);
 ```
@@ -175,7 +175,7 @@ CREATE POLICY tenant_isolation ON debts
 await inTransaction(pool, async (client) => {
   // Fija el tenant para esta transacción (true = local a la transacción: seguro con poolers en modo transacción)
   await client.query("SELECT set_config('app.tenant_id', $1, true)", [String(user.tenantId)]);
-  return client.query("SELECT * FROM debts WHERE status = 'pending'"); // sólo filas del tenant
+  return client.query("SELECT * FROM invoices WHERE status = 'open'"); // sólo facturas del tenant
 });
 ```
 
@@ -261,7 +261,7 @@ cada transacción**, nunca a nivel de sesión compartida.
 
 <KnowledgeCheck
   id="postgresql.operations.q2"
-  question="Activaste RLS en `debts`, pero la aplicación sigue viendo filas de todos los tenants. ¿Cuál es la causa más probable?"
+  question="Activaste RLS en `invoices`, pero la aplicación sigue viendo filas de todos los tenants. ¿Cuál es la causa más probable?"
   options={[
     {
       text: "RLS sólo funciona con SELECT.",

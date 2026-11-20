@@ -6,7 +6,7 @@ description: "Cómo se diseña un esquema que proteja la integridad de los datos
 difficulty: intermediate
 order: 1
 objectives:
-  - "Modelar entidades y relaciones 1:N y N:M para un dominio de cobranzas."
+  - "Modelar entidades y relaciones 1:N y N:M para una plataforma de cursos online."
   - "Aplicar normalización y justificar las desnormalizaciones."
   - "Elegir claves primarias y usar foreign keys con la acción de borrado correcta."
   - "Expresar reglas de negocio con NOT NULL, CHECK, UNIQUE (también parciales) y EXCLUDE."
@@ -33,7 +33,7 @@ interviewQuestions:
     keyPoints:
       - "La base es la última línea de defensa: la verifica sin importar qué código escriba (varios servicios, scripts, migraciones)."
       - "Las constraints son atómicas y seguras ante concurrencia; los chequeos previos en la aplicación tienen carreras."
-      - "Ejemplos: UNIQUE para idempotencia, CHECK para rangos, FK para referencias, índices únicos parciales para una sola promesa vigente."
+      - "Ejemplos: UNIQUE para idempotencia, CHECK para rangos, FK para referencias, índices únicos parciales para una sola inscripción activa."
       - "La aplicación igual valida para dar buenos mensajes de error."
   - question: "¿Cuándo usarías JSONB?"
     keyPoints:
@@ -59,13 +59,13 @@ summary:
 
 ## ¿Qué problema resuelve?
 
-Un servicio de cobranzas tenía la regla "una deuda puede tener a lo sumo una promesa de pago vigente". Estaba en el
-código: antes de insertar, se consultaba si existía una. Con dos mensajes casi simultáneos del deudor, ambos chequeos
-pasaron y quedaron dos promesas vigentes; el agente después mencionaba fechas contradictorias. Una sola línea en el
-esquema lo habría hecho imposible:
+Una plataforma de cursos online tenía la regla "un alumno puede tener a lo sumo una inscripción activa por curso".
+Estaba en el código: antes de insertar, se consultaba si existía una. Un alumno hizo doble clic en "Inscribirme",
+las dos requests pasaron el chequeo a la vez y quedaron dos inscripciones activas, cada una con su cobro. Una sola
+línea en el esquema lo habría hecho imposible:
 
 ```sql
-CREATE UNIQUE INDEX one_active_promise_per_debt ON payment_promises (debt_id) WHERE status = 'active';
+CREATE UNIQUE INDEX one_active_enrollment ON enrollments (student_id, course_id) WHERE status = 'active';
 ```
 
 El modelado relacional consiste en que **el esquema exprese las reglas del dominio**, para que los estados inválidos
@@ -74,36 +74,36 @@ no se puedan guardar, sin importar qué código escriba.
 ## Entidades y relaciones
 
 <MermaidDiagram
-  caption="Modelo simplificado de una plataforma de cobranzas multi-tenant."
+  caption="Modelo simplificado de una plataforma de cursos online multi-tenant."
   chart={`
 erDiagram
-  TENANTS ||--o{ CUSTOMERS : tiene
-  CUSTOMERS ||--o{ DEBTS : debe
-  DEBTS ||--o{ PAYMENTS : recibe
-  DEBTS ||--o{ PAYMENT_PROMISES : tiene
-  CAMPAIGNS ||--o{ CAMPAIGN_TARGETS : incluye
-  DEBTS ||--o{ CAMPAIGN_TARGETS : participa
-  CUSTOMERS ||--o{ CONVERSATIONS : mantiene
-  DEBTS {
+  TENANTS ||--o{ STUDENTS : tiene
+  TENANTS ||--o{ COURSES : publica
+  STUDENTS ||--o{ ENROLLMENTS : se_inscribe
+  COURSES ||--o{ ENROLLMENTS : recibe
+  ENROLLMENTS ||--o{ PAYMENTS : paga
+  COURSES ||--o{ LESSONS : contiene
+  ENROLLMENTS ||--o| CERTIFICATES : obtiene
+  ENROLLMENTS {
     bigint id PK
-    bigint customer_id FK
-    bigint balance_cents
-    date due_date
+    bigint student_id FK
+    bigint course_id FK
+    bigint price_cents
     text status
   }
-  PAYMENT_PROMISES {
+  CERTIFICATES {
     bigint id PK
-    bigint debt_id FK
-    date promised_for
-    bigint amount_cents
-    text status
+    bigint enrollment_id FK
+    text student_name
+    date issued_on
   }
 `}
 />
 
-- **1:N** (un cliente tiene muchas deudas): foreign key en el lado "muchos" (`debts.customer_id`).
-- **N:M** (campañas y deudas): tabla intermedia (`campaign_targets`) con las dos foreign keys y, a menudo, atributos
-  propios de la relación (fecha de inclusión, resultado).
+- **1:N** (un curso tiene muchas lecciones): foreign key en el lado "muchos" (`lessons.course_id`).
+- **N:M** (alumnos y cursos): tabla intermedia (`enrollments`) con las dos foreign keys y, a menudo, atributos
+  propios de la relación (precio pagado, estado, fecha de inscripción).
+- **1:0..1** (una inscripción tiene a lo sumo un certificado): foreign key con `UNIQUE` en el lado opcional.
 - **1:1** es raro y suele indicar que se puede fusionar o que una parte es opcional y pesada.
 
 ## Normalización y desnormalización
@@ -113,22 +113,22 @@ la idea; en la práctica, la regla es: si un dato se repite en muchas filas, pro
 tabla.
 
 ```sql
--- ❌ Desnormalizado: el nombre del cliente se repite en cada deuda
-CREATE TABLE debts_bad (id bigint, customer_name text, customer_email text, balance_cents bigint);
--- Si el cliente cambia el email, hay que actualizar N filas; si se olvida una, hay datos contradictorios.
+-- ❌ Desnormalizado: el nombre del alumno se repite en cada inscripción
+CREATE TABLE enrollments_bad (id bigint, student_name text, student_email text, course_title text);
+-- Si el alumno cambia el email, hay que actualizar N filas; si se olvida una, hay datos contradictorios.
 
--- ✅ Normalizado: el cliente se guarda una vez y las deudas lo referencian
--- (customers y debts de la lección anterior)
+-- ✅ Normalizado: el alumno y el curso se guardan una vez y la inscripción los referencia
+-- (students, courses y enrollments con sus foreign keys)
 ```
 
 **Desnormalizar** (duplicar a propósito) es válido con un motivo concreto, normalmente de lectura, y con un
 mecanismo que mantenga la copia sincronizada:
 
-| Desnormalización                                                     | Motivo                             | Cómo se mantiene                                          |
-| -------------------------------------------------------------------- | ---------------------------------- | --------------------------------------------------------- |
-| `debts.balance_cents` (en lugar de calcularlo de los pagos cada vez) | Lectura frecuente y barata         | Se actualiza en la misma transacción que registra el pago |
-| Tabla de resumen por campaña                                         | Dashboards sobre millones de filas | Vista materializada o proceso asíncrono                   |
-| Copia del nombre del cliente en un evento                            | El evento debe reflejar el momento | Inmutable a propósito: es historia                        |
+| Desnormalización                                                   | Motivo                             | Cómo se mantiene                                             |
+| ------------------------------------------------------------------ | ---------------------------------- | ------------------------------------------------------------ |
+| `enrollments.progress_pct` (en lugar de contar lecciones cada vez) | Lectura frecuente y barata         | Se actualiza en la misma transacción que completa la lección |
+| Tabla de resumen por curso                                         | Dashboards sobre millones de filas | Vista materializada o proceso asíncrono                      |
+| Nombre del alumno copiado en el certificado                        | El certificado refleja el momento  | Inmutable a propósito: es historia                           |
 
 ## Claves primarias
 
@@ -147,7 +147,7 @@ Recomendación habitual: **clave sustituta** como primaria (identity o uuid) y l
 ```sql
 CREATE TABLE payments (
   id            bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-  debt_id       bigint NOT NULL REFERENCES debts (id) ON DELETE RESTRICT,
+  enrollment_id bigint NOT NULL REFERENCES enrollments (id) ON DELETE RESTRICT,
   provider_payment_id text NOT NULL,
   amount_cents  bigint NOT NULL CHECK (amount_cents > 0),
   paid_at       timestamptz NOT NULL,
@@ -168,30 +168,30 @@ hay que crearlos, porque los joins y los borrados del padre los necesitan.
 ## Constraints: hacer imposibles los estados inválidos
 
 ```sql
-CREATE TABLE payment_promises (
+CREATE TABLE enrollments (
   id            bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-  debt_id       bigint NOT NULL REFERENCES debts (id),
-  promised_for  date   NOT NULL,
-  amount_cents  bigint NOT NULL CHECK (amount_cents > 0),
-  status        text   NOT NULL CHECK (status IN ('active', 'kept', 'broken', 'cancelled')),
+  student_id    bigint NOT NULL REFERENCES students (id),
+  course_id     bigint NOT NULL REFERENCES courses (id),
+  price_cents   bigint NOT NULL CHECK (price_cents >= 0),       -- 0 para becas
+  status        text   NOT NULL CHECK (status IN ('active', 'completed', 'cancelled')),
   created_at    timestamptz NOT NULL DEFAULT now(),
-  kept_at       timestamptz,
-  -- Regla entre columnas: kept_at existe si y sólo si la promesa se cumplió
-  CHECK ((status = 'kept') = (kept_at IS NOT NULL))
+  completed_at  timestamptz,
+  -- Regla entre columnas: completed_at existe si y sólo si el curso se completó
+  CHECK ((status = 'completed') = (completed_at IS NOT NULL))
 );
 
--- Una sola promesa activa por deuda (índice único parcial)
-CREATE UNIQUE INDEX one_active_promise_per_debt ON payment_promises (debt_id) WHERE status = 'active';
+-- Una sola inscripción activa por alumno y curso (índice único parcial)
+CREATE UNIQUE INDEX one_active_enrollment ON enrollments (student_id, course_id) WHERE status = 'active';
 ```
 
-| Constraint           | Expresa                                                             |
-| -------------------- | ------------------------------------------------------------------- |
-| `NOT NULL`           | El dato es obligatorio                                              |
-| `CHECK`              | Rangos, conjuntos de valores y reglas entre columnas de la fila     |
-| `UNIQUE`             | Unicidad (también compuesta: `UNIQUE (tenant_id, email)`)           |
-| Índice único parcial | Unicidad condicional ("una activa por deuda")                       |
-| `FOREIGN KEY`        | La referencia existe                                                |
-| `EXCLUDE`            | Que no haya solapamientos (por ejemplo, rangos de fechas de planes) |
+| Constraint           | Expresa                                                                                       |
+| -------------------- | --------------------------------------------------------------------------------------------- |
+| `NOT NULL`           | El dato es obligatorio                                                                        |
+| `CHECK`              | Rangos, conjuntos de valores y reglas entre columnas de la fila                               |
+| `UNIQUE`             | Unicidad (también compuesta: `UNIQUE (tenant_id, email)`)                                     |
+| Índice único parcial | Unicidad condicional ("una activa por alumno y curso")                                        |
+| `FOREIGN KEY`        | La referencia existe                                                                          |
+| `EXCLUDE`            | Que no haya solapamientos (por ejemplo, dos reservas del mismo aula en horarios superpuestos) |
 
 Las constraints son **seguras ante concurrencia**: dos transacciones simultáneas no pueden violarlas, a diferencia de
 un "consultar y después insertar" en la aplicación. La aplicación igual valida antes, para devolver buenos mensajes;
@@ -210,7 +210,7 @@ CREATE TABLE webhook_events (
   received_at        timestamptz NOT NULL DEFAULT now()
 );
 
-SELECT payload ->> 'debt_reference' AS debt_reference      -- ->> extrae como texto
+SELECT payload ->> 'order_reference' AS order_reference    -- ->> extrae como texto
   FROM webhook_events
  WHERE payload @> '{"status": "succeeded"}';               -- @> "contiene", indexable con GIN
 
@@ -287,14 +287,14 @@ CONSTRAINT`, que valida sin el bloqueo más fuerte.
 
 <KnowledgeCheck
   id="postgresql.modeling.q1"
-  question="¿Cómo garantizás que una deuda tenga a lo sumo una promesa de pago activa, incluso con requests concurrentes?"
+  question="¿Cómo garantizás que un alumno tenga a lo sumo una inscripción activa por curso, incluso con requests concurrentes?"
   options={[
     {
       text: "Consultando antes de insertar en la aplicación.",
       explanation: "Dos requests concurrentes pueden pasar el chequeo a la vez.",
     },
     {
-      text: "Con un índice único parcial: `UNIQUE (debt_id) WHERE status = 'active'`.",
+      text: "Con un índice único parcial: `UNIQUE (student_id, course_id) WHERE status = 'active'`.",
       correct: true,
       explanation:
         "Correcto. La base lo garantiza de forma atómica; la segunda inserción falla con un error de unicidad.",
@@ -331,7 +331,7 @@ CONSTRAINT`, que valida sin el bloqueo más fuerte.
   question="¿Qué conviene guardar en una columna JSONB?"
   options={[
     {
-      text: "El estado de la deuda, para poder agregar estados nuevos sin migraciones.",
+      text: "El estado de la inscripción, para poder agregar estados nuevos sin migraciones.",
       explanation: "Es un dato central que se filtra y tiene reglas: va en una columna con CHECK.",
     },
     {

@@ -23,10 +23,10 @@ const CodeEditor = dynamic(
 
 const DRAFT_ID = "sql-playground";
 const DEFAULT_QUERY = `-- Fecha de referencia del dataset: 2026-11-15
-SELECT c.full_name, l.id AS loan_id, l.status, l.principal_cents
+SELECT c.full_name, o.id AS order_id, o.status, o.created_at
 FROM customers c
-JOIN loans l ON l.customer_id = c.id
-ORDER BY c.full_name
+JOIN orders o ON o.customer_id = c.id
+ORDER BY o.created_at DESC
 LIMIT 20;`;
 
 export interface ExerciseLink {
@@ -37,7 +37,7 @@ export interface ExerciseLink {
 }
 
 /**
- * SQL Playground libre sobre el dataset de cobranzas: PostgreSQL real en el navegador, con esquema visible,
+ * SQL Playground libre sobre el dataset del marketplace: PostgreSQL real en el navegador, con esquema visible,
  * resultados tabulares, errores con posición y reset del dataset.
  */
 export function SqlPlayground({

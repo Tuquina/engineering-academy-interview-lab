@@ -13,9 +13,9 @@ export default async function DatabaseLabPage() {
       <header className="mb-4">
         <h1 className="text-foreground text-2xl font-bold tracking-tight">Database Lab · SQL Playground</h1>
         <p className="text-muted mt-1 text-sm">
-          PostgreSQL real en tu navegador con un dataset de cobranzas (clientes, préstamos, cuotas, pagos,
-          promesas, campañas y conversaciones). Explorá el esquema, ejecutá consultas y resolvé los ejercicios
-          autocorregibles.
+          PostgreSQL real en tu navegador con el dataset de un marketplace (catálogo, pedidos, pagos, envíos,
+          reseñas y tickets de soporte) y un esquema chico de reservas de hotel. Explorá el esquema, ejecutá
+          consultas y resolvé los ejercicios autocorregibles.
         </p>
       </header>
       <SqlPlayground

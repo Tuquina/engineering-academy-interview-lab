@@ -58,8 +58,8 @@ summary:
 
 ## ¿Qué problema resuelve?
 
-El panel de supervisores muestra "deudas vencidas de la campaña, ordenadas por saldo". Con 10.000 deudas tardaba 20
-ms; con 8 millones tarda 9 segundos. La consulta no cambió: cambió el volumen. Sin un índice adecuado, PostgreSQL
+La agenda de recepción de un software para clínicas muestra "turnos programados de la clínica hasta el viernes, por
+horario". Con 10.000 turnos tardaba 20 ms; con 8 millones (años de historia de cientos de clínicas) tarda 9 segundos. La consulta no cambió: cambió el volumen. Sin un índice adecuado, PostgreSQL
 **lee la tabla entera** para encontrar unas pocas filas. Esta lección explica cómo se diseñan índices **a partir de
 las consultas** y cómo se verifica con evidencia que funcionan.
 
@@ -90,15 +90,15 @@ mucho más lento que una con dos.
 ## Índices compuestos y el orden de las columnas
 
 ```sql
--- Consulta frecuente del panel
-SELECT id, customer_id, balance_cents
-  FROM debts
- WHERE tenant_id = $1 AND status = 'pending' AND due_date < $2
- ORDER BY due_date
+-- Consulta frecuente de la agenda
+SELECT id, patient_id, doctor_id, starts_at
+  FROM appointments
+ WHERE tenant_id = $1 AND status = 'scheduled' AND starts_at < $2
+ ORDER BY starts_at
  LIMIT 100;
 
 -- Índice que la soporta: igualdades primero, después la columna de rango y orden
-CREATE INDEX debts_tenant_status_due_idx ON debts (tenant_id, status, due_date);
+CREATE INDEX appointments_tenant_status_start_idx ON appointments (tenant_id, status, starts_at);
 ```
 
 La **regla del prefijo izquierdo**: un índice en `(a, b, c)` sirve para filtros sobre `a`, sobre `a, b` y sobre
@@ -108,17 +108,17 @@ apellido y nombre: buscar por apellido es rápido; buscar sólo por nombre oblig
 Criterio práctico de orden:
 
 1. Columnas filtradas por **igualdad** (`tenant_id`, `status`).
-2. La columna de **rango** (`due_date < ...`) o de **orden** (`ORDER BY due_date`).
+2. La columna de **rango** (`starts_at < ...`) o de **orden** (`ORDER BY starts_at`).
 3. Si hace falta, columnas extra para cubrir la consulta (`INCLUDE`).
 
 ## Índices parciales, de cobertura y por expresión
 
 ```sql
--- Parcial: sólo las deudas abiertas, que son las que se consultan (y un índice más chico)
-CREATE INDEX debts_open_due_idx ON debts (tenant_id, due_date) WHERE status <> 'paid';
+-- Parcial: sólo los turnos programados, que son los que se consultan (y un índice más chico)
+CREATE INDEX appointments_scheduled_idx ON appointments (tenant_id, starts_at) WHERE status = 'scheduled';
 
 -- De cobertura: incluye columnas para responder sin ir a la tabla (index-only scan)
-CREATE INDEX debts_tenant_due_cover_idx ON debts (tenant_id, due_date) INCLUDE (balance_cents, customer_id);
+CREATE INDEX appointments_tenant_start_cover_idx ON appointments (tenant_id, starts_at) INCLUDE (patient_id, doctor_id);
 
 -- Por expresión: búsquedas por email sin distinguir mayúsculas
 CREATE INDEX customers_email_lower_idx ON customers (lower(email));
@@ -148,8 +148,8 @@ PostgreSQL tiene un **planificador basado en costos**: estima cuántas filas dev
 **estadísticas** de las columnas (que recolecta `ANALYZE`, automáticamente con autovacuum) y elige el plan más barato
 **estimado**.
 
-- La **selectividad** es qué fracción de filas cumple un filtro. `status = 'paid'` sobre una tabla donde el 90 % está
-  pagado es **poco selectivo**: leer la tabla secuencialmente puede ser más barato que saltar del índice a la tabla
+- La **selectividad** es qué fracción de filas cumple un filtro. `status = 'completed'` sobre una tabla de turnos donde el 90 %
+  ya se atendió es **poco selectivo**: leer la tabla secuencialmente puede ser más barato que saltar del índice a la tabla
   millones de veces. Por eso, a veces, **el planificador ignora un índice a propósito**.
 - Si las estimaciones están muy lejos de la realidad (estadísticas viejas, columnas correlacionadas), el plan puede
   ser malo. Se corre `ANALYZE` y, para correlaciones, se pueden crear estadísticas extendidas (`CREATE STATISTICS`).
@@ -161,24 +161,24 @@ PostgreSQL tiene un **planificador basado en costos**: estima cuántas filas dev
 
 ```sql
 EXPLAIN (ANALYZE, BUFFERS)
-SELECT id, balance_cents FROM debts
- WHERE tenant_id = 3 AND status = 'pending' AND due_date < '2026-11-01'
- ORDER BY due_date LIMIT 100;
+SELECT id, patient_id FROM appointments
+ WHERE tenant_id = 3 AND status = 'scheduled' AND starts_at < '2026-11-20'
+ ORDER BY starts_at LIMIT 100;
 ```
 
 ```text
 -- Sin el índice adecuado
 Limit  (actual time=8412.3..8412.4 rows=100 loops=1)
   ->  Sort  (actual time=8412.3..8412.3 rows=100 loops=1)
-        Sort Key: due_date
-        ->  Seq Scan on debts  (actual time=0.02..8301.7 rows=412339 loops=1)
-              Filter: ((tenant_id = 3) AND (status = 'pending') AND (due_date < '2026-11-01'))
+        Sort Key: starts_at
+        ->  Seq Scan on appointments  (actual time=0.02..8301.7 rows=412339 loops=1)
+              Filter: ((tenant_id = 3) AND (status = 'scheduled') AND (starts_at < '2026-11-20 00:00:00+00'))
               Rows Removed by Filter: 7587661
 
--- Con el índice (tenant_id, status, due_date)
+-- Con el índice (tenant_id, status, starts_at)
 Limit  (actual time=0.04..0.31 rows=100 loops=1)
-  ->  Index Scan using debts_tenant_status_due_idx on debts  (actual time=0.04..0.30 rows=100 loops=1)
-        Index Cond: ((tenant_id = 3) AND (status = 'pending') AND (due_date < '2026-11-01'))
+  ->  Index Scan using appointments_tenant_status_start_idx on appointments  (actual time=0.04..0.30 rows=100 loops=1)
+        Index Cond: ((tenant_id = 3) AND (status = 'scheduled') AND (starts_at < '2026-11-20 00:00:00+00'))
 ```
 
 | Nodo / señal                                | Qué indica                                                                      |
@@ -198,15 +198,15 @@ partida para saber **qué** optimizar.
 ## El problema N+1
 
 ```ts
-// ❌ N+1: 1 consulta para las deudas + 1 por cada deuda para su cliente
-const debts = await db.query("SELECT * FROM debts WHERE campaign_id = $1", [campaignId]);
-for (const debt of debts.rows) {
-  debt.customer = (await db.query("SELECT * FROM customers WHERE id = $1", [debt.customer_id])).rows[0];
+// ❌ N+1 en un chat: 1 consulta para los mensajes + 1 por cada mensaje para su autor
+const messages = await db.query("SELECT * FROM messages WHERE conversation_id = $1", [conversationId]);
+for (const message of messages.rows) {
+  message.author = (await db.query("SELECT * FROM users WHERE id = $1", [message.author_id])).rows[0];
 }
 
 // ✅ Una consulta con join, o dos consultas por lote
-const customers = await db.query("SELECT * FROM customers WHERE id = ANY($1)", [
-  debts.rows.map((d) => d.customer_id),
+const authors = await db.query("SELECT * FROM users WHERE id = ANY($1)", [
+  messages.rows.map((m) => m.author_id),
 ]);
 ```
 
@@ -237,21 +237,21 @@ esconde. Se detecta en las trazas (decenas de spans de consultas idénticas) o e
 
 <KnowledgeCheck
   id="postgresql.indexes.q1"
-  question="Existe el índice `(tenant_id, status, due_date)`. ¿Cuál de estas consultas NO puede aprovecharlo bien?"
+  question="Existe el índice `(tenant_id, status, starts_at)`. ¿Cuál de estas consultas NO puede aprovecharlo bien?"
   options={[
     {
-      text: "`WHERE tenant_id = 3 AND status = 'pending'`",
+      text: "`WHERE tenant_id = 3 AND status = 'scheduled'`",
       explanation: "Usa el prefijo (tenant_id, status).",
     },
     {
-      text: "`WHERE tenant_id = 3 AND status = 'pending' AND due_date < '2026-11-01'`",
+      text: "`WHERE tenant_id = 3 AND status = 'scheduled' AND starts_at < '2026-11-20'`",
       explanation: "Usa las tres columnas en el orden ideal.",
     },
     {
-      text: "`WHERE due_date < '2026-11-01'`",
+      text: "`WHERE starts_at < '2026-11-20'`",
       correct: true,
       explanation:
-        "Correcto. due_date no es prefijo del índice: por la regla del prefijo izquierdo, en general no sirve.",
+        "Correcto. starts_at no es prefijo del índice: por la regla del prefijo izquierdo, en general no sirve.",
     },
   ]}
 />
@@ -273,11 +273,11 @@ esconde. Se detecta en las trazas (decenas de spans de consultas idénticas) o e
 
 <KnowledgeCheck
   id="postgresql.indexes.q3"
-  question="Creaste un índice sobre `status`, pero el planificador lo ignora en `WHERE status = 'paid'`. ¿Cuál es la explicación más probable?"
+  question="Creaste un índice sobre `status`, pero el planificador lo ignora en `WHERE status = 'completed'`. ¿Cuál es la explicación más probable?"
   options={[
     { text: "PostgreSQL no usa índices con texto.", explanation: "Los usa sin problema." },
     {
-      text: "La mayoría de las filas son 'paid': el filtro es poco selectivo y leer la tabla es más barato.",
+      text: "La mayoría de las filas son 'completed' (turnos ya atendidos): el filtro es poco selectivo y leer la tabla es más barato.",
       correct: true,
       explanation:
         "Correcto. El planificador elige por costo estimado; un índice poco selectivo puede no convenir.",

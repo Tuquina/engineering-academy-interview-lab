@@ -11,8 +11,8 @@ hints:
   - "Un `INSERT` común falla la segunda vez por violar la restricción."
   - "`INSERT ... ON CONFLICT (provider, external_id) DO NOTHING` ignora el duplicado sin error."
 solution: |
-  INSERT INTO payments (loan_id, provider, external_id, amount_cents, paid_at)
-  VALUES (1, 'pasarela', 'pay_ext_999', 5000, '2026-11-15 10:00+00')
+  INSERT INTO payments (order_id, provider, external_id, amount_cents, paid_at)
+  VALUES (17, 'pasarela', 'pay_ext_999', 2100000, '2026-11-15 10:00+00')
   ON CONFLICT (provider, external_id) DO NOTHING;
 checkQuery: |
   SELECT COUNT(*) AS registered, SUM(amount_cents) AS amount_cents
@@ -22,13 +22,13 @@ checkQuery: |
 
 ## Enunciado
 
-El webhook del proveedor puede entregar el mismo pago más de una vez. Escribí la sentencia que registra este pago de
-forma **idempotente**:
+El pedido 17 está pendiente de pago y el webhook del proveedor confirma el cobro, pero puede entregar la misma
+notificación más de una vez. Escribí la sentencia que registra este pago de forma **idempotente**:
 
-- `loan_id`: 1
+- `order_id`: 17
 - `provider`: `'pasarela'`
 - `external_id`: `'pay_ext_999'`
-- `amount_cents`: 5000
+- `amount_cents`: 2100000
 - `paid_at`: `'2026-11-15 10:00+00'`
 
 La corrección ejecuta **tu sentencia dos veces seguidas**: ninguna ejecución debe fallar y el pago debe quedar
@@ -41,5 +41,5 @@ una ventana de carrera entre dos requests simultáneas. La restricción `UNIQUE`
 forma atómica, y `ON CONFLICT DO NOTHING` convierte el duplicado en un no-op.
 
 - `ON CONFLICT ... DO UPDATE SET ...` (UPSERT) sirve cuando el reintento trae datos que deben actualizarse.
-- `RETURNING id` devuelve una fila sólo si insertó: así la aplicación sabe si el pago era nuevo y si debe aplicarlo a
-  la deuda (en la misma transacción).
+- `RETURNING id` devuelve una fila sólo si insertó: así la aplicación sabe si el pago era nuevo y si debe marcar el
+  pedido como pagado (en la misma transacción).

@@ -1,0 +1,49 @@
+---
+id: challenge.sql-late-shipments
+kind: sql
+sqlExerciseId: sql.late-shipments
+title: "Query compleja: envíos demorados"
+summary: "Detectar envíos entregados tarde o todavía sin entregar después de la fecha comprometida, con PostgreSQL real."
+difficulty: intermediate
+durationMinutes: 25
+technologies: ["postgresql", "sql"]
+topics: ["subconsultas", "NULL", "fechas", "zonas horarias"]
+skills: ["SQL", "modelado de reglas de negocio"]
+interviewType: live-coding
+order: 9
+constraints:
+  - "Una sola consulta (podés usar CTEs y subconsultas)."
+  - "Fecha de referencia: 2026-11-15."
+acceptanceCriteria:
+  - "Devuelve los envíos entregados después de `promised_by`."
+  - "Incluye los envíos sin entregar cuya fecha comprometida ya pasó."
+  - "No incluye envíos entregados a tiempo ni envíos sin entregar que todavía están en plazo."
+  - "Columnas: shipment_id, full_name, carrier, promised_by, delivered_on."
+hints:
+  - "La entrega es el evento `delivered` del envío en `shipment_events`; puede no existir."
+  - "El cliente se obtiene a través del pedido: shipments → orders → customers."
+  - "Cuidado con comparar contra NULL: un envío que nunca llegó no tiene fecha de entrega."
+followUpQuestions:
+  - "¿Qué índice agregarías si shipment_events tuviera 500 millones de filas?"
+  - "¿Cómo lo convertirías en un job que avise al cliente una sola vez por envío demorado?"
+  - "¿Qué cambia si cada transportista informa los eventos en su zona horaria local?"
+relatedLessons: ["postgresql.queries"]
+---
+
+## Contexto
+
+El equipo de soporte de un marketplace quiere avisar de forma proactiva a los clientes con **envíos demorados**, antes
+de que escriban preguntando por su pedido. Es una consulta típica de entrevista porque combina un filtro temporal, una
+búsqueda en una tabla de eventos y el manejo de `NULL`.
+
+Trabajás sobre el dataset del Database Lab (PostgreSQL real en tu navegador). Usá el explorador de esquema del
+[Database Lab](/database-lab) si necesitás ver las tablas.
+
+## Definición
+
+Un envío (`shipments`) está **demorado** al 2026-11-15 si:
+
+1. Tiene un evento `delivered` en `shipment_events` cuya fecha UTC es posterior a `promised_by`, o
+2. No tiene evento `delivered` y su `promised_by` es anterior al 2026-11-15.
+
+`delivered_on` es la fecha UTC de la entrega, o `NULL` si el envío no se entregó.
