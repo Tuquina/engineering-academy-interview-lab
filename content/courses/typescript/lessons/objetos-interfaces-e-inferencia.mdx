@@ -56,27 +56,27 @@ summary:
 
 ## ¿Qué problema resuelve?
 
-En C# o Java, para pasar datos entre capas se crea una clase o un `record`: `CustomerDto`, `DebtResponse`. En
+En C# o Java, para pasar datos entre capas se crea una clase o un `record`: `GuestDto`, `BookingResponse`. En
 TypeScript casi nunca se hace eso. Los datos son **objetos simples** (vienen de JSON, de la base de datos, de un
 formulario) y lo que se necesita es **describir su forma** para que el compilador ayude.
 
-Modelar bien esas formas tiene consecuencias directas: un estado de deuda tipado como `string` acepta `"pagado"`,
-`"Paid"` o `"pyd"`; tipado como `"pending" | "promised" | "paid"`, el compilador rechaza cualquier otro valor y el
+Modelar bien esas formas tiene consecuencias directas: un estado de reserva tipado como `string` acepta `"confirmada"`,
+`"Confirmed"` o `"cnfrmd"`; tipado como `"pending" | "confirmed" | "cancelled"`, el compilador rechaza cualquier otro valor y el
 editor autocompleta los válidos. Esta lección cubre las herramientas para lograrlo.
 
 ## interface y type
 
 ```ts
 // interface: describe la forma de un objeto
-interface Customer {
+interface Guest {
   id: string;
   name: string;
   email?: string;
 }
 
 // type alias: le da nombre a cualquier tipo
-type CustomerId = string;
-type DebtStatus = "pending" | "promised" | "paid";
+type GuestId = string;
+type BookingStatus = "pending" | "confirmed" | "cancelled";
 type Money = { amountCents: number; currency: "ARS" | "USD" };
 ```
 
@@ -98,13 +98,13 @@ interface Auditable {
 }
 
 // Extender con interface
-interface Debt extends Auditable {
+interface Booking extends Auditable {
   id: string;
-  status: DebtStatus;
+  status: BookingStatus;
 }
 
 // Componer con type (intersection)
-type DebtWithCustomer = Debt & { customer: Customer };
+type BookingWithGuest = Booking & { guest: Guest };
 ```
 
 **Declaration merging** permite ampliar un tipo declarado en otro lugar, por ejemplo para agregar propiedades a un
@@ -126,30 +126,30 @@ declare global {
 ## Propiedades opcionales y readonly
 
 ```ts
-interface PaymentPromise {
+interface RoomHold {
   readonly id: string; // no se puede reasignar a través de este tipo
-  debtId: string;
-  promisedFor: string;
+  roomId: string;
+  checkIn: string;
   note?: string; // puede no estar
 }
 
-const promise: PaymentPromise = { id: "pp_1", debtId: "debt_1", promisedFor: "2026-12-01" };
-promise.note = "Llamar a la mañana"; // ✅
-promise.id = "pp_2"; // ❌ Cannot assign to 'id' because it is a read-only property
+const hold: RoomHold = { id: "hold_1", roomId: "room_204", checkIn: "2026-12-01" };
+hold.note = "Llega tarde, después de las 23"; // ✅
+hold.id = "hold_2"; // ❌ Cannot assign to 'id' because it is a read-only property
 ```
 
 Tres matices importantes:
 
 1. **`readonly` sólo existe en compilación.** En runtime el objeto es mutable. Para congelarlo hace falta
    `Object.freeze`, que además es superficial.
-2. **Es superficial:** `readonly customer: Customer` impide reasignar `customer`, pero no `customer.name`.
-3. **Para arrays** se usa `readonly Debt[]` o `ReadonlyArray<Debt>`, que quita `push`, `sort` y el resto de los
+2. **Es superficial:** `readonly guest: Guest` impide reasignar `guest`, pero no `guest.name`.
+3. **Para arrays** se usa `readonly Booking[]` o `ReadonlyArray<Booking>`, que quita `push`, `sort` y el resto de los
    métodos que mutan. Es una buena práctica en parámetros: documenta que la función no modifica lo que recibe.
 
 ```ts
-function totalOf(debts: readonly Debt[]): number {
-  debts.push(); // ❌ Property 'push' does not exist on type 'readonly Debt[]'
-  return debts.length;
+function countBookings(bookings: readonly Booking[]): number {
+  bookings.push(); // ❌ Property 'push' does not exist on type 'readonly Booking[]'
+  return bookings.length;
 }
 ```
 
@@ -161,22 +161,22 @@ Con `exactOptionalPropertyTypes`, `note?: string` significa "puede faltar", y as
 
 ```ts
 // Index signature: cualquier clave string
-interface BalanceByCustomer {
-  [customerId: string]: number;
+interface FreeRoomsByDate {
+  [date: string]: number;
 }
 
 // Record: forma abreviada, muy usada
-type BalanceMap = Record<string, number>;
+type AvailabilityMap = Record<string, number>;
 
 // Record con claves finitas: obliga a definir todas
-const statusLabel: Record<DebtStatus, string> = {
-  pending: "Pendiente",
-  promised: "Con promesa de pago",
-  paid: "Pagada",
+const statusLabel: Record<BookingStatus, string> = {
+  pending: "Pendiente de pago",
+  confirmed: "Confirmada",
+  cancelled: "Cancelada",
 }; // si falta una clave o sobra otra, error de compilación
 
-const balances: BalanceMap = {};
-const balance = balances["cus_1"]; // number | undefined con noUncheckedIndexedAccess
+const availability: AvailabilityMap = {};
+const freeRooms = availability["2026-12-01"]; // number | undefined con noUncheckedIndexedAccess
 ```
 
 Para diccionarios dinámicos con muchas inserciones y borrados, `Map<string, number>` es mejor opción: tiene
@@ -184,7 +184,7 @@ Para diccionarios dinámicos con muchas inserciones y borrados, `Map<string, num
 
 ## Literal types y widening
 
-Un **literal type** es un tipo que admite un solo valor: `"paid"`, `42`, `true`. Por sí solos parecen inútiles; en
+Un **literal type** es un tipo que admite un solo valor: `"confirmed"`, `42`, `true`. Por sí solos parecen inútiles; en
 uniones son la forma idiomática de modelar conjuntos cerrados de valores (lo que en C# o Java sería un `enum`):
 
 ```ts
@@ -245,11 +245,11 @@ flowchart LR
 
 ```ts
 const routes = {
-  debts: "/debts",
-  promises: "/promises",
+  bookings: "/bookings",
+  rooms: "/rooms",
 } satisfies Record<string, `/${string}`>;
 
-routes.debts; // tipo "/debts": autocompletado de claves concretas
+routes.bookings; // tipo "/bookings": autocompletado de claves concretas
 routes.payments; // ❌ no existe: con una anotación Record<string, ...> habría compilado
 ```
 
@@ -258,18 +258,18 @@ routes.payments; // ❌ no existe: con una anotación Record<string, ...> habrí
 TypeScript tiene `enum`, pero la mayoría de los equipos prefiere uniones de literales:
 
 ```ts
-enum DebtStatusEnum {
+enum BookingStatusEnum {
   Pending = "pending",
-  Paid = "paid",
+  Confirmed = "confirmed",
 }
 
-type DebtStatusUnion = "pending" | "paid";
-const DEBT_STATUSES = ["pending", "paid"] as const; // si además necesitás iterar los valores
-type DebtStatusFromArray = (typeof DEBT_STATUSES)[number]; // "pending" | "paid"
+type BookingStatusUnion = "pending" | "confirmed";
+const BOOKING_STATUSES = ["pending", "confirmed"] as const; // si además necesitás iterar los valores
+type BookingStatusFromArray = (typeof BOOKING_STATUSES)[number]; // "pending" | "confirmed"
 ```
 
 Razones: un `enum` genera código en runtime (no es borrable), los enums numéricos aceptan cualquier número y los
-valores de un JSON (`"paid"`) no son asignables a un enum sin conversión. La unión de literales no tiene ninguno de
+valores de un JSON (`"confirmed"`) no son asignables a un enum sin conversión. La unión de literales no tiene ninguno de
 esos problemas.
 
 ## Funciones como tipos
@@ -314,7 +314,7 @@ ser más claras. Una sola implementación recibe todas las variantes, porque en 
 - **Usar `as const` para todo.** Convierte todo en readonly y literal; está bien para constantes, no para objetos que
   después vas a modificar.
 - **Anotar configuraciones con `Record<string, X>`.** Perdés la verificación de claves concretas; usá `satisfies`.
-- **Confiar en que una propiedad de un index signature existe.** Sin `noUncheckedIndexedAccess`, `balances[id]` se
+- **Confiar en que una propiedad de un index signature existe.** Sin `noUncheckedIndexedAccess`, `availability[date]` se
   tipa como `number` aunque la clave no exista.
 - **Usar enums numéricos.** `enum Level { Low, High }` acepta `Level = 99` sin error.
 
@@ -372,7 +372,7 @@ ser más claras. Una sola implementación recibe todas las variantes, porque en 
       explanation: "Las clases pueden implementar interfaces y también types de objeto.",
     },
     {
-      text: "Representar una unión como `'pending' | 'paid'`.",
+      text: "Representar una unión como `'pending' | 'confirmed'`.",
       correct: true,
       explanation: "Correcto. Uniones, tuplas, primitivos y tipos derivados sólo se expresan con type.",
     },

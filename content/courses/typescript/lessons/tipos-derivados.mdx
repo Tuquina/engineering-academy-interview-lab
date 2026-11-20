@@ -49,34 +49,34 @@ summary:
   - "Un mapped type recorre claves: { [K in keyof T]: T[K] }, con modificadores +/- readonly y ?."
   - "Un conditional type es un if en el espacio de tipos: T extends U ? X : Y; sobre uniones se distribuye."
   - "infer captura una parte del tipo durante el pattern matching."
-  - "Los template literal types tipan strings con formato, como 'debt_${string}' o nombres de eventos."
+  - "Los template literal types tipan strings con formato, como 'shp_${string}' o nombres de eventos."
   - "Si nadie del equipo puede leer un tipo, el tipo es deuda técnica."
 ---
 
 ## ¿Qué problema resuelve?
 
-En una API de deudas hay varias formas del mismo concepto: la entidad completa, el body para crearla (sin `id` ni
+En una API de envíos hay varias formas del mismo concepto: la entidad completa, el body para crearla (sin `id` ni
 fechas), el body para actualizarla (todo opcional) y la vista pública (sin datos internos). En C# o Java se
 escriben cuatro clases y se mantienen sincronizadas a mano, con AutoMapper o MapStruct en el medio.
 
 En TypeScript se escribe **un tipo** y se **derivan** los demás:
 
 ```ts
-interface Debt {
+interface Shipment {
   id: string;
-  customerId: string;
-  amountCents: number;
-  status: "pending" | "paid";
-  internalScore: number;
+  orderId: string;
+  weightGrams: number;
+  status: "created" | "in_transit" | "delivered";
+  internalCostCents: number;
   createdAt: string;
 }
 
-type CreateDebtInput = Omit<Debt, "id" | "status" | "createdAt" | "internalScore">;
-type UpdateDebtInput = Partial<Pick<Debt, "amountCents" | "status">>;
-type PublicDebt = Omit<Debt, "internalScore">;
+type CreateShipmentInput = Omit<Shipment, "id" | "status" | "createdAt" | "internalCostCents">;
+type UpdateShipmentInput = Partial<Pick<Shipment, "weightGrams" | "status">>;
+type PublicShipment = Omit<Shipment, "internalCostCents">;
 ```
 
-Si mañana `Debt` agrega un campo, los tipos derivados lo reflejan solos. Esta lección explica cómo funcionan esas
+Si mañana `Shipment` agrega un campo, los tipos derivados lo reflejan solos. Esta lección explica cómo funcionan esas
 herramientas para poder usarlas y, cuando haga falta, escribir las propias.
 
 ## Utility types de la librería estándar
@@ -89,20 +89,20 @@ herramientas para poder usarlas y, cuando haga falta, escribir las propias.
 | `Pick<T, K>`     | Sólo las claves K                               | Vista reducida                           |
 | `Omit<T, K>`     | Todas menos K                                   | Input sin `id`                           |
 | `Record<K, V>`   | Objeto con claves K y valores V                 | Diccionarios, tablas por estado          |
-| `Exclude<U, X>`  | Quita de la unión U los miembros asignables a X | `Exclude<Status, "paid">`                |
-| `Extract<U, X>`  | Conserva los miembros asignables a X            | `Extract<Debt, { status: "paid" }>`      |
+| `Exclude<U, X>`  | Quita de la unión U los miembros asignables a X | `Exclude<Status, "delivered">`           |
+| `Extract<U, X>`  | Conserva los miembros asignables a X            | `Extract<Event, { type: "delivered" }>`  |
 | `NonNullable<T>` | Quita `null` y `undefined`                      | Después de validar                       |
 | `ReturnType<F>`  | Tipo de retorno de una función                  | Tipo de un factory                       |
 | `Parameters<F>`  | Tupla de parámetros                             | Wrappers y decoradores                   |
 | `Awaited<T>`     | Desenvuelve Promises (recursivamente)           | Resultado de una función async           |
 
 ```ts
-async function loadDashboard(customerId: string) {
-  return { debts: [] as Debt[], balanceCents: 0 };
+async function loadDashboard(carrierId: string) {
+  return { shipments: [] as Shipment[], delayedCount: 0 };
 }
 
-type Dashboard = Awaited<ReturnType<typeof loadDashboard>>; // { debts: Debt[]; balanceCents: number }
-type LoadArgs = Parameters<typeof loadDashboard>; // [customerId: string]
+type Dashboard = Awaited<ReturnType<typeof loadDashboard>>; // { shipments: Shipment[]; delayedCount: number }
+type LoadArgs = Parameters<typeof loadDashboard>; // [carrierId: string]
 ```
 
 ## Mapped types
@@ -125,9 +125,9 @@ type Validators<T> = {
   [K in keyof T]: (value: T[K]) => string | null; // null = válido; string = mensaje de error
 };
 
-const debtValidators: Validators<Pick<Debt, "amountCents" | "customerId">> = {
-  amountCents: (value) => (value > 0 ? null : "El monto debe ser positivo"),
-  customerId: (value) => (value.startsWith("cus_") ? null : "ID de cliente inválido"),
+const shipmentValidators: Validators<Pick<Shipment, "weightGrams" | "orderId">> = {
+  weightGrams: (value) => (value > 0 ? null : "El peso debe ser positivo"),
+  orderId: (value) => (value.startsWith("ord_") ? null : "ID de pedido inválido"),
 };
 ```
 
@@ -136,7 +136,7 @@ const debtValidators: Validators<Pick<Debt, "amountCents" | "customerId">> = {
 Con `as` se puede **renombrar** o **filtrar** claves:
 
 ```ts
-// Generar nombres de getters: { getAmountCents: () => number; ... }
+// Generar nombres de getters: { getWeightGrams: () => number; ... }
 type Getters<T> = {
   [K in keyof T as `get${Capitalize<string & K>}`]: () => T[K];
 };
@@ -168,10 +168,10 @@ miembro por separado** y los resultados se unen. Así funciona `Exclude`:
 ```ts
 type MyExclude<T, U> = T extends U ? never : T;
 
-type Status = "pending" | "promised" | "paid";
-type Open = MyExclude<Status, "paid">;
-// = ("pending" extends "paid" ? never : "pending") | ("promised" extends ...) | ("paid" extends ...)
-// = "pending" | "promised"
+type Status = "created" | "in_transit" | "delivered";
+type Pending = MyExclude<Status, "delivered">;
+// = ("created" extends "delivered" ? never : "created") | ("in_transit" extends ...) | ("delivered" extends ...)
+// = "created" | "in_transit"
 ```
 
 Para evitar la distribución se envuelve en una tupla: `[T] extends [U] ? X : Y`.
@@ -180,10 +180,10 @@ Para evitar la distribución se envuelve en una tupla: `[T] extends [U] ? X : Y`
   caption="Un conditional type distributivo procesa cada miembro de la unión por separado y une los resultados."
   chart={`
 flowchart LR
-  U["'pending' | 'promised' | 'paid'"] --> P1["'pending' extends 'paid'?<br/>no: 'pending'"]
-  U --> P2["'promised' extends 'paid'?<br/>no: 'promised'"]
-  U --> P3["'paid' extends 'paid'?<br/>sí: never"]
-  P1 --> R["'pending' | 'promised'"]
+  U["'created' | 'in_transit' | 'delivered'"] --> P1["'created' extends 'delivered'?<br/>no: 'created'"]
+  U --> P2["'in_transit' extends 'delivered'?<br/>no: 'in_transit'"]
+  U --> P3["'delivered' extends 'delivered'?<br/>sí: never"]
+  P1 --> R["'created' | 'in_transit'"]
   P2 --> R
   P3 --> R
 `}
@@ -198,7 +198,7 @@ type MyReturnType<F> = F extends (...args: never[]) => infer R ? R : never;
 type ElementOf<T> = T extends readonly (infer E)[] ? E : never;
 type UnwrapPromise<T> = T extends Promise<infer V> ? V : T;
 
-type E = ElementOf<Debt[]>; // Debt
+type E = ElementOf<Shipment[]>; // Shipment
 type V = UnwrapPromise<Promise<number>>; // number
 ```
 
@@ -206,15 +206,15 @@ Un ejemplo útil en la práctica: obtener el tipo del payload de un evento a par
 
 ```ts
 type DomainEvent =
-  | { type: "debt.created"; payload: { debtId: string; amountCents: number } }
-  | { type: "payment.received"; payload: { debtId: string; paidCents: number } };
+  | { type: "shipment.created"; payload: { shipmentId: string; carrierId: string } }
+  | { type: "shipment.delivered"; payload: { shipmentId: string; deliveredAt: string } };
 
 type EventPayload<T extends DomainEvent["type"]> = Extract<DomainEvent, { type: T }>["payload"];
 
 function on<T extends DomainEvent["type"]>(type: T, handler: (payload: EventPayload<T>) => void) {}
 
-on("payment.received", (payload) => {
-  payload.paidCents; // ✅ el handler conoce el payload exacto
+on("shipment.delivered", (payload) => {
+  payload.deliveredAt; // ✅ el handler conoce el payload exacto
 });
 ```
 
@@ -223,13 +223,13 @@ on("payment.received", (payload) => {
 Permiten tipar strings con estructura, combinando literales y uniones:
 
 ```ts
-type DebtId = `debt_${string}`;
+type ShipmentId = `shp_${string}`;
 type Channel = "sms" | "email";
 type ChannelEvent = `${Channel}.${"sent" | "delivered" | "failed"}`;
 // "sms.sent" | "sms.delivered" | "sms.failed" | "email.sent" | ...
 
-const id: DebtId = "debt_123"; // ✅
-const wrong: DebtId = "cus_123"; // ❌
+const id: ShipmentId = "shp_123"; // ✅
+const wrong: ShipmentId = "ord_123"; // ❌
 
 type EnvKey = Uppercase<`app_${"db_url" | "api_key"}`>; // "APP_DB_URL" | "APP_API_KEY"
 ```
@@ -237,7 +237,7 @@ type EnvKey = Uppercase<`app_${"db_url" | "api_key"}`>; // "APP_DB_URL" | "APP_A
 `Uppercase`, `Lowercase`, `Capitalize` y `Uncapitalize` son utility types intrínsecos para strings.
 
 <Callout type="warning" title="Un template literal type no valida en runtime">
-  `debt_${string}` sólo verifica strings que el compilador conoce. Un ID que llega por HTTP sigue siendo
+  `shp_${string}` sólo verifica strings que el compilador conoce. Un ID que llega por HTTP sigue siendo
   `unknown` hasta que lo validás.
 </Callout>
 
@@ -247,7 +247,7 @@ Los tipos derivados son código: tienen costo de lectura, de mensajes de error y
 
 - **Sí:** derivar inputs de una entidad, mapear eventos a payloads, tablas `Record` por estado, tipar claves de
   configuración.
-- **Con cuidado:** tipos recursivos profundos (rutas de objetos anidados como `"customer.address.city"`), que
+- **Con cuidado:** tipos recursivos profundos (rutas de objetos anidados como `"recipient.address.city"`), que
   generan errores ilegibles y compilación lenta.
 - **No:** reimplementar lógica de negocio en el sistema de tipos. Si un test en runtime lo cubre de forma más
   simple, preferí el test.
@@ -270,7 +270,7 @@ el compilador, sin generar nada, porque su sistema de tipos es estructural y pue
 
 ## Errores frecuentes
 
-- **Typos en `Omit`.** `Omit<Debt, "internalScor">` compila sin error y no quita nada. Un tipo propio
+- **Typos en `Omit`.** `Omit<Shipment, "internalCostCent">` compila sin error y no quita nada. Un tipo propio
   `StrictOmit<T, K extends keyof T>` lo previene.
 - **Usar `Omit` sobre una discriminated union.** Colapsa los miembros en uno solo y se pierde el narrowing. Se
   resuelve con una versión distributiva: `type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never`.
@@ -284,10 +284,10 @@ el compilador, sin generar nada, porque su sistema de tipos es estructural y pue
 
 <KnowledgeCheck
   id="typescript.type-transformations.q1"
-  question="¿Qué resultado da `Exclude<'pending' | 'promised' | 'paid', 'paid' | 'promised'>`?"
+  question="¿Qué resultado da `Exclude<'created' | 'in_transit' | 'delivered', 'delivered' | 'in_transit'>`?"
   options={[
     {
-      text: "`'pending'`",
+      text: "`'created'`",
       correct: true,
       explanation:
         "Correcto. El condicional se distribuye sobre cada miembro y descarta los asignables a la segunda unión.",
@@ -296,7 +296,7 @@ el compilador, sin generar nada, porque su sistema de tipos es estructural y pue
       text: "`never`",
       explanation: "Sólo sería never si todos los miembros fueran asignables a la segunda unión.",
     },
-    { text: "`'paid' | 'promised'`", explanation: "Eso es lo que devolvería Extract." },
+    { text: "`'delivered' | 'in_transit'`", explanation: "Eso es lo que devolvería Extract." },
   ]}
 />
 

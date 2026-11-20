@@ -198,13 +198,13 @@ El archivo `tsconfig.json` configura el compilador. Para un proyecto nuevo, este
 ### Primitivos
 
 ```ts
-const customerName: string = "Ana Pérez";
-const amountCents: number = 150_000; // separador numérico, igual que en C# y Java
-const isOverdue: boolean = true;
+const productName: string = "Zapatillas running";
+const priceCents: number = 150_000; // separador numérico, igual que en C# y Java
+const inStock: boolean = true;
 const bigBalance: bigint = 9_007_199_254_740_993n; // enteros arbitrariamente grandes
 const notAssigned: undefined = undefined;
 const intentionallyEmpty: null = null;
-const uniqueKey: symbol = Symbol("debt");
+const uniqueKey: symbol = Symbol("cart");
 ```
 
 Las diferencias con C# y Java que más sorprenden:
@@ -221,16 +221,16 @@ Las diferencias con C# y Java que más sorprenden:
 ### Arrays, tuplas y objetos
 
 ```ts
-const amounts: number[] = [1000, 2500, 4000];
+const prices: number[] = [1000, 2500, 4000];
 const sameThing: Array<number> = [1000, 2500, 4000]; // sintaxis genérica equivalente
 
 // Tupla: largo y tipo por posición fijos
 const range: [start: string, end: string] = ["2026-01-01", "2026-01-31"];
 
 // Tipo de objeto en línea
-const debt: { id: string; amountCents: number; paidAt?: string } = {
-  id: "debt_1",
-  amountCents: 150_000,
+const product: { sku: string; priceCents: number; discountedAt?: string } = {
+  sku: "SKU-1",
+  priceCents: 150_000,
 };
 ```
 
@@ -239,13 +239,13 @@ la forma correcta **sin declarar ninguna clase**: esa es la forma más común de
 darle nombre a una forma se usa `interface` o `type`:
 
 ```ts
-interface Debt {
-  id: string;
-  amountCents: number;
-  paidAt?: string; // opcional: puede no estar
+interface CartItem {
+  sku: string;
+  priceCents: number;
+  couponCode?: string; // opcional: puede no estar
 }
 
-const debts: Debt[] = [{ id: "debt_1", amountCents: 150_000 }];
+const cart: CartItem[] = [{ sku: "SKU-1", priceCents: 150_000 }];
 ```
 
 ### Funciones
@@ -257,8 +257,8 @@ function formatAmount(amountCents: number, currency: string = "ARS"): string {
 }
 
 // Función que no devuelve nada útil
-function logDebt(debt: Debt): void {
-  console.log(debt.id);
+function logItem(item: CartItem): void {
+  console.log(item.sku);
 }
 
 // Tipo de una función, útil para callbacks

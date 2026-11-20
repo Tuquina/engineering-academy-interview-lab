@@ -31,7 +31,7 @@ references:
 interviewQuestions:
   - question: "¿Cuándo usarías excepciones y cuándo un tipo Result?"
     keyPoints:
-      - "Result para errores esperables del dominio que el llamador debe manejar (saldo insuficiente, promesa inválida)."
+      - "Result para errores esperables del dominio que el llamador debe manejar (stock insuficiente, cupón vencido)."
       - "Excepciones para fallas inesperadas o de infraestructura que no se pueden manejar localmente."
       - "Result hace visible el error en la firma y el compilador obliga a manejarlo; TypeScript no tiene excepciones chequeadas."
       - "No mezclar: una función que devuelve Result no debería lanzar por errores de negocio."
@@ -60,7 +60,7 @@ summary:
 ## ¿Qué problema resuelve?
 
 Las lecciones anteriores cubrieron el lenguaje. Esta cubre **cómo se diseña** con él. Quien viene de C# o Java
-suele hacer una de dos cosas: replicar todo el andamiaje del ecosistema (`IDebtService`, `DebtServiceImpl`,
+suele hacer una de dos cosas: replicar todo el andamiaje del ecosistema (`ICartService`, `CartServiceImpl`,
 contenedores de DI con decoradores, clases para todo) o, al revés, abandonar toda estructura porque "en JavaScript
 se hace así". Ninguna de las dos escala.
 
@@ -74,24 +74,24 @@ Organizá por **funcionalidad** (lo que el sistema hace), no por tipo técnico:
 ```text
 src/
   modules/
-    debts/
+    cart/
       domain/          entidades, reglas puras, tipos
       application/     casos de uso; definen los puertos que necesitan
       infrastructure/  implementaciones: Postgres, HTTP, colas
       index.ts         API pública del módulo
+    orders/
     payments/
-    notifications/
   infrastructure/
     composition/       crea y conecta las implementaciones
 ```
 
 Reglas que mantienen esto sano:
 
-- **API pública explícita:** otros módulos importan desde `modules/debts` (su `index.ts`), no desde archivos
+- **API pública explícita:** otros módulos importan desde `modules/cart` (su `index.ts`), no desde archivos
   internos.
 - **Dependencias hacia el dominio:** `domain` no importa nada de `infrastructure`; `infrastructure` sí importa del
   dominio.
-- **Sin ciclos:** si `debts` importa de `payments` y `payments` de `debts`, falta un concepto o un evento en el
+- **Sin ciclos:** si `orders` importa de `payments` y `payments` de `orders`, falta un concepto o un evento en el
   medio. Herramientas como `dependency-cruiser` o reglas de lint lo verifican.
 - **Cuidado con los barrels gigantes:** un `index.ts` que reexporta todo un proyecto empeora los tiempos de build y
   favorece los ciclos. Un barrel por módulo, con lo que es realmente público, está bien.
@@ -106,29 +106,25 @@ escribe en la base, no muta sus argumentos).
 
 ```ts
 // ❌ Impura: lee el reloj, muta el argumento y escribe en la base
-async function registerPromise(debt: Debt, promisedFor: string): Promise<void> {
-  if (new Date(promisedFor) < new Date()) throw new Error("Fecha pasada");
-  debt.status = "promised";
-  debt.promisedFor = promisedFor;
-  await db.debts.update(debt);
+async function registerCoupon(cart: Cart, coupon: Coupon): Promise<void> {
+  if (new Date(coupon.expiresAt) < new Date()) throw new Error("Cupón vencido");
+  cart.couponCode = coupon.code;
+  cart.discountPct = coupon.discountPct;
+  await db.carts.update(cart);
 }
 
-// ✅ Núcleo puro: recibe el "ahora" y devuelve un estado nuevo
-type PromiseError = { kind: "date_in_past" } | { kind: "already_paid" };
+// ✅ Núcleo puro: recibe el "ahora" y devuelve un carrito nuevo
+type CouponError = { kind: "coupon_expired" } | { kind: "cart_checked_out" };
 
-function promisePayment(
-  debt: Debt,
-  promisedFor: string,
-  now: Date,
-): Result<Extract<Debt, { status: "promised" }>, PromiseError> {
-  if (debt.status === "paid") return err({ kind: "already_paid" });
-  if (new Date(promisedFor) < now) return err({ kind: "date_in_past" });
-  return ok({ ...debt, status: "promised", promisedFor });
+function applyCoupon(cart: Cart, coupon: Coupon, now: Date): Result<Cart, CouponError> {
+  if (cart.status === "checked_out") return err({ kind: "cart_checked_out" });
+  if (new Date(coupon.expiresAt) < now) return err({ kind: "coupon_expired" });
+  return ok({ ...cart, couponCode: coupon.code, discountPct: coupon.discountPct });
 }
 ```
 
 La versión pura se testea con una línea, sin base de datos ni fechas falsas globales. El caso de uso que la llama
-se encarga de los efectos: leer la deuda, obtener la hora, persistir el resultado.
+se encarga de los efectos: leer el carrito y el cupón, obtener la hora, persistir el resultado.
 
 <MermaidDiagram
   caption="Núcleo funcional, cáscara imperativa: la lógica pura en el centro y los efectos en el borde."
@@ -137,14 +133,14 @@ flowchart LR
   H["Handler HTTP"] --> U["Caso de uso<br/>orquesta efectos"]
   U -->|"lee"| R["Repositorio<br/>puerto"]
   U -->|"now()"| CL["Reloj<br/>puerto"]
-  U --> P["promisePayment<br/>función pura"]
+  U --> P["applyCoupon<br/>función pura"]
   P -->|"Result"| U
   U -->|"guarda"| R
-  R -.->|"implementa"| DB["PostgresDebtRepository"]
+  R -.->|"implementa"| DB["PostgresCartRepository"]
 `}
 />
 
-Para no mutar, se usan copias (`{ ...debt, status }`), `readonly` en los tipos y métodos no mutantes (`toSorted`,
+Para no mutar, se usan copias (`{ ...cart, couponCode }`), `readonly` en los tipos y métodos no mutantes (`toSorted`,
 `map`, `filter`). La inmutabilidad no es dogma: dentro de una función, mutar una variable local es perfectamente
 razonable; lo que se evita es mutar **lo que recibiste o lo compartido**.
 
@@ -154,47 +150,56 @@ El caso de uso define **qué necesita** con interfaces; la infraestructura las i
 
 ```ts
 // application/ports.ts: el caso de uso define lo que necesita
-export interface DebtRepository {
-  findById(id: DebtId): Promise<Debt | undefined>;
-  save(debt: Debt): Promise<void>;
+export interface CartRepository {
+  findById(id: CartId): Promise<Cart | undefined>;
+  save(cart: Cart): Promise<void>;
+}
+
+export interface CouponRepository {
+  findByCode(code: string): Promise<Coupon | undefined>;
 }
 
 export interface Clock {
   now(): Date;
 }
 
-// application/promise-payment.ts
-export class PromisePaymentUseCase {
+// application/apply-coupon.ts
+export class ApplyCouponUseCase {
   constructor(
-    private readonly debts: DebtRepository,
+    private readonly carts: CartRepository,
+    private readonly coupons: CouponRepository,
     private readonly clock: Clock,
   ) {}
 
   async execute(input: {
-    debtId: DebtId;
-    promisedFor: string;
-  }): Promise<Result<void, PromiseError | { kind: "not_found" }>> {
-    const debt = await this.debts.findById(input.debtId);
-    if (!debt) return err({ kind: "not_found" });
+    cartId: CartId;
+    couponCode: string;
+  }): Promise<Result<void, CouponError | { kind: "cart_not_found" } | { kind: "coupon_not_found" }>> {
+    const cart = await this.carts.findById(input.cartId);
+    if (!cart) return err({ kind: "cart_not_found" });
+    const coupon = await this.coupons.findByCode(input.couponCode);
+    if (!coupon) return err({ kind: "coupon_not_found" });
 
-    const result = promisePayment(debt, input.promisedFor, this.clock.now());
+    const result = applyCoupon(cart, coupon, this.clock.now());
     if (!result.ok) return result;
 
-    await this.debts.save(result.value);
+    await this.carts.save(result.value);
     return ok(undefined);
   }
 }
 
-// infrastructure/composition/debts.ts: el composition root
-export function createDebtModule(db: Database) {
+// infrastructure/composition/cart.ts: el composition root
+export function createCartModule(db: Database) {
   return {
-    promisePayment: new PromisePaymentUseCase(new PostgresDebtRepository(db), { now: () => new Date() }),
+    applyCoupon: new ApplyCouponUseCase(new PostgresCartRepository(db), new PostgresCouponRepository(db), {
+      now: () => new Date(),
+    }),
   };
 }
 ```
 
 No hacen falta decoradores ni contenedores: el constructor **es** la inyección. Si preferís un estilo funcional,
-una función fábrica (`createPromisePayment({ debts, clock })`) que devuelve una función cumple el mismo rol.
+una función fábrica (`createApplyCoupon({ carts, coupons, clock })`) que devuelve una función cumple el mismo rol.
 
 ## Errores esperables: el tipo Result
 
@@ -209,16 +214,17 @@ export const err = <E>(error: E): Result<never, E> => ({ ok: false, error });
 ```
 
 ```ts
-const result = await promisePaymentUseCase.execute({ debtId, promisedFor });
+const result = await applyCouponUseCase.execute({ cartId, couponCode });
 
 if (!result.ok) {
   switch (result.error.kind) {
-    case "not_found":
-      return Response.json({ error: "debt_not_found" }, { status: 404 });
-    case "already_paid":
-      return Response.json({ error: "debt_already_paid" }, { status: 409 });
-    case "date_in_past":
-      return Response.json({ error: "promised_date_in_past" }, { status: 422 });
+    case "cart_not_found":
+    case "coupon_not_found":
+      return Response.json({ error: result.error.kind }, { status: 404 });
+    case "cart_checked_out":
+      return Response.json({ error: "cart_already_checked_out" }, { status: 409 });
+    case "coupon_expired":
+      return Response.json({ error: "coupon_expired" }, { status: 422 });
   }
 }
 return new Response(null, { status: 204 });
@@ -226,7 +232,7 @@ return new Response(null, { status: 204 });
 
 | Situación                                    | Mecanismo                               |
 | -------------------------------------------- | --------------------------------------- |
-| Regla de negocio no cumplida (saldo, estado) | `Result` con un error tipado            |
+| Regla de negocio no cumplida (stock, estado) | `Result` con un error tipado            |
 | Dato de entrada inválido                     | Parseo en el límite (esquema) → 4xx     |
 | Falla de infraestructura (DB caída, timeout) | Excepción; se captura en el borde → 5xx |
 | Bug (estado imposible, invariante rota)      | Excepción; se registra y se alerta      |
@@ -240,22 +246,23 @@ Vitest es el runner estándar en proyectos con Vite o TypeScript moderno; su API
 ```ts
 import { describe, expect, it } from "vitest";
 
-describe("promisePayment", () => {
+describe("applyCoupon", () => {
   const now = new Date("2026-11-19T10:00:00Z");
-  const pending: Debt = { id: "debt_1" as DebtId, status: "pending", amountCents: 10_000 };
+  const cart: Cart = { id: "cart_1" as CartId, status: "open", items: [] };
+  const blackFriday: Coupon = { code: "BF2026", discountPct: 20, expiresAt: "2026-12-01T00:00:00Z" };
 
-  it("registra la promesa si la fecha es futura", () => {
-    const result = promisePayment(pending, "2026-12-01", now);
-    expect(result).toEqual({
+  it("aplica un cupón vigente", () => {
+    expect(applyCoupon(cart, blackFriday, now)).toEqual({
       ok: true,
-      value: { ...pending, status: "promised", promisedFor: "2026-12-01" },
+      value: { ...cart, couponCode: "BF2026", discountPct: 20 },
     });
   });
 
-  it("rechaza fechas pasadas", () => {
-    expect(promisePayment(pending, "2026-11-01", now)).toEqual({
+  it("rechaza cupones vencidos", () => {
+    const expired = { ...blackFriday, expiresAt: "2026-11-01T00:00:00Z" };
+    expect(applyCoupon(cart, expired, now)).toEqual({
       ok: false,
-      error: { kind: "date_in_past" },
+      error: { kind: "coupon_expired" },
     });
   });
 });
@@ -264,24 +271,25 @@ describe("promisePayment", () => {
 Para el caso de uso, en lugar de mockear cada método, se usa un **fake en memoria** que implementa el puerto:
 
 ```ts
-class InMemoryDebtRepository implements DebtRepository {
-  readonly items = new Map<string, Debt>();
-  async findById(id: DebtId) {
+class InMemoryCartRepository implements CartRepository {
+  readonly items = new Map<string, Cart>();
+  async findById(id: CartId) {
     return this.items.get(id);
   }
-  async save(debt: Debt) {
-    this.items.set(debt.id, debt);
+  async save(cart: Cart) {
+    this.items.set(cart.id, cart);
   }
 }
 
-it("persiste la deuda con la promesa", async () => {
-  const debts = new InMemoryDebtRepository();
-  debts.items.set("debt_1", pending);
-  const useCase = new PromisePaymentUseCase(debts, { now: () => now });
+it("guarda el carrito con el cupón aplicado", async () => {
+  const carts = new InMemoryCartRepository();
+  carts.items.set("cart_1", cart);
+  const coupons = { findByCode: async () => blackFriday };
+  const useCase = new ApplyCouponUseCase(carts, coupons, { now: () => now });
 
-  await useCase.execute({ debtId: "debt_1" as DebtId, promisedFor: "2026-12-01" });
+  await useCase.execute({ cartId: "cart_1" as CartId, couponCode: "BF2026" });
 
-  expect(debts.items.get("debt_1")?.status).toBe("promised"); // se verifica el estado, no las llamadas
+  expect(carts.items.get("cart_1")?.couponCode).toBe("BF2026"); // se verifica el estado, no las llamadas
 });
 ```
 
@@ -301,7 +309,7 @@ unión produce errores en todos los lugares afectados. Algunos anti-patterns fre
 
 | Anti-pattern                                                   | Por qué molesta en TypeScript                | Alternativa                                |
 | -------------------------------------------------------------- | -------------------------------------------- | ------------------------------------------ |
-| `IDebtService` + `DebtServiceImpl` con una sola implementación | Ceremonia sin beneficio                      | Interface sólo donde hay un puerto real    |
+| `ICartService` + `CartServiceImpl` con una sola implementación | Ceremonia sin beneficio                      | Interface sólo donde hay un puerto real    |
 | Clases sólo con métodos estáticos                              | Un módulo ya agrupa funciones                | Funciones exportadas                       |
 | Getters y setters triviales                                    | Ruido; las propiedades ya son accesibles     | Propiedades `readonly` o públicas          |
 | DTO = entidad = fila de la base                                | Acopla API, dominio y persistencia           | Tipos por capa con mapeo en los límites    |
@@ -338,14 +346,14 @@ compilador, los tipos recursivos profundos y los barrels gigantes son los que al
 
 <KnowledgeCheck
   id="typescript.design-errors-testing.q1"
-  question="Un caso de uso puede fallar porque la deuda ya está pagada. ¿Cómo conviene representarlo en TypeScript?"
+  question="Un caso de uso puede fallar porque no hay stock suficiente de un producto. ¿Cómo conviene representarlo en TypeScript?"
   options={[
     {
-      text: "Lanzando `new Error('already paid')`.",
+      text: "Lanzando `new Error('out of stock')`.",
       explanation: "Funciona, pero el error es invisible en la firma y el compilador no obliga a manejarlo.",
     },
     {
-      text: "Devolviendo un `Result` con un error `{ kind: 'already_paid' }`.",
+      text: "Devolviendo un `Result` con un error `{ kind: 'out_of_stock' }`.",
       correct: true,
       explanation:
         "Correcto. Es un error esperable del negocio: la firma lo declara y el switch sobre kind es exhaustivo.",
@@ -359,7 +367,7 @@ compilador, los tipos recursivos profundos y los barrels gigantes son los que al
 
 <KnowledgeCheck
   id="typescript.design-errors-testing.q2"
-  question="¿Por qué conviene que `promisePayment` reciba `now: Date` como parámetro en lugar de llamar a `new Date()`?"
+  question="¿Por qué conviene que `applyCoupon` reciba `now: Date` como parámetro en lugar de llamar a `new Date()`?"
   options={[
     {
       text: "Por performance: crear fechas es costoso.",

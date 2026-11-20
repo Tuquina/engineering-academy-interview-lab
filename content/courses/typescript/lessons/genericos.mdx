@@ -62,8 +62,8 @@ function firstAny(items: any[]): any {
   return items[0]; // perdés el tipo: todo lo que toques después es any
 }
 
-function firstDebt(items: Debt[]): Debt | undefined {
-  return items[0]; // correcto, pero hay que repetirla para Customer, Payment...
+function firstMember(items: Member[]): Member | undefined {
+  return items[0]; // correcto, pero hay que repetirla para Organization, Invoice...
 }
 ```
 
@@ -74,7 +74,7 @@ function first<T>(items: readonly T[]): T | undefined {
   return items[0];
 }
 
-const debt = first(debts); // Debt | undefined (T se infiere como Debt)
+const member = first(members); // Member | undefined (T se infiere como Member)
 const name = first(["Ana", "Luis"]); // string | undefined
 ```
 
@@ -110,15 +110,15 @@ class InMemoryRepository<T extends { id: string }> implements Repository<T> {
   }
 }
 
-const debtRepository = new InMemoryRepository<Debt>();
+const memberRepository = new InMemoryRepository<Member>();
 ```
 
-`Id = string` es un **valor por defecto**: `Repository<Debt>` equivale a `Repository<Debt, string>`.
+`Id = string` es un **valor por defecto**: `Repository<Member>` equivale a `Repository<Member, string>`.
 
 ### Inferencia de argumentos genéricos
 
-Casi nunca hace falta escribir `<Debt>` al llamar una función: el compilador infiere `T` desde los argumentos.
-Sólo se escribe cuando no hay nada de dónde inferir (como en `new InMemoryRepository<Debt>()`, que no recibe
+Casi nunca hace falta escribir `<Member>` al llamar una función: el compilador infiere `T` desde los argumentos.
+Sólo se escribe cuando no hay nada de dónde inferir (como en `new InMemoryRepository<Member>()`, que no recibe
 argumentos) o cuando la inferencia da un tipo más amplio que el deseado.
 
 Para que la inferencia conserve literales en lugar de ensancharlos, existen los **const type parameters**:
@@ -145,12 +145,12 @@ function indexById<T extends HasId>(items: readonly T[]): Map<string, T> {
   return new Map(items.map((item) => [item.id, item]));
 }
 
-indexById(debts); // ✅ Debt tiene id
+indexById(members); // ✅ Member tiene id
 indexById([{ id: "x", extra: true }]); // ✅ cualquier objeto con id
 indexById([1, 2, 3]); // ❌ number no tiene id
 ```
 
-En C# esto sería `where T : IHasId` y requeriría que `Debt` implemente `IHasId`. En TypeScript, cualquier objeto
+En C# esto sería `where T : IHasId` y requeriría que `Member` implemente `IHasId`. En TypeScript, cualquier objeto
 con `id: string` cumple la restricción.
 
 ## keyof, typeof e indexed access
@@ -158,16 +158,16 @@ con `id: string` cumple la restricción.
 Tres operadores que trabajan **en el espacio de tipos** y permiten derivar un tipo de otro.
 
 ```ts
-interface Customer {
+interface Organization {
   id: string;
   name: string;
-  segment: "retail" | "sme";
-  balanceCents: number;
+  plan: "free" | "pro" | "enterprise";
+  seats: number;
 }
 
-type CustomerKey = keyof Customer; // "id" | "name" | "segment" | "balanceCents"
-type Segment = Customer["segment"]; // "retail" | "sme"   (indexed access)
-type IdOrName = Customer["id" | "name"]; // string
+type OrganizationKey = keyof Organization; // "id" | "name" | "plan" | "seats"
+type Plan = Organization["plan"]; // "free" | "pro" | "enterprise"   (indexed access)
+type IdOrName = Organization["id" | "name"]; // string
 
 const defaults = { channel: "sms", retries: 3 };
 type Defaults = typeof defaults; // { channel: string; retries: number }  (typeof en posición de tipo)
@@ -180,23 +180,23 @@ function getProperty<T, K extends keyof T>(obj: T, key: K): T[K] {
   return obj[key];
 }
 
-const customer: Customer = { id: "c1", name: "Ana", segment: "sme", balanceCents: 0 };
-const segment = getProperty(customer, "segment"); // "retail" | "sme"
-getProperty(customer, "email"); // ❌ "email" no es keyof Customer
+const organization: Organization = { id: "org_1", name: "Acme Learning", plan: "pro", seats: 25 };
+const plan = getProperty(organization, "plan"); // "free" | "pro" | "enterprise"
+getProperty(organization, "email"); // ❌ "email" no es keyof Organization
 
 function sortBy<T, K extends keyof T>(items: readonly T[], key: K): T[] {
   return items.toSorted((a, b) => (a[key] < b[key] ? -1 : a[key] > b[key] ? 1 : 0));
 }
 
-sortBy(customers, "balanceCents"); // el editor autocompleta las claves válidas
+sortBy(organizations, "seats"); // el editor autocompleta las claves válidas
 ```
 
 <MermaidDiagram
-  caption="keyof, indexed access y typeof derivan tipos: si cambia Customer, todo lo derivado cambia con él."
+  caption="keyof, indexed access y typeof derivan tipos: si cambia Organization, todo lo derivado cambia con él."
   chart={`
 flowchart LR
-  C["interface Customer"] -->|"keyof"| K["'id' | 'name' | 'segment' | 'balanceCents'"]
-  C -->|"Customer['segment']"| S["'retail' | 'sme'"]
+  C["interface Organization"] -->|"keyof"| K["'id' | 'name' | 'plan' | 'seats'"]
+  C -->|"Organization['plan']"| S["'free' | 'pro' | 'enterprise'"]
   V["const defaults = { ... }"] -->|"typeof"| D["tipo de defaults"]
   K --> G["getProperty con K extends keyof T"]
   G -->|"retorno T[K]"| R["tipo exacto de la propiedad"]
@@ -209,8 +209,8 @@ El valor de estos operadores es mantener **una sola fuente de verdad**. Por ejem
 usa en runtime (para un `<select>`) y también como tipo:
 
 ```ts
-export const DEBT_STATUSES = ["pending", "promised", "paid"] as const;
-export type DebtStatus = (typeof DEBT_STATUSES)[number]; // "pending" | "promised" | "paid"
+export const SUBSCRIPTION_STATUSES = ["trialing", "active", "cancelled"] as const;
+export type SubscriptionStatus = (typeof SUBSCRIPTION_STATUSES)[number]; // "trialing" | "active" | "cancelled"
 ```
 
 Agregar un estado al array actualiza el tipo automáticamente.
@@ -246,7 +246,7 @@ retorno). Si aparece una vez, no aporta.
 ## Varianza en una sola sección
 
 En C# se declara la varianza (`IEnumerable<out T>`, `Action<in T>`) y en Java se usa en el sitio de uso
-(`List<? extends Debt>`). TypeScript la **calcula estructuralmente**: un tipo genérico es compatible con otro si
+(`List<? extends Member>`). TypeScript la **calcula estructuralmente**: un tipo genérico es compatible con otro si
 sus miembros lo son.
 
 ```ts
@@ -295,20 +295,20 @@ métodos (`onEvent(e: Event): void`).
 
 <KnowledgeCheck
   id="typescript.generics.q1"
-  question="¿Qué tipo devuelve `getProperty(customer, 'segment')` si la firma es `getProperty<T, K extends keyof T>(obj: T, key: K): T[K]`?"
+  question="¿Qué tipo devuelve `getProperty(organization, 'plan')` si la firma es `getProperty<T, K extends keyof T>(obj: T, key: K): T[K]`?"
   options={[
     {
       text: "`string`",
-      explanation: "Sería así si el retorno fuera `T[keyof T]` o si segment fuera string.",
+      explanation:
+        "Sería así si plan estuviera tipado como string. Con `T[keyof T]` sería la unión de los tipos de todas las propiedades.",
     },
     {
-      text: "`'retail' | 'sme'`",
+      text: "`'free' | 'pro' | 'enterprise'`",
       correct: true,
-      explanation:
-        "Correcto. K se infiere como el literal 'segment' y T[K] es el tipo exacto de esa propiedad.",
+      explanation: "Correcto. K se infiere como el literal 'plan' y T[K] es el tipo exacto de esa propiedad.",
     },
     { text: "`unknown`", explanation: "Las indexed access types conservan el tipo de la propiedad." },
-    { text: "`keyof Customer`", explanation: "Eso es el tipo de la clave, no del valor." },
+    { text: "`keyof Organization`", explanation: "Eso es el tipo de la clave, no del valor." },
   ]}
 />
 

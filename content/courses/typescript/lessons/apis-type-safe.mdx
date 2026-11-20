@@ -34,8 +34,8 @@ interviewQuestions:
       - "En TypeScript se implementa con esquemas (Zod) o constructores de branded types."
   - question: "¿Qué es un branded type y cuándo lo usarías?"
     keyPoints:
-      - "Un tipo primitivo intersecado con una marca de compilación: string & { __brand: 'DebtId' }."
-      - "Simula tipado nominal: un CustomerId no es asignable a un DebtId aunque ambos sean string."
+      - "Un tipo primitivo intersecado con una marca de compilación: string & { __brand: 'PatientId' }."
+      - "Simula tipado nominal: un AppointmentId no es asignable a un PatientId aunque ambos sean string."
       - "Se crea sólo desde una función que valida, por lo que el tipo prueba la invariante (Email válido, monto positivo)."
       - "No tiene costo en runtime: la marca se borra."
   - question: "¿Por qué separar los DTOs de los tipos del dominio?"
@@ -56,10 +56,10 @@ summary:
 
 ## ¿Qué problema resuelve?
 
-En un servicio de cobranzas hay decenas de valores que son "un string" para el compilador pero tienen reglas muy
-distintas: el ID de un cliente, el de una deuda, un email, un teléfono en formato E.164, una fecha ISO. Si todos
-son `string`, el compilador no puede impedir que pases el teléfono donde iba el email, o el ID del cliente a
-`cancelDebt`.
+En un sistema de turnos médicos hay decenas de valores que son "un string" para el compilador pero tienen reglas
+muy distintas: el ID de un paciente, el de un profesional, el de un turno, un email, un teléfono en formato E.164,
+una fecha ISO. Si todos son `string`, el compilador no puede impedir que pases el teléfono donde iba el email, o el
+ID del paciente a `cancelAppointment`.
 
 Y en los bordes del sistema hay datos sin verificar: el body de un request, un mensaje de una cola, la salida de un
 LLM, `process.env`. La pregunta de diseño es **dónde** y **cómo** se convierten esos datos en tipos confiables, para
@@ -83,11 +83,11 @@ function parseEmail(value: string): Email {
   return value as Email; // única aserción permitida: justo después de validar
 }
 
-function sendReceipt(to: Email, debtId: DebtId) {} // no necesita volver a validar
+function sendConfirmation(to: Email, appointmentId: AppointmentId) {} // no necesita volver a validar
 ```
 
 Con validación, cada función que recibe un `string` tiene que preguntarse si ya alguien lo validó. Con parseo, el
-tipo **es la prueba**: `sendReceipt` no puede recibir un string cualquiera.
+tipo **es la prueba**: `sendConfirmation` no puede recibir un string cualquiera.
 
 <FlowDiagram
   steps={[
@@ -99,7 +99,7 @@ tipo **es la prueba**: `sendReceipt` no puede recibir un string cualquiera.
     { title: "Parseo en el límite", detail: "Esquema o constructor que valida y devuelve tipos precisos." },
     {
       title: "Dominio",
-      detail: "Funciones que reciben Email, DebtId, Money: nunca validan de nuevo.",
+      detail: "Funciones que reciben Email, AppointmentId, DurationMinutes: nunca validan de nuevo.",
       tone: "runtime",
     },
     { title: "Serialización", detail: "Al salir, el adaptador convierte de nuevo a DTO." },
@@ -115,36 +115,36 @@ Un branded type es un primitivo con una **marca que sólo existe para el compila
 declare const brand: unique symbol;
 export type Brand<T, B extends string> = T & { readonly [brand]: B };
 
-export type CustomerId = Brand<string, "CustomerId">;
-export type DebtId = Brand<string, "DebtId">;
-export type AmountCents = Brand<number, "AmountCents">;
+export type PatientId = Brand<string, "PatientId">;
+export type AppointmentId = Brand<string, "AppointmentId">;
+export type DurationMinutes = Brand<number, "DurationMinutes">;
 
-export function toDebtId(raw: string): DebtId {
-  if (!/^debt_[a-z0-9]{6,}$/.test(raw)) throw new Error(`DebtId inválido: ${raw}`);
-  return raw as DebtId;
+export function toAppointmentId(raw: string): AppointmentId {
+  if (!/^apt_[a-z0-9]{6,}$/.test(raw)) throw new Error(`AppointmentId inválido: ${raw}`);
+  return raw as AppointmentId;
 }
 
-export function toAmountCents(raw: number): AmountCents {
-  if (!Number.isSafeInteger(raw) || raw <= 0) throw new Error(`Monto inválido: ${raw}`);
-  return raw as AmountCents;
+export function toDurationMinutes(raw: number): DurationMinutes {
+  if (!Number.isSafeInteger(raw) || raw <= 0 || raw > 240) throw new Error(`Duración inválida: ${raw}`);
+  return raw as DurationMinutes;
 }
 
-declare function cancelDebt(id: DebtId): Promise<void>;
-declare const customerId: CustomerId;
+declare function cancelAppointment(id: AppointmentId): Promise<void>;
+declare const patientId: PatientId;
 
-cancelDebt(customerId); // ❌ CustomerId no es asignable a DebtId
-cancelDebt("debt_abc123"); // ❌ un string literal tampoco: hay que pasar por toDebtId
+cancelAppointment(patientId); // ❌ PatientId no es asignable a AppointmentId
+cancelAppointment("apt_abc123"); // ❌ un string literal tampoco: hay que pasar por toAppointmentId
 ```
 
 Propiedades importantes:
 
-- **Costo cero en runtime:** la marca se borra; un `DebtId` es un string normal al ejecutar.
-- **Se usan como el primitivo:** `id.startsWith("debt_")` funciona, y un `AmountCents` se suma como un número (el
+- **Costo cero en runtime:** la marca se borra; un `AppointmentId` es un string normal al ejecutar.
+- **Se usan como el primitivo:** `id.startsWith("apt_")` funciona, y un `DurationMinutes` se suma como un número (el
   resultado de una suma es `number`, sin marca, y está bien: hay que revalidar si querés el brand).
 - **El único constructor es la función que valida.** Si el equipo respeta esa regla (con lint o revisión), el tipo
   prueba la invariante.
 
-Es la forma de conseguir en TypeScript algo parecido a los `record struct CustomerId(string Value)` de C# o los
+Es la forma de conseguir en TypeScript algo parecido a los `record struct PatientId(string Value)` de C# o los
 value objects de Java, sin crear objetos envoltorio.
 
 ## Esquemas con Zod
@@ -155,26 +155,26 @@ para los límites:
 ```ts
 import { z } from "zod";
 
-export const CreatePaymentPromiseSchema = z.object({
-  debtId: z
+export const CreateAppointmentSchema = z.object({
+  patientId: z
     .string()
-    .regex(/^debt_[a-z0-9]{6,}$/)
-    .transform((value) => value as DebtId),
-  promisedFor: z.iso.date(), // "2026-12-01"
-  amountCents: z.number().int().positive(),
-  channel: z.enum(["sms", "email", "whatsapp"]).default("sms"),
-  note: z.string().max(500).optional(),
+    .regex(/^pat_[a-z0-9]{6,}$/)
+    .transform((value) => value as PatientId),
+  professionalId: z.string().min(1),
+  startsAt: z.iso.datetime(), // "2026-12-01T09:30:00Z"
+  reminderChannel: z.enum(["sms", "email", "whatsapp"]).default("sms"),
+  reason: z.string().max(500).optional(),
 });
 
-// Lo que el cliente puede mandar (channel opcional) y lo que obtenés después de parsear (channel presente)
-export type CreatePaymentPromiseInput = z.input<typeof CreatePaymentPromiseSchema>;
-export type CreatePaymentPromise = z.output<typeof CreatePaymentPromiseSchema>; // igual a z.infer
+// Lo que el cliente puede mandar (canal opcional) y lo que obtenés después de parsear (canal presente)
+export type CreateAppointmentInput = z.input<typeof CreateAppointmentSchema>;
+export type CreateAppointment = z.output<typeof CreateAppointmentSchema>; // igual a z.infer
 ```
 
 ```ts
 export async function POST(request: Request): Promise<Response> {
   const body: unknown = await request.json().catch(() => null);
-  const parsed = CreatePaymentPromiseSchema.safeParse(body);
+  const parsed = CreateAppointmentSchema.safeParse(body);
 
   if (!parsed.success) {
     return Response.json(
@@ -183,8 +183,8 @@ export async function POST(request: Request): Promise<Response> {
     );
   }
 
-  const promise = await createPaymentPromise(parsed.data); // parsed.data: CreatePaymentPromise
-  return Response.json(toPaymentPromiseDto(promise), { status: 201 });
+  const appointment = await createAppointment(parsed.data); // parsed.data: CreateAppointment
+  return Response.json(toAppointmentDto(appointment), { status: 201 });
 }
 ```
 
@@ -197,55 +197,59 @@ export async function POST(request: Request): Promise<Response> {
 ### Componer esquemas
 
 ```ts
-const MoneySchema = z.object({ amountCents: z.number().int().positive(), currency: z.enum(["ARS", "USD"]) });
+const SlotSchema = z.object({ startsAt: z.iso.datetime(), durationMinutes: z.number().int().positive() });
 
-const DebtSchema = z.object({
+const AppointmentSchema = z.object({
   id: z.string(),
-  customerId: z.string(),
-  balance: MoneySchema,
-  status: z.enum(["pending", "promised", "paid"]),
+  patientId: z.string(),
+  slot: SlotSchema,
+  status: z.enum(["requested", "confirmed", "attended", "cancelled"]),
 });
 
-const DebtListSchema = z.array(DebtSchema);
-const DebtPatchSchema = DebtSchema.pick({ status: true }).partial();
+const AppointmentListSchema = z.array(AppointmentSchema);
+const AppointmentPatchSchema = AppointmentSchema.pick({ status: true }).partial();
 
 // Discriminated union en runtime: el equivalente validado de la lección de narrowing
 const WebhookEventSchema = z.discriminatedUnion("type", [
-  z.object({ type: z.literal("payment.succeeded"), debtId: z.string(), paidCents: z.number().int() }),
-  z.object({ type: z.literal("payment.failed"), debtId: z.string(), reason: z.string() }),
+  z.object({
+    type: z.literal("consultation.started"),
+    appointmentId: z.string(),
+    startedAt: z.iso.datetime(),
+  }),
+  z.object({ type: z.literal("consultation.failed"), appointmentId: z.string(), reason: z.string() }),
 ]);
 ```
 
 ## DTOs y contratos en los límites
 
 Un **DTO** (Data Transfer Object) describe cómo viaja un dato: JSON, nombres que eligió el proveedor, fechas como
-strings, montos en la unidad que use el contrato. El **dominio** usa sus propios tipos. Mezclarlos acopla el núcleo
-a cada detalle de transporte.
+strings, cantidades en la unidad que use el contrato. El **dominio** usa sus propios tipos. Mezclarlos acopla el
+núcleo a cada detalle de transporte.
 
 ```ts
-// Contrato del proveedor de pagos (como llega)
-const ProviderPaymentDtoSchema = z.object({
-  payment_id: z.string(),
-  debt_reference: z.string(),
-  amount: z.string(), // "1500.00": el proveedor manda strings decimales
-  paid_at: z.iso.datetime(),
+// Contrato de un proveedor externo de agenda (como llega)
+const ProviderBookingDtoSchema = z.object({
+  booking_id: z.string(),
+  appointment_reference: z.string(),
+  duration: z.string(), // "30": el proveedor manda los minutos como string
+  starts_at: z.iso.datetime(),
 });
 
 // Tipo del dominio (como lo usamos)
-interface Payment {
+interface Booking {
   id: string;
-  debtId: DebtId;
-  amount: AmountCents;
-  paidAt: Date;
+  appointmentId: AppointmentId;
+  duration: DurationMinutes;
+  startsAt: Date;
 }
 
 // El mapeo vive en el adaptador, no en el dominio
-function toPayment(dto: z.infer<typeof ProviderPaymentDtoSchema>): Payment {
+function toBooking(dto: z.infer<typeof ProviderBookingDtoSchema>): Booking {
   return {
-    id: dto.payment_id,
-    debtId: toDebtId(dto.debt_reference),
-    amount: toAmountCents(Math.round(Number.parseFloat(dto.amount) * 100)),
-    paidAt: new Date(dto.paid_at),
+    id: dto.booking_id,
+    appointmentId: toAppointmentId(dto.appointment_reference),
+    duration: toDurationMinutes(Number.parseInt(dto.duration, 10)),
+    startsAt: new Date(dto.starts_at),
   };
 }
 ```
@@ -254,9 +258,9 @@ function toPayment(dto: z.infer<typeof ProviderPaymentDtoSchema>): Payment {
   caption="Los DTOs viven en los adaptadores; el dominio sólo conoce sus tipos. El mapeo concentra las conversiones."
   chart={`
 flowchart LR
-  P["Proveedor de pagos<br/>JSON snake_case"] --> A["Adaptador HTTP<br/>esquema DTO + toPayment"]
-  A --> D["Dominio<br/>Payment, DebtId, AmountCents"]
-  D --> O["Adaptador de salida<br/>toPaymentDto"]
+  P["Proveedor de agenda<br/>JSON snake_case"] --> A["Adaptador HTTP<br/>esquema DTO + toBooking"]
+  A --> D["Dominio<br/>Booking, AppointmentId, DurationMinutes"]
+  D --> O["Adaptador de salida<br/>toBookingDto"]
   O --> C["Cliente de la API<br/>JSON público versionado"]
 `}
 />
@@ -290,7 +294,7 @@ export const env = EnvSchema.parse(process.env); // si falta algo, el proceso no
 | Necesidad                      | C#                                               | Java                                      | TypeScript                              |
 | ------------------------------ | ------------------------------------------------ | ----------------------------------------- | --------------------------------------- |
 | Validar el body de un request  | Model binding + DataAnnotations/FluentValidation | Bean Validation (`@Valid`)                | Esquema Zod + `safeParse`               |
-| ID con tipo propio             | `record struct DebtId(string Value)`             | `record DebtId(String value)`             | Branded type, sin objeto envoltorio     |
+| ID con tipo propio             | `record struct PatientId(string Value)`          | `record PatientId(String value)`          | Branded type, sin objeto envoltorio     |
 | Configuración validada         | Options pattern + `ValidateOnStart`              | `@ConfigurationProperties` + `@Validated` | Esquema sobre `process.env` al arrancar |
 | DTO y mapeo                    | Clases + AutoMapper/Mapperly                     | Clases + MapStruct                        | Esquema del DTO + función de mapeo      |
 | Tipo derivado de la validación | No (dos definiciones)                            | No (dos definiciones)                     | Sí: `z.infer` desde el esquema          |
@@ -307,7 +311,7 @@ runtime. En TypeScript eso se logra haciendo que **el esquema sea la fuente** y 
 - **Usar `parseFloat` para dinero sin redondear.** `Math.round(parseFloat("19.99") * 100)` evita errores de
   representación; mejor aún, parsear el string decimal sin pasar por punto flotante.
 - **Mensajes de validación con datos sensibles.** No devuelvas el valor recibido en el error si puede contener datos
-  personales.
+  personales. En un sistema de salud, el motivo de una consulta es un dato sensible: tampoco va a los logs.
 
 ## Ejercicio interactivo
 
@@ -334,14 +338,14 @@ runtime. En TypeScript eso se logra haciendo que **el esquema sea la fuente** y 
 
 <KnowledgeCheck
   id="typescript.type-safe-apis.q2"
-  question="¿Qué garantiza un branded type `DebtId = string & { readonly [brand]: 'DebtId' }`?"
+  question="¿Qué garantiza un branded type `PatientId = string & { readonly [brand]: 'PatientId' }`?"
   options={[
     {
       text: "Que el valor se valida en runtime cada vez que se usa.",
       explanation: "La marca se borra: no hay ninguna verificación en runtime.",
     },
     {
-      text: "Que un string o un CustomerId no se pueden pasar donde se espera un DebtId sin pasar por el constructor.",
+      text: "Que un string o un AppointmentId no se pueden pasar donde se espera un PatientId sin pasar por el constructor.",
       correct: true,
       explanation: "Correcto. Si el único constructor valida, el tipo funciona como prueba de la invariante.",
     },

@@ -73,9 +73,9 @@ const maxRetries = 3; // no se puede reasignar
 let attempt = 0; // se puede reasignar
 attempt += 1;
 
-const customer = { name: "Ana" };
-customer.name = "Ana María"; // ✅ const impide reasignar la variable, no mutar el objeto
-// customer = { name: "Luis" }; ❌ Error: no se puede reasignar una constante
+const student = { name: "Ana" };
+student.name = "Ana María"; // ✅ const impide reasignar la variable, no mutar el objeto
+// student = { name: "Luis" }; ❌ Error: no se puede reasignar una constante
 ```
 
 - **`const` por defecto, `let` cuando necesitás reasignar.** Es la convención de prácticamente todos los equipos.
@@ -121,8 +121,8 @@ function describeBalanceFixed(balanceCents: number | undefined): string {
 
 ```ts
 const name = "Ana";
-const amount = 1500;
-const message = `Hola ${name}, tu deuda es de ${amount / 100} USD`; // interpolación con backticks
+const grade = 8.5;
+const message = `Hola ${name}, tu nota final es ${grade}`; // interpolación con backticks
 const multiline = `Línea 1
 Línea 2`;
 ```
@@ -164,7 +164,7 @@ next(); // 2
 ### Parámetros opcionales, por defecto y rest
 
 ```ts
-function sendReminder(customerId: string, channel: "sms" | "email" = "sms", note?: string): void {
+function sendReminder(studentId: string, channel: "sms" | "email" = "email", note?: string): void {
   // note puede ser undefined
 }
 
@@ -217,48 +217,49 @@ flowchart TD
 ## Objetos: atajos, destructuring y spread
 
 ```ts
-const id = "debt_1";
-const amountCents = 150_000;
+const id = "enr_1";
+const courseId = "typescript-101";
 
-const debt = { id, amountCents, status: "pending" }; // atajo: { id: id, amountCents: amountCents }
+const enrollment = { id, courseId, status: "active" }; // atajo: { id: id, courseId: courseId }
 
 // Destructuring: extraer propiedades en variables
-const { status, amountCents: amount } = debt; // renombra amountCents a amount
+const { status, courseId: course } = enrollment; // renombra courseId a course
 
 // Destructuring en parámetros, muy común en funciones con muchas opciones
-function createPromise({ debtId, dueDate }: { debtId: string; dueDate: string }) {
-  return { debtId, dueDate };
+function enroll({ studentId, courseId }: { studentId: string; courseId: string }) {
+  return { studentId, courseId };
 }
 
 // Arrays también se desestructuran
 const [first, second, ...rest] = [10, 20, 30, 40]; // rest = [30, 40]
 
 // Spread: copiar y combinar sin mutar (copia superficial)
-const paidDebt = { ...debt, status: "paid", paidAt: "2026-11-19" };
-const allAmounts = [...[1, 2], ...[3, 4]];
+const completed = { ...enrollment, status: "completed", completedAt: "2026-11-19" };
+const allGrades = [...[7, 8], ...[9, 10]];
 ```
 
-`{ ...debt, status: "paid" }` es el equivalente idiomático de un `with` sobre un `record` de C#: crea un objeto
-nuevo con una propiedad cambiada. Es la base de la inmutabilidad en React y en reducers.
+`{ ...enrollment, status: "completed" }` es el equivalente idiomático de un `with` sobre un `record` de C#: crea un
+objeto nuevo con una propiedad cambiada. Es la base de la inmutabilidad en React y en reducers.
 
 <Callout type="warning" title="Spread copia un solo nivel">
-  `{...debt}` copia las propiedades del primer nivel. Si `debt.customer` es un objeto, la copia y el original
-  comparten la misma referencia. Para una copia profunda de datos simples existe `structuredClone(debt)`.
+  `{...enrollment}` copia las propiedades del primer nivel. Si `enrollment.student` es un objeto, la copia y
+  el original comparten la misma referencia. Para una copia profunda de datos simples existe
+  `structuredClone(enrollment)`.
 </Callout>
 
 ### Optional chaining y nullish coalescing
 
 ```ts
-interface Customer {
+interface Student {
   name: string;
   contact?: { email?: string; phone?: string };
 }
 
-function preferredChannel(customer: Customer): string {
+function preferredChannel(student: Student): string {
   // ?. corta y devuelve undefined si lo de la izquierda es null o undefined
-  const email = customer.contact?.email;
+  const email = student.contact?.email;
   // ?? usa el valor de la derecha sólo si la izquierda es null o undefined
-  return email ?? customer.contact?.phone ?? "sin contacto";
+  return email ?? student.contact?.phone ?? "sin contacto";
 }
 
 const retries = 0;
@@ -271,25 +272,25 @@ Son los mismos operadores `?.` y `??` de C#. En Java el equivalente es encadenar
 ## Arrays y sus métodos funcionales
 
 ```ts
-interface Installment {
+interface Assignment {
   number: number;
-  amountCents: number;
-  paid: boolean;
+  grade: number;
+  submitted: boolean;
 }
 
-const installments: Installment[] = [
-  { number: 1, amountCents: 50_000, paid: true },
-  { number: 2, amountCents: 50_000, paid: false },
-  { number: 3, amountCents: 50_000, paid: false },
+const assignments: Assignment[] = [
+  { number: 1, grade: 9, submitted: true },
+  { number: 2, grade: 7, submitted: true },
+  { number: 3, grade: 0, submitted: false },
 ];
 
-const pending = installments.filter((i) => !i.paid); // Where
-const amounts = pending.map((i) => i.amountCents); // Select
-const totalPending = amounts.reduce((acc, value) => acc + value, 0); // Aggregate
-const firstPending = installments.find((i) => !i.paid); // FirstOrDefault (o undefined)
-const anyPaid = installments.some((i) => i.paid); // Any
-const allPaid = installments.every((i) => i.paid); // All
-const sorted = installments.toSorted((a, b) => b.amountCents - a.amountCents); // OrderByDescending, sin mutar
+const delivered = assignments.filter((a) => a.submitted); // Where
+const grades = delivered.map((a) => a.grade); // Select
+const average = grades.reduce((acc, value) => acc + value, 0) / grades.length; // Aggregate
+const firstMissing = assignments.find((a) => !a.submitted); // FirstOrDefault (o undefined)
+const anyMissing = assignments.some((a) => !a.submitted); // Any
+const allSubmitted = assignments.every((a) => a.submitted); // All
+const ranked = assignments.toSorted((a, b) => b.grade - a.grade); // OrderByDescending, sin mutar
 ```
 
 | JavaScript               | C# (LINQ)            | Java (Streams)            |
@@ -309,9 +310,9 @@ existen `toSorted`, `toReversed` y `toSpliced`.
 Para diccionarios y conjuntos, JavaScript tiene `Map` y `Set`, equivalentes a `Dictionary` y `HashSet`:
 
 ```ts
-const byCustomer = new Map<string, Installment[]>();
-byCustomer.set("cus_1", installments);
-byCustomer.get("cus_1"); // Installment[] | undefined
+const byStudent = new Map<string, Assignment[]>();
+byStudent.set("stu_1", assignments);
+byStudent.get("stu_1"); // Assignment[] | undefined
 
 const seenEvents = new Set<string>();
 seenEvents.add("evt_1");
@@ -321,34 +322,34 @@ seenEvents.has("evt_1"); // true
 ## Clases
 
 ```ts
-class PaymentPromise {
+class Exam {
   // Campo con #: privado real en runtime. private de TypeScript se borra al compilar.
-  #reminders = 0;
-  static readonly maxReminders = 3;
+  #attempts = 0;
+  static readonly maxAttempts = 3;
 
   constructor(
-    readonly debtId: string, // parameter property: declara y asigna el campo
-    private dueDate: Date,
+    readonly courseId: string, // parameter property: declara y asigna el campo
+    private closesAt: Date,
   ) {}
 
-  get isDue(): boolean {
-    return this.dueDate.getTime() <= Date.now();
+  get isClosed(): boolean {
+    return this.closesAt.getTime() <= Date.now();
   }
 
-  remind(): boolean {
-    if (this.#reminders >= PaymentPromise.maxReminders) return false;
-    this.#reminders++;
+  attempt(): boolean {
+    if (this.isClosed || this.#attempts >= Exam.maxAttempts) return false;
+    this.#attempts++;
     return true;
   }
 }
 
-class PartialPaymentPromise extends PaymentPromise {
+class TimedExam extends Exam {
   constructor(
-    debtId: string,
-    dueDate: Date,
-    readonly amountCents: number,
+    courseId: string,
+    closesAt: Date,
+    readonly durationMinutes: number,
   ) {
-    super(debtId, dueDate);
+    super(courseId, closesAt);
   }
 }
 ```
@@ -363,21 +364,21 @@ encapsulado con comportamiento (un cliente HTTP, un repositorio, un caso de uso 
 Cada archivo es un módulo con su propio alcance. Lo que no se exporta es privado al archivo.
 
 ```ts
-// src/debts/format.ts
-export function formatAmount(amountCents: number): string {
-  return (amountCents / 100).toFixed(2);
+// src/grades/format.ts
+export function formatGrade(grade: number): string {
+  return grade.toFixed(1);
 }
 
-export const DEFAULT_CURRENCY = "USD";
+export const PASSING_GRADE = 6;
 
-export default class DebtFormatter {}
+export default class GradeFormatter {}
 ```
 
 ```ts
 // src/main.ts
-import DebtFormatter, { formatAmount, DEFAULT_CURRENCY } from "./debts/format.js";
-import * as format from "./debts/format.js"; // todo el módulo como objeto
-import type { Debt } from "./debts/types.js"; // import sólo de tipos: se borra al compilar
+import GradeFormatter, { formatGrade, PASSING_GRADE } from "./grades/format.js";
+import * as format from "./grades/format.js"; // todo el módulo como objeto
+import type { Assignment } from "./grades/types.js"; // import sólo de tipos: se borra al compilar
 ```
 
 - Un módulo se parece más a un archivo con miembros `internal` que a un `namespace` o un `package`.
@@ -390,19 +391,19 @@ import type { Debt } from "./debts/types.js"; // import sólo de tipos: se borra
 ## Errores y excepciones
 
 ```ts
-class DebtNotFoundError extends Error {
-  constructor(readonly debtId: string) {
-    super(`No existe la deuda ${debtId}`);
-    this.name = "DebtNotFoundError";
+class CourseFullError extends Error {
+  constructor(readonly courseId: string) {
+    super(`El curso ${courseId} no tiene cupo`);
+    this.name = "CourseFullError";
   }
 }
 
 try {
-  throw new DebtNotFoundError("debt_1");
+  throw new CourseFullError("typescript-101");
 } catch (error) {
   // error es unknown: en JavaScript se puede lanzar cualquier valor, incluso un string
-  if (error instanceof DebtNotFoundError) {
-    console.log(error.debtId);
+  if (error instanceof CourseFullError) {
+    console.log(error.courseId);
   } else {
     throw error;
   }
@@ -435,7 +436,7 @@ try {
 - **Comparar objetos con `===` esperando igualdad por valor.** Compará propiedades o IDs.
 - **Pasar métodos como callbacks.** `promise.then(this.handle)` pierde el `this`; usá una arrow function.
 - **Mutar con `sort` o `reverse`.** Ordenar un array que recibiste como parámetro lo modifica para quien te lo pasó.
-- **Olvidar `await` o el `return` en una arrow function con llaves.** `items.map((i) => { i.amountCents })` devuelve
+- **Olvidar `await` o el `return` en una arrow function con llaves.** `items.map((i) => { i.grade })` devuelve
   `undefined` por cada elemento: con llaves hace falta `return`.
 - **Lanzar strings.** `throw "error"` pierde el stack trace; lanzá siempre instancias de `Error`.
 
@@ -485,18 +486,18 @@ try {
 
 <KnowledgeCheck
   id="typescript.modern-javascript.q3"
-  question="¿Cuál de estas expresiones NO modifica el array `amounts` original?"
+  question="¿Cuál de estas expresiones NO modifica el array `grades` original?"
   options={[
     {
-      text: "`amounts.sort((a, b) => a - b)`",
+      text: "`grades.sort((a, b) => a - b)`",
       explanation: "`sort` ordena en el lugar y devuelve el mismo array.",
     },
-    { text: "`amounts.reverse()`", explanation: "`reverse` también muta el array original." },
+    { text: "`grades.reverse()`", explanation: "`reverse` también muta el array original." },
     {
-      text: "`amounts.toSorted((a, b) => a - b)`",
+      text: "`grades.toSorted((a, b) => a - b)`",
       correct: true,
       explanation: "Correcto. `toSorted` devuelve un array nuevo ordenado y deja el original intacto.",
     },
-    { text: "`amounts.splice(0, 1)`", explanation: "`splice` elimina elementos del array original." },
+    { text: "`grades.splice(0, 1)`", explanation: "`splice` elimina elementos del array original." },
   ]}
 />

@@ -45,7 +45,7 @@ interviewQuestions:
     keyPoints:
       - "La compatibilidad se decide por la forma (propiedades y tipos), no por el nombre declarado ni por la herencia."
       - "Ventajas: modela bien objetos JSON, simplifica mocks y la interoperabilidad entre módulos."
-      - "Riesgo: alias como CustomerId y DebtId (ambos string) son intercambiables; se mitiga con branded types."
+      - "Riesgo: alias como CustomerId y PaymentId (ambos string) son intercambiables; se mitiga con branded types."
       - "Matices: los excess property checks sólo aplican a literales frescos; las clases con miembros private se comportan de forma nominal."
   - question: "¿Cómo validarías el payload de un webhook en un backend TypeScript?"
     keyPoints:
@@ -70,7 +70,7 @@ summary:
 
 ## ¿Qué problema resuelve?
 
-Imaginá un endpoint que recibe el webhook de un proveedor de pagos y aplica el pago a una deuda. En C# o Java,
+Imaginá un endpoint que recibe el webhook de un proveedor de pagos y registra el cobro de un pedido. En C# o Java,
 deserializar el JSON a una clase `PaymentReceivedEvent` ya es una primera barrera: el deserializador conoce el tipo
 destino en tiempo de ejecución, y si `amountCents` llega como `"150000"` (string), `System.Text.Json` lanza una
 `JsonException` por defecto, mientras que Jackson intenta convertirlo a número usando la clase destino.
@@ -84,13 +84,13 @@ totalCents += event.amountCents; // si llegó "150000", totalCents ahora es "015
 ```
 
 Compila sin errores. Y si el proveedor cambia el formato, el bug aparece lejos de su causa: un total concatenado
-como string, un `NaN` en un reporte o, peor, una deuda marcada como pagada con un monto incorrecto. **El compilador
+como string, un `NaN` en un reporte o, peor, un pedido marcado como pagado con un monto incorrecto. **El compilador
 no se equivocó: le dijimos que confiara en algo que nunca verificó.** Entender por qué es el objetivo de esta lección.
 
-<Callout type="info" title="Por qué importa en plataformas de agentes">
-  En una plataforma de agentes de IA los datos externos están en todas partes: webhooks de pagos, respuestas
-  de APIs de clientes, mensajes de colas y argumentos de tool calls generados por un LLM. Ninguno de ellos fue
-  verificado por el compilador.
+<Callout type="info" title="Los datos externos están en todas partes">
+  En cualquier backend los datos externos aparecen en muchos lugares: webhooks de pagos o de transportistas,
+  lecturas de sensores, respuestas de APIs de terceros, mensajes de colas y argumentos de tool calls generados
+  por un LLM. Ninguno de ellos fue verificado por el compilador.
 </Callout>
 
 ## Dos lenguajes en uno
@@ -134,23 +134,23 @@ es un tipo **y** un objeto. Una `interface` sólo existe en el espacio de tipos.
 ## Type erasure: qué desaparece y qué sobrevive
 
 ```ts
-interface Debt {
+interface Payment {
   id: string;
   amountCents: number;
-  dueDate: string; // ISO 8601
+  authorizationExpiresAt: string; // ISO 8601
 }
 
-type DebtStatus = "pending" | "promised" | "paid";
+type PaymentStatus = "pending" | "authorized" | "captured" | "refunded";
 
-/** Indica si la deuda está vencida respecto de la fecha dada. */
-function isOverdue(debt: Debt, today: string): boolean {
-  return debt.dueDate < today;
+/** Indica si la autorización del pago venció respecto de la fecha dada. */
+function isExpired(payment: Payment, now: string): boolean {
+  return payment.authorizationExpiresAt < now;
 }
 
-class PaymentPromise {
+class Refund {
   constructor(
-    readonly debtId: string,
-    readonly promisedFor: string,
+    readonly paymentId: string,
+    readonly requestedAt: string,
   ) {}
 }
 ```
@@ -158,19 +158,19 @@ class PaymentPromise {
 El JavaScript emitido (simplificado) es:
 
 ```js
-function isOverdue(debt, today) {
-  return debt.dueDate < today;
+function isExpired(payment, now) {
+  return payment.authorizationExpiresAt < now;
 }
 
-class PaymentPromise {
-  constructor(debtId, promisedFor) {
-    this.debtId = debtId;
-    this.promisedFor = promisedFor;
+class Refund {
+  constructor(paymentId, requestedAt) {
+    this.paymentId = paymentId;
+    this.requestedAt = requestedAt;
   }
 }
 ```
 
-`Debt` y `DebtStatus` desaparecieron por completo. La clase sobrevive, y sus _parameter properties_ se convirtieron en
+`Payment` y `PaymentStatus` desaparecieron por completo. La clase sobrevive, y sus _parameter properties_ se convirtieron en
 asignaciones: no son sólo tipos, generan código.
 
 | Construcción                                  | ¿Existe en runtime?                                |
@@ -186,13 +186,13 @@ asignaciones: no son sólo tipos, generan código.
   Desde TypeScript 5.8, la opción `erasableSyntaxOnly` marca como error las construcciones que generan código
   (enums, namespaces con valores, parameter properties). Es útil si ejecutás TypeScript con type stripping,
   porque esas herramientas sólo pueden borrar anotaciones, no transformar código. Una unión de literales como
-  `type DebtStatus = "pending" | "paid"` es la alternativa borrable a un `enum`.
+  `type PaymentStatus = "pending" | "captured"` es la alternativa borrable a un `enum`.
 </Callout>
 
 ### La comparación con Java y C#
 
 Si venís de Java, ya conocés el término: Java borra los **argumentos genéricos** (`List<String>` y `List<Integer>`
-son ambos `List` en runtime), pero conserva clases e interfaces, por lo que `obj instanceof Debt` funciona y la
+son ambos `List` en runtime), pero conserva clases e interfaces, por lo que `obj instanceof Payment` funciona y la
 reflection conoce el tipo de cada campo. C# va más allá: los genéricos están **reificados**, así que `typeof(T)` y
 `List<string>` frente a `List<int>` son distinguibles en runtime.
 
@@ -222,7 +222,7 @@ interface Customer {
   name: string;
 }
 
-interface CollectionAgent {
+interface Merchant {
   id: string;
   name: string;
 }
@@ -231,8 +231,8 @@ function notifyCustomer(customer: Customer): void {
   // ...
 }
 
-const agent: CollectionAgent = { id: "agt_1", name: "Recordatorio de pago" };
-notifyCustomer(agent); // compila: CollectionAgent tiene la forma de Customer
+const merchant: Merchant = { id: "mer_1", name: "Tienda del barrio" };
+notifyCustomer(merchant); // compila: Merchant tiene la forma de Customer
 ```
 
 En C# o Java esa llamada no compilaría. El tipado estructural encaja muy bien con objetos JSON y simplifica los
@@ -240,12 +240,12 @@ tests (cualquier objeto con la forma correcta sirve como doble de prueba), pero 
 
 ```ts
 type CustomerId = string;
-type DebtId = string;
+type PaymentId = string;
 
-declare function cancelDebt(id: DebtId): Promise<void>;
+declare function refundPayment(id: PaymentId): Promise<void>;
 
 const customerId: CustomerId = "cus_123";
-await cancelDebt(customerId); // compila: ambos alias son string
+await refundPayment(customerId); // compila: ambos alias son string
 ```
 
 Un alias no crea un tipo nuevo. La mitigación habitual son los **branded types**, que se estudian en el módulo de
@@ -253,12 +253,12 @@ sistema de tipos avanzado:
 
 ```ts
 type Brand<T, B extends string> = T & { readonly __brand: B };
-type DebtId = Brand<string, "DebtId">;
+type PaymentId = Brand<string, "PaymentId">;
 
-/** Único punto donde un string se convierte en DebtId: valida antes de afirmar el tipo. */
-function toDebtId(raw: string): DebtId {
-  if (!/^debt_[a-z0-9]+$/.test(raw)) throw new Error(`DebtId inválido: ${raw}`);
-  return raw as DebtId;
+/** Único punto donde un string se convierte en PaymentId: valida antes de afirmar el tipo. */
+function toPaymentId(raw: string): PaymentId {
+  if (!/^pay_[a-z0-9]+$/.test(raw)) throw new Error(`PaymentId inválido: ${raw}`);
+  return raw as PaymentId;
 }
 ```
 
@@ -275,15 +275,15 @@ instancias que lo hereden de la misma declaración. En ese caso el comportamient
 
 ```ts
 interface PaymentReceivedEvent {
-  debtId: string;
+  paymentId: string;
   amountCents: number;
-  paidAt: string;
+  capturedAt: string;
 }
 
 // ❌ Confía en el tipo declarado para datos que llegan por la red.
 export async function POST(request: Request): Promise<Response> {
   const event = (await request.json()) as PaymentReceivedEvent;
-  await ledger.applyPayment(event.debtId, event.amountCents);
+  await ledger.recordCapture(event.paymentId, event.amountCents);
   return Response.json({ ok: true });
 }
 ```
@@ -292,7 +292,7 @@ Por qué falla:
 
 1. `request.json()` devuelve `Promise<any>`. Incluso sin el `as`, escribir `const event: PaymentReceivedEvent = await request.json()`
    compila, porque `any` es asignable a cualquier tipo.
-2. La aserción `as` no ejecuta nada: si falta `debtId` o `amountCents` es un string, el error viaja hacia el
+2. La aserción `as` no ejecuta nada: si falta `paymentId` o `amountCents` es un string, el error viaja hacia el
    núcleo del dominio y aparece lejos de su causa.
 3. Intentar "verificarlo" como en Java tampoco funciona: `event instanceof PaymentReceivedEvent` produce el error
    _"'PaymentReceivedEvent' only refers to a type, but is being used as a value here"_, porque la interfaz no existe
@@ -307,9 +307,9 @@ valor de runtime y el tipo se deriva de él, así que validación y tipo no pued
 import { z } from "zod";
 
 const PaymentReceivedEventSchema = z.object({
-  debtId: z.string().startsWith("debt_"),
+  paymentId: z.string().startsWith("pay_"),
   amountCents: z.number().int().positive(),
-  paidAt: z.iso.datetime(),
+  capturedAt: z.iso.datetime(),
 });
 
 /** Tipo derivado del esquema: una sola fuente de verdad. */
@@ -327,7 +327,7 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   // A partir de aquí el tipo describe datos verificados.
-  await applyPayment(parsed.data);
+  await recordCapture(parsed.data);
   return Response.json({ ok: true });
 }
 ```
@@ -339,11 +339,11 @@ function isPaymentReceivedEvent(value: unknown): value is PaymentReceivedEvent {
   if (typeof value !== "object" || value === null) return false;
   const candidate = value as Record<string, unknown>;
   return (
-    typeof candidate.debtId === "string" &&
+    typeof candidate.paymentId === "string" &&
     typeof candidate.amountCents === "number" &&
     Number.isInteger(candidate.amountCents) &&
     candidate.amountCents > 0 &&
-    typeof candidate.paidAt === "string"
+    typeof candidate.capturedAt === "string"
   );
 }
 ```
@@ -365,8 +365,8 @@ prefiere un esquema del que se derive el tipo.
 - **`any` es contagioso.** Una propiedad leída de un `any` también es `any`, y se propaga silenciosamente. El modo
   `strict` evita los `any` implícitos; reglas como `@typescript-eslint/no-unsafe-assignment` detectan los explícitos.
 - **Dinero con `number`.** Los números de JavaScript son IEEE-754 de doble precisión: `0.1 + 0.2 === 0.3` es `false`.
-  En cobranzas usá enteros en centavos (como `amountCents`) o una representación decimal con una librería dedicada.
-- **Fechas.** JSON no tiene tipo fecha: `paidAt` llega como string. Tiparlo como `Date` sin convertirlo es otra
+  Para dinero usá enteros en centavos (como `amountCents`) o una representación decimal con una librería dedicada.
+- **Fechas.** JSON no tiene tipo fecha: `capturedAt` llega como string. Tiparlo como `Date` sin convertirlo es otra
   mentira al compilador; validalo como fecha ISO y convertilo explícitamente.
 - **`private` no es privado en runtime.** El modificador `private` de TypeScript se borra; los campos `#privados` de
   JavaScript sí son inaccesibles desde fuera de la clase.
@@ -383,7 +383,7 @@ prefiere un esquema del que se derive el tipo.
 | Tipos en runtime                 | Sí, completos (reflection)        | Sí para clases e interfaces            | No: sólo existen valores de JavaScript      |
 | Genéricos                        | Reificados: `typeof(T)` funciona  | Borrados: `List<String>` pasa a `List` | Borrados por completo                       |
 | Compatibilidad                   | Nominal                           | Nominal                                | Estructural                                 |
-| Chequear una interfaz en runtime | `obj is IDebt`                    | `obj instanceof Debt`                  | Imposible: hay que validar la forma         |
+| Chequear una interfaz en runtime | `obj is IPayment`                 | `obj instanceof Payment`               | Imposible: hay que validar la forma         |
 | Deserializar JSON                | El serializer usa el tipo destino | Jackson usa la clase destino           | `JSON.parse` devuelve `any`                 |
 | Validación de entrada habitual   | DataAnnotations, FluentValidation | Bean Validation (Jakarta)              | Zod u otra librería de esquemas, predicados |
 
@@ -435,7 +435,7 @@ prefiere un esquema del que se derive el tipo.
 
 <KnowledgeCheck
   id="typescript.runtime-vs-type-system.q2"
-  question="Con `type CustomerId = string` y `type DebtId = string`, ¿qué ocurre al llamar `cancelDebt(customerId)` si la función espera un `DebtId`?"
+  question="Con `type CustomerId = string` y `type PaymentId = string`, ¿qué ocurre al llamar `refundPayment(customerId)` si la función espera un `PaymentId`?"
   options={[
     {
       text: "Error de compilación: los alias tienen nombres distintos.",
@@ -451,7 +451,7 @@ prefiere un esquema del que se derive el tipo.
     {
       text: "Compila, pero lanza un TypeError en runtime.",
       explanation:
-        "En runtime no queda ningún rastro de los alias, así que nada puede detectar el error: la cancelación se ejecuta con el ID equivocado.",
+        "En runtime no queda ningún rastro de los alias, así que nada puede detectar el error: el reembolso se ejecuta con el ID equivocado.",
     },
     {
       text: "Sólo compila si `strict` está desactivado.",

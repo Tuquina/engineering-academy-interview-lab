@@ -35,7 +35,7 @@ interviewQuestions:
     keyPoints:
       - "Una unión de tipos de objeto que comparten una propiedad literal (el discriminante, por ejemplo kind o status)."
       - "Al chequear el discriminante, el compilador estrecha al miembro correcto y permite acceder a sus propiedades."
-      - "Hace imposibles los estados inválidos (por ejemplo, una deuda pagada sin fecha de pago)."
+      - "Hace imposibles los estados inválidos (por ejemplo, un viaje completado sin tarifa ni hora de llegada)."
       - "Con un default que asigna a never, agregar un caso nuevo produce errores de compilación en todos los switch incompletos."
   - question: "¿Qué es el narrowing y qué técnicas conocés?"
     keyPoints:
@@ -66,20 +66,21 @@ summary:
 
 ## ¿Qué problema resuelve?
 
-Pensá en el estado de una deuda en una plataforma de cobranzas. Un modelo típico de C# o Java sería una clase con
-todos los campos posibles y muchos nullables:
+Pensá en el estado de un viaje en una app de movilidad. Un modelo típico de C# o Java sería una clase con todos los
+campos posibles y muchos nullables:
 
 ```ts
-interface DebtBad {
-  status: "pending" | "promised" | "paid" | "written_off";
-  promisedFor?: string; // sólo si status es "promised"
-  paidAt?: string; // sólo si status es "paid"
-  paidAmountCents?: number; // sólo si status es "paid"
-  writeOffReason?: string; // sólo si status es "written_off"
+interface TripBad {
+  status: "requested" | "assigned" | "completed" | "cancelled";
+  driverId?: string; // sólo si status es "assigned" o "completed"
+  completedAt?: string; // sólo si status es "completed"
+  fareCents?: number; // sólo si status es "completed"
+  cancellationReason?: string; // sólo si status es "cancelled"
 }
 ```
 
-Este modelo admite estados absurdos: una deuda `"paid"` sin `paidAt`, o `"pending"` con `writeOffReason`. Cada
+Este modelo admite estados absurdos: un viaje `"completed"` sin `fareCents`, o `"requested"` con
+`cancellationReason`. Cada
 función que la use tiene que adivinar qué campos existen, y el compilador no puede ayudar. **Uniones y narrowing**
 permiten modelar sólo los estados válidos y que el compilador verifique que cada caso se maneja.
 
@@ -97,8 +98,8 @@ function normalize(id: Identifier): string {
 }
 
 type WithTimestamps = { createdAt: string; updatedAt: string };
-type Debt = { id: string; amountCents: number };
-type StoredDebt = Debt & WithTimestamps; // tiene las cuatro propiedades
+type Trip = { id: string; passengerId: string };
+type StoredTrip = Trip & WithTimestamps; // tiene las cuatro propiedades
 ```
 
 Con una unión, **sólo podés usar lo que es común a todos los miembros**. Para usar algo específico, primero hay que
@@ -116,17 +117,17 @@ Con `strict` activado, `null` y `undefined` **no** forman parte de `string` ni d
 faltar, el tipo lo dice:
 
 ```ts
-function findCustomer(id: string): Customer | undefined {
-  return customers.get(id);
+function findDriver(id: string): Driver | undefined {
+  return drivers.get(id);
 }
 
-const customer = findCustomer("cus_1");
-customer.name; // ❌ 'customer' is possibly 'undefined'
-customer?.name; // ✅ string | undefined
-if (customer) customer.name; // ✅ string
+const driver = findDriver("drv_1");
+driver.name; // ❌ 'driver' is possibly 'undefined'
+driver?.name; // ✅ string | undefined
+if (driver) driver.name; // ✅ string
 ```
 
-Es lo mismo que los _nullable reference types_ de C# (`Customer?`), pero obligatorio y sin warnings ignorables.
+Es lo mismo que los _nullable reference types_ de C# (`Driver?`), pero obligatorio y sin warnings ignorables.
 Java no tiene equivalente en el lenguaje: se usa `Optional<T>` o anotaciones `@Nullable`.
 
 ## Narrowing: cómo el compilador estrecha tipos
@@ -149,9 +150,9 @@ function describe(value: string | number | Date | null | undefined): string {
 | --------------- | ------------------------------- | -------------------------------------------------------------------------------- |
 | `typeof`        | `typeof x === "string"`         | Primitivos: string, number, boolean, bigint, symbol, undefined, function, object |
 | `instanceof`    | `error instanceof HttpError`    | Instancias de una clase (existe en runtime)                                      |
-| `in`            | `"paidAt" in debt`              | Miembros de la unión que tienen esa propiedad                                    |
-| Igualdad        | `debt.status === "paid"`        | Miembros con ese literal                                                         |
-| Truthiness      | `if (customer)`                 | Quita `null`, `undefined` (y otros falsy)                                        |
+| `in`            | `"fareCents" in trip`           | Miembros de la unión que tienen esa propiedad                                    |
+| Igualdad        | `trip.status === "completed"`   | Miembros con ese literal                                                         |
+| Truthiness      | `if (driver)`                   | Quita `null`, `undefined` (y otros falsy)                                        |
 | `Array.isArray` | `Array.isArray(input)`          | Arrays                                                                           |
 | Asignación      | `let x: string \| number = "a"` | El tipo del valor asignado                                                       |
 
@@ -201,32 +202,39 @@ function assertDefined<T>(value: T, message: string): asserts value is NonNullab
   if (value === undefined || value === null) throw new Error(message);
 }
 
-const customer = findCustomer("cus_1");
-assertDefined(customer, "El cliente debería existir");
-customer.name; // ✅ a partir de acá es Customer
+const driver = findDriver("drv_1");
+assertDefined(driver, "El conductor debería existir");
+driver.name; // ✅ a partir de acá es Driver
 ```
 
 ## Discriminated unions
 
-La solución al modelo de deuda del principio: **un tipo por estado**, todos con una propiedad literal común.
+La solución al modelo de viaje del principio: **un tipo por estado**, todos con una propiedad literal común.
 
 ```ts
-type Debt =
-  | { status: "pending"; id: string; amountCents: number }
-  | { status: "promised"; id: string; amountCents: number; promisedFor: string }
-  | { status: "paid"; id: string; amountCents: number; paidAt: string; paidAmountCents: number }
-  | { status: "written_off"; id: string; amountCents: number; writeOffReason: string };
+type Trip =
+  | { status: "requested"; id: string; passengerId: string }
+  | { status: "assigned"; id: string; passengerId: string; driverId: string }
+  | {
+      status: "completed";
+      id: string;
+      passengerId: string;
+      driverId: string;
+      completedAt: string;
+      fareCents: number;
+    }
+  | { status: "cancelled"; id: string; passengerId: string; cancellationReason: string };
 
-function describeDebt(debt: Debt): string {
-  switch (debt.status) {
-    case "pending":
-      return `Pendiente: ${debt.amountCents}`;
-    case "promised":
-      return `Promesa para el ${debt.promisedFor}`; // promisedFor existe sólo acá
-    case "paid":
-      return `Pagada el ${debt.paidAt}`;
-    case "written_off":
-      return `Incobrable: ${debt.writeOffReason}`;
+function describeTrip(trip: Trip): string {
+  switch (trip.status) {
+    case "requested":
+      return "Buscando conductor";
+    case "assigned":
+      return `Conductor ${trip.driverId} en camino`; // driverId existe sólo en assigned y completed
+    case "completed":
+      return `Finalizado el ${trip.completedAt}: ${trip.fareCents}`;
+    case "cancelled":
+      return `Cancelado: ${trip.cancellationReason}`;
   }
 }
 ```
@@ -235,27 +243,27 @@ function describeDebt(debt: Debt): string {
   caption="Cada estado es un tipo distinto: las transiciones válidas se modelan como funciones que reciben un estado y devuelven otro."
   chart={`
 stateDiagram-v2
-  [*] --> pending
-  pending --> promised: promesa de pago
-  promised --> paid: pago recibido
-  pending --> paid: pago recibido
-  promised --> pending: promesa incumplida
-  pending --> written_off: incobrable
-  paid --> [*]
-  written_off --> [*]
+  [*] --> requested
+  requested --> assigned: un conductor acepta
+  assigned --> completed: llegada a destino
+  assigned --> requested: el conductor cancela
+  requested --> cancelled: el pasajero cancela
+  assigned --> cancelled: el pasajero cancela
+  completed --> [*]
+  cancelled --> [*]
 `}
 />
 
 Ventajas concretas:
 
-- **Estados inválidos imposibles:** no se puede construir una deuda `"paid"` sin `paidAt`.
+- **Estados inválidos imposibles:** no se puede construir un viaje `"completed"` sin `fareCents`.
 - **Autocompletado preciso:** dentro de cada `case`, el editor muestra sólo las propiedades de ese estado.
-- **Transiciones tipadas:** una función `markAsPaid(debt: Extract<Debt, { status: "promised" }>)` sólo acepta
-  deudas con promesa.
+- **Transiciones tipadas:** una función `complete(trip: Extract<Trip, { status: "assigned" }>)` sólo acepta
+  viajes con conductor asignado.
 
 ### Chequeo exhaustivo con never
 
-¿Qué pasa si mañana se agrega el estado `"in_dispute"`? Con un `default` que asigna a `never`, **cada switch
+¿Qué pasa si mañana se agrega el estado `"in_progress"`? Con un `default` que asigna a `never`, **cada switch
 incompleto deja de compilar**:
 
 ```ts
@@ -263,30 +271,30 @@ function assertNever(value: never): never {
   throw new Error(`Caso no contemplado: ${JSON.stringify(value)}`);
 }
 
-function nextAction(debt: Debt): string {
-  switch (debt.status) {
-    case "pending":
-      return "send_reminder";
-    case "promised":
-      return "wait_until_due";
-    case "paid":
-    case "written_off":
+function nextAction(trip: Trip): string {
+  switch (trip.status) {
+    case "requested":
+      return "find_driver";
+    case "assigned":
+      return "track_driver";
+    case "completed":
+    case "cancelled":
       return "none";
     default:
-      return assertNever(debt); // si falta un caso, debt no es never y no compila
+      return assertNever(trip); // si falta un caso, trip no es never y no compila
   }
 }
 ```
 
-Después de los `case`, el narrowing deja a `debt` sin tipos posibles: `never`. Si se agrega un estado nuevo y no se
-maneja, en el `default` `debt` tiene el tipo del estado nuevo, que no es asignable a `never`, y aparece el error.
+Después de los `case`, el narrowing deja a `trip` sin tipos posibles: `never`. Si se agrega un estado nuevo y no se
+maneja, en el `default` `trip` tiene el tipo del estado nuevo, que no es asignable a `never`, y aparece el error.
 
 <FlowDiagram
   steps={[
-    { title: "Se agrega un estado", detail: "Debt suma el caso in_dispute." },
+    { title: "Se agrega un estado", detail: "Trip suma el caso in_progress." },
     {
       title: "Compilación",
-      detail: "En cada switch sin ese case, el default recibe in_dispute en lugar de never.",
+      detail: "En cada switch sin ese case, el default recibe in_progress en lugar de never.",
     },
     { title: "Error", detail: "El compilador lista todos los lugares a actualizar.", tone: "boundary" },
     {
@@ -301,19 +309,19 @@ maneja, en el `default` `debt` tiene el tipo del estado nuevo, que no es asignab
 ## Type assertions y non-null: cuándo mienten
 
 ```ts
-const input = document.getElementById("amount") as HTMLInputElement; // afirmación: puede ser null o un div
-const customer = customers.get(id)!; // ! afirma que no es undefined
+const input = document.getElementById("destination") as HTMLInputElement; // afirmación: puede ser null o un div
+const driver = drivers.get(id)!; // ! afirma que no es undefined
 ```
 
 Ninguna de las dos ejecuta un chequeo. Si estás equivocado, el error aparece después, como un `TypeError: Cannot
 read properties of undefined`, lejos de donde se originó. Alternativas más seguras:
 
 ```ts
-const element = document.getElementById("amount");
-if (!(element instanceof HTMLInputElement)) throw new Error("Falta el input de monto");
+const element = document.getElementById("destination");
+if (!(element instanceof HTMLInputElement)) throw new Error("Falta el input de destino");
 
-const customer = customers.get(id);
-if (!customer) throw new CustomerNotFoundError(id);
+const driver = drivers.get(id);
+if (!driver) throw new DriverNotFoundError(id);
 ```
 
 Las aserciones tienen usos legítimos (el constructor de un branded type después de validar, tipos que el
@@ -322,13 +330,13 @@ corrección.
 
 ## Comparación con C# y Java
 
-| Concepto             | C#                                       | Java                                            | TypeScript                                 |
-| -------------------- | ---------------------------------------- | ----------------------------------------------- | ------------------------------------------ |
-| Tipo "uno de varios" | Jerarquía de clases o `OneOf` (librería) | `sealed interface` + `record` (Java 17+)        | Unión `A \| B`, sin clases                 |
-| Estrechar el tipo    | `if (x is Paid p)`, switch con patrones  | `if (x instanceof Paid p)`, switch con patrones | `typeof`, `in`, igualdad del discriminante |
-| Exhaustividad        | Warning en switch expressions            | Error con sealed + switch                       | `never` en el default                      |
-| Nulabilidad          | `string?` (warnings)                     | `Optional<T>`                                   | `string \| undefined` (errores)            |
-| Cast                 | `(Paid)x` con chequeo en runtime         | `(Paid) x` con chequeo en runtime               | `x as Paid` **sin** chequeo                |
+| Concepto             | C#                                           | Java                                                 | TypeScript                                 |
+| -------------------- | -------------------------------------------- | ---------------------------------------------------- | ------------------------------------------ |
+| Tipo "uno de varios" | Jerarquía de clases o `OneOf` (librería)     | `sealed interface` + `record` (Java 17+)             | Unión `A \| B`, sin clases                 |
+| Estrechar el tipo    | `if (x is Completed c)`, switch con patrones | `if (x instanceof Completed c)`, switch con patrones | `typeof`, `in`, igualdad del discriminante |
+| Exhaustividad        | Warning en switch expressions                | Error con sealed + switch                            | `never` en el default                      |
+| Nulabilidad          | `string?` (warnings)                         | `Optional<T>`                                        | `string \| undefined` (errores)            |
+| Cast                 | `(Completed)x` con chequeo en runtime        | `(Completed) x` con chequeo en runtime               | `x as Completed` **sin** chequeo           |
 
 La diferencia clave está en la última fila: un cast en C# o Java lanza `InvalidCastException` o
 `ClassCastException` si el objeto no es del tipo. En TypeScript, `as` no hace nada en runtime.
@@ -341,21 +349,21 @@ La diferencia clave está en la última fila: un cast en C# o Java lanza `Invali
 - **Discriminar por una propiedad que no es literal.** Si `status` es `string` en algún miembro, el narrowing no
   funciona.
 - **Predicates incompletos.** `value is ToolCall` que sólo verifica `name` deja pasar objetos sin `arguments`.
-- **Desestructurar antes de estrechar.** `const { status, paidAt } = debt` falla porque `paidAt` no existe en todos
-  los miembros; primero se chequea `debt.status`.
+- **Desestructurar antes de estrechar.** `const { status, fareCents } = trip` falla porque `fareCents` no existe en
+  todos los miembros; primero se chequea `trip.status`.
 
 ## Ejercicio interactivo
 
 <KnowledgeCheck
   id="typescript.unions-narrowing.q1"
-  question="Agregás el estado `in_dispute` a la unión `Debt`. ¿Qué pasa en una función con switch sobre `debt.status` que termina en `default: return assertNever(debt)`?"
+  question="Agregás el estado `in_progress` a la unión `Trip`. ¿Qué pasa en una función con switch sobre `trip.status` que termina en `default: return assertNever(trip)`?"
   options={[
     {
-      text: "Compila y en runtime devuelve undefined para in_dispute.",
+      text: "Compila y en runtime devuelve undefined para in_progress.",
       explanation: "Eso pasaría sin el default con assertNever.",
     },
     {
-      text: "No compila: en el default, debt tiene el tipo del nuevo estado y no es asignable a never.",
+      text: "No compila: en el default, trip tiene el tipo del nuevo estado y no es asignable a never.",
       correct: true,
       explanation: "Correcto. El compilador señala cada switch que hay que actualizar.",
     },
@@ -385,7 +393,7 @@ La diferencia clave está en la última fila: un cast en C# o Java lanza `Invali
 
 <KnowledgeCheck
   id="typescript.unions-narrowing.q3"
-  question="En C#, `(PaidDebt)debt` lanza una excepción si el objeto no es del tipo. ¿Qué hace `debt as PaidDebt` en TypeScript si debt no es una deuda pagada?"
+  question="En C#, `(CompletedTrip)trip` lanza una excepción si el objeto no es del tipo. ¿Qué hace `trip as CompletedTrip` en TypeScript si trip no es un viaje completado?"
   options={[
     { text: "Lanza un TypeError.", explanation: "as no ejecuta nada en runtime." },
     {

@@ -37,7 +37,7 @@ interviewQuestions:
       - "fetch y muchas APIs de Node.js aceptan signal de forma nativa; el código propio debe escuchar el evento abort o chequear signal.aborted."
       - "La señal se propaga como parámetro por todas las capas, igual que un CancellationToken en .NET."
       - "Cancelar no deshace efectos ya producidos: hay que diseñar operaciones idempotentes o compensables."
-  - question: "Tenés que enviar 10.000 recordatorios a una API que permite 20 llamadas concurrentes. ¿Cómo lo harías?"
+  - question: "Tenés que cotizar 10.000 envíos con la API de un transportista que permite 20 llamadas concurrentes. ¿Cómo lo harías?"
     keyPoints:
       - "No usar Promise.all sobre las 10.000: dispara todas a la vez y satura al proveedor y a la memoria."
       - "Un pool de N workers que toman tareas de una cola compartida, o un limitador de concurrencia (semáforo)."
@@ -67,12 +67,12 @@ summary:
 ## ¿Qué problema resuelve?
 
 La lección anterior explicó qué es una Promise y cómo combinarlas. Con eso alcanza para escribir código que
-funciona **cuando todo sale bien**. En producción, una plataforma que llama a proveedores de mensajería, a modelos
-de lenguaje y a APIs de clientes enfrenta otra realidad:
+funciona **cuando todo sale bien**. En producción, una plataforma que llama a transportistas, proveedores de mensajería,
+modelos de lenguaje y APIs de terceros enfrenta otra realidad:
 
-- El proveedor de SMS tarda 40 segundos en responder en lugar de 300 ms.
+- La API de un transportista tarda 40 segundos en responder en lugar de 300 ms.
 - El usuario cerró la pestaña y la request ya no le importa a nadie, pero el servidor sigue trabajando.
-- Una campaña dispara 10.000 llamadas a la vez y el proveedor responde `429 Too Many Requests`.
+- El cierre del día dispara 10.000 cotizaciones de envío a la vez y el transportista responde `429 Too Many Requests`.
 - Dos webhooks del mismo pago llegan casi juntos y el saldo queda mal.
 - Un error transitorio se reintenta inmediatamente, mil veces, y empeora la caída del proveedor.
 
@@ -86,7 +86,7 @@ cancela es **el trabajo**, y para eso JavaScript usa un mecanismo cooperativo: `
 ```ts
 const controller = new AbortController();
 
-const responsePromise = fetch("https://api.example.com/debts", { signal: controller.signal });
+const responsePromise = fetch("https://api.carrier.example/rates", { signal: controller.signal });
 
 controller.abort(); // fetch se interrumpe y la Promise se rechaza con un AbortError
 ```
@@ -98,15 +98,15 @@ controller.abort(); // fetch se interrumpe y la Promise se rechaza con un AbortE
   evento `abort`.
 
 ```ts
-/** Envía recordatorios hasta terminar o hasta que se cancele la señal. */
-async function sendReminders(customerIds: readonly string[], signal: AbortSignal): Promise<number> {
-  let sent = 0;
-  for (const customerId of customerIds) {
+/** Actualiza el seguimiento de los envíos hasta terminar o hasta que se cancele la señal. */
+async function syncTracking(shipmentIds: readonly string[], signal: AbortSignal): Promise<number> {
+  let updated = 0;
+  for (const shipmentId of shipmentIds) {
     signal.throwIfAborted(); // corta entre iteraciones si se canceló
-    await notifier.send(customerId, { signal }); // y propaga la señal hacia abajo
-    sent++;
+    await carrier.track(shipmentId, { signal }); // y propaga la señal hacia abajo
+    updated++;
   }
-  return sent;
+  return updated;
 }
 ```
 
@@ -188,10 +188,10 @@ export async function mapWithConcurrency<T, R>(
   caption="Un pool de 3 workers procesa la cola: nunca hay más de 3 llamadas en vuelo."
   chart={`
 flowchart LR
-  Q["Cola de tareas<br/>10.000 clientes"] --> W1["Worker 1"]
+  Q["Cola de tareas<br/>10.000 envíos"] --> W1["Worker 1"]
   Q --> W2["Worker 2"]
   Q --> W3["Worker 3"]
-  W1 --> P["Proveedor de SMS<br/>máximo 3 concurrentes"]
+  W1 --> P["API del transportista<br/>máximo 3 concurrentes"]
   W2 --> P
   W3 --> P
   W1 --> R["Resultados por índice<br/>fulfilled o rejected"]
@@ -213,12 +213,12 @@ Node.js tiene un solo hilo de JavaScript, pero **entre dos `await` puede ejecuta
 alcanza para producir race conditions clásicas:
 
 ```ts
-// ❌ Lost update: dos pagos concurrentes de la misma deuda
-async function applyPayment(debtId: string, paidCents: number): Promise<void> {
-  const debt = await debtRepository.findById(debtId); // 1. lee saldo: 10.000
-  // ← acá puede ejecutarse otro applyPayment del mismo debtId y leer también 10.000
-  const newBalance = debt.balanceCents - paidCents;
-  await debtRepository.updateBalance(debtId, newBalance); // 2. escribe: el último pisa al primero
+// ❌ Lost update: dos pagos concurrentes desde la misma billetera
+async function applyPayment(walletId: string, paidCents: number): Promise<void> {
+  const wallet = await walletRepository.findById(walletId); // 1. lee saldo: 10.000
+  // ← acá puede ejecutarse otro applyPayment del mismo walletId y leer también 10.000
+  const newBalance = wallet.balanceCents - paidCents;
+  await walletRepository.updateBalance(walletId, newBalance); // 2. escribe: el último pisa al primero
 }
 ```
 
@@ -239,13 +239,13 @@ sequenceDiagram
 
 Soluciones, de la más recomendable a la más local:
 
-1. **Operación atómica en la base:** `UPDATE debts SET balance_cents = balance_cents - $1 WHERE id = $2`. La base
+1. **Operación atómica en la base:** `UPDATE wallets SET balance_cents = balance_cents - $1 WHERE id = $2 AND balance_cents >= $1`. La base
    serializa las escrituras.
 2. **Concurrencia optimista:** un campo `version`; el `UPDATE ... WHERE version = $v` falla si otro escribió antes y
    se reintenta.
 3. **Idempotencia:** guardar el `paymentId` con una constraint única para que el mismo webhook no se aplique dos
    veces.
-4. **Serializar por clave en memoria:** encadenar las operaciones del mismo `debtId`. Sólo funciona con **una única
+4. **Serializar por clave en memoria:** encadenar las operaciones del mismo `walletId`. Sólo funciona con **una única
    instancia** del proceso; con varias réplicas, no protege nada.
 
 El challenge [Race condition en pagos](/challenges/payment-race-condition) reproduce este problema.
@@ -312,7 +312,7 @@ proceso** por defecto.
 ```ts
 // ❌ Se lanza y se olvida: si falla, el proceso puede caerse
 void auditLog.write(event);
-notifier.send(customerId); // sin await ni catch
+notifier.send(userId); // sin await ni catch
 
 // ✅ Fire-and-forget explícito y capturado
 auditLog.write(event).catch((error) => logger.error({ error }, "audit_log_failed"));
