@@ -1,0 +1,109 @@
+---
+id: pattern.factory-method
+kind: design
+category: creational
+title: "Factory"
+summary: "Centralizar la decisión de qué implementación crear a partir de datos o configuración."
+difficulty: basic
+order: 5
+definition: 'Una fábrica encapsula la creación de objetos: el código cliente pide "un notificador para este canal" y recibe una implementación de una interfaz común, sin conocer las clases concretas ni cómo se configuran. El GoF distingue Factory Method (una subclase decide qué crear) y Abstract Factory (familias de objetos relacionados); en TypeScript lo más común es una función fábrica.'
+problem: "El código que envía notificaciones decide en cada lugar si crear un cliente de email, de SMS o de push, con sus credenciales y opciones. La lógica de creación se repite, cada canal nuevo obliga a tocar varios archivos y los tests no pueden reemplazar las implementaciones."
+benefits:
+  - "La decisión de qué crear vive en un solo lugar."
+  - "El cliente depende de la interfaz, no de las clases concretas."
+  - "Facilita reemplazar implementaciones en tests o por configuración."
+costs:
+  - "Una indirección más que leer."
+  - "Si sólo hay una implementación, es abstracción innecesaria."
+alternatives:
+  - name: "Constructor directo"
+    when: "Si hay una única implementación y crearla es trivial, `new` es más claro."
+  - name: "Inyección de dependencias"
+    when: "Si la implementación se decide una vez al arrancar la aplicación, alcanza con crearla en la raíz de composición e inyectarla."
+commonMistakes:
+  - "Fábricas con un switch gigante que mezcla creación y lógica de negocio."
+  - "Crear una fábrica para cada clase, aunque nunca varíe."
+  - "Que la fábrica devuelva tipos concretos y el cliente termine dependiendo de ellos."
+avoidWhen:
+  - "Hay una única implementación sin variación prevista."
+  - "La elección ocurre una sola vez al iniciar: es configuración en la raíz de composición."
+interviewQuestions:
+  - question: "¿Qué diferencia hay entre Factory Method y Abstract Factory?"
+    answer: "Factory Method delega en una subclase (o una función) la creación de un producto. Abstract Factory crea familias de productos relacionados que deben usarse juntos, por ejemplo todos los componentes de un tema visual o todos los clientes de un proveedor de nube."
+  - question: "¿Cómo se relaciona una fábrica con la inyección de dependencias?"
+    answer: "Son complementarias: la inyección decide qué se pasa a cada objeto; una fábrica se inyecta cuando el objeto necesita crear instancias en tiempo de ejecución según datos (por ejemplo, un notificador por canal elegido por el usuario)."
+diagrams: []
+related: ["strategy", "builder", "adapter"]
+relatedLessons: ["software-architecture.design-patterns"]
+tags: ["factory", "creacional", "interfaces"]
+---
+
+## Motivación
+
+Una aplicación envía notificaciones por email, SMS o push según la preferencia de cada usuario. Cada proveedor tiene su
+cliente, credenciales y opciones (reintentos, remitente).
+
+## Ejemplo incorrecto
+
+```ts
+async function notify(user: User, message: string) {
+  if (user.channel === "email") {
+    const client = new SesClient({ region: "us-east-1", from: "no-reply@shop.com" });
+    await client.send(user.email, message);
+  } else if (user.channel === "sms") {
+    const client = new TwilioClient(process.env.TWILIO_SID!, process.env.TWILIO_TOKEN!);
+    await client.sms(user.phone, message);
+  }
+  // …el mismo if aparece en el recordatorio, el reseteo de contraseña y el resumen semanal
+}
+```
+
+## Implementación correcta
+
+```ts
+export interface Notifier {
+  send(user: User, message: string): Promise<void>;
+}
+
+export type Channel = "email" | "sms" | "push";
+
+export function createNotifierFactory(config: NotificationConfig) {
+  // Los clientes se crean una vez; la fábrica sólo elige.
+  const notifiers: Record<Channel, Notifier> = {
+    email: new EmailNotifier(new SesClient(config.ses)),
+    sms: new SmsNotifier(new TwilioClient(config.twilio)),
+    push: new PushNotifier(config.push),
+  };
+  return (channel: Channel): Notifier => notifiers[channel];
+}
+
+// Uso
+const notifierFor = createNotifierFactory(config);
+await notifierFor(user.channel).send(user, message);
+```
+
+Agregar un canal es agregar una implementación y una entrada. En los tests se pasa una fábrica que devuelve un
+notificador en memoria.
+
+## Ejercicio
+
+Ahora algunos usuarios quieren recibir por **dos** canales a la vez. ¿Cómo lo resolvés sin tocar los notificadores?
+
+<Reveal>
+
+Con un notificador compuesto (patrón **Composite**) que implementa la misma interfaz y delega en varios:
+
+```ts
+class MultiNotifier implements Notifier {
+  constructor(private readonly notifiers: readonly Notifier[]) {}
+  async send(user: User, message: string) {
+    await Promise.allSettled(this.notifiers.map((n) => n.send(user, message)));
+  }
+}
+
+const notifier = new MultiNotifier(user.channels.map(notifierFor));
+```
+
+La fábrica sigue eligiendo implementaciones simples y el cliente no se entera de que son varias.
+
+</Reveal>

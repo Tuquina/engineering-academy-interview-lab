@@ -1,0 +1,130 @@
+---
+id: pattern.chain-of-responsibility
+kind: design
+category: behavioral
+title: "Chain of Responsibility"
+summary: "Pasar una solicitud por una cadena de manejadores que pueden procesarla, transformarla o cortarla."
+difficulty: intermediate
+order: 65
+definition: "Chain of Responsibility encadena manejadores independientes: cada uno recibe la solicitud, decide si la procesa, la modifica o la pasa al siguiente, y puede cortar la cadena. Es el modelo de los middlewares de Express, Koa, Next.js y de los interceptores de clientes HTTP."
+problem: "Cada endpoint repite autenticación, rate limiting, validación, logging y manejo de errores al principio de su código. Agregar un control nuevo (por ejemplo, un header de auditoría) implica tocar todos los endpoints y es fácil olvidar uno."
+benefits:
+  - "Cada responsabilidad transversal vive en un manejador pequeño y testeable."
+  - "El orden y la composición de la cadena se configuran en un lugar."
+  - "Se agregan o quitan pasos sin tocar a los demás."
+costs:
+  - "El orden importa y no siempre es evidente (autenticar antes de autorizar, loguear antes de todo)."
+  - "Depurar qué manejador cortó la cadena puede ser difícil sin buen logging."
+alternatives:
+  - name: "Decorator"
+    when: "Si se envuelve un único objeto para agregar comportamiento y siempre se llama al envuelto."
+  - name: "Llamadas explícitas en el handler"
+    when: "Con uno o dos pasos que sólo aplican a un endpoint."
+commonMistakes:
+  - "Olvidar llamar a `next()` y dejar la request colgada."
+  - "Manejadores que dependen de efectos de otros sin declarar el orden."
+  - "Poner lógica de negocio en middlewares."
+avoidWhen:
+  - "El procesamiento es una secuencia fija sin pasos opcionales ni cortes."
+interviewQuestions:
+  - question: "¿Cómo funciona un middleware de Express o Koa?"
+    answer: "Cada middleware recibe la request, la respuesta y una función `next`. Puede responder y cortar la cadena, modificar la request y llamar a `next()`, o ejecutar código antes y después del siguiente (en Koa, con `await next()`, el modelo de cebolla)."
+  - question: "¿Qué diferencia hay entre Chain of Responsibility y Decorator?"
+    answer: "Ambos encadenan objetos, pero en Decorator cada capa siempre delega en la siguiente y agrega comportamiento alrededor; en Chain of Responsibility un manejador puede decidir no pasar la solicitud y resolverla él mismo o rechazarla."
+diagrams: []
+related: ["decorator", "command"]
+relatedLessons: ["nodejs.http-apis"]
+tags: ["middleware", "pipeline", "comportamiento"]
+---
+
+## Motivación
+
+Una API tiene decenas de endpoints que necesitan los mismos controles: correlation ID, logging, autenticación, rate
+limiting y manejo uniforme de errores.
+
+## Ejemplo incorrecto
+
+```ts
+export async function POST(request: Request) {
+  const requestId = crypto.randomUUID();
+  console.log(requestId, request.url);
+  const user = await authenticate(request);
+  if (!user) return Response.json({ error: "No autenticado" }, { status: 401 });
+  if (!(await rateLimiter.allow(user.id)))
+    return Response.json({ error: "Demasiadas requests" }, { status: 429 });
+  try {
+    // …lógica del endpoint
+  } catch (e) {
+    console.error(requestId, e);
+    return Response.json({ error: "Error interno" }, { status: 500 });
+  }
+}
+```
+
+Copiado en cada endpoint, con pequeñas diferencias y algún control olvidado.
+
+## Implementación correcta
+
+```ts
+type Context = { request: Request; requestId: string; user?: User };
+type Handler = (ctx: Context) => Promise<Response>;
+type Middleware = (ctx: Context, next: Handler) => Promise<Response>;
+
+const withErrors: Middleware = async (ctx, next) => {
+  try {
+    return await next(ctx);
+  } catch (error) {
+    logger.error({ requestId: ctx.requestId, error });
+    return Response.json({ error: "Error interno" }, { status: 500 });
+  }
+};
+
+const withAuth: Middleware = async (ctx, next) => {
+  const user = await authenticate(ctx.request);
+  if (!user) return Response.json({ error: "No autenticado" }, { status: 401 }); // corta la cadena
+  return next({ ...ctx, user });
+};
+
+const withRateLimit: Middleware = async (ctx, next) =>
+  (await rateLimiter.allow(ctx.user!.id))
+    ? next(ctx)
+    : Response.json({ error: "Demasiadas requests" }, { status: 429 });
+
+/** Compone los middlewares de afuera hacia adentro. */
+export const chain =
+  (...middlewares: Middleware[]) =>
+  (handler: Handler) =>
+  (request: Request) =>
+    middlewares.reduceRight<Handler>(
+      (next, mw) => (ctx) => mw(ctx, next),
+      handler,
+    )({
+      request,
+      requestId: request.headers.get("x-request-id") ?? crypto.randomUUID(),
+    });
+
+export const POST = chain(
+  withErrors,
+  withAuth,
+  withRateLimit,
+)(async ({ user }) => {
+  return Response.json(await createOrder(user!));
+});
+```
+
+## Ejercicio
+
+¿En qué orden pondrías `withErrors`, `withAuth`, `withRateLimit` y un `withLogging` que registra método, ruta, status y
+duración? Justificá.
+
+<Reveal>
+
+`withLogging` → `withErrors` → `withRateLimit` (por IP) → `withAuth` → (rate limit por usuario) → handler.
+
+- **Logging** afuera de todo, para medir la duración total y registrar también las respuestas de error.
+- **Errores** inmediatamente después, para que cualquier excepción de los siguientes se convierta en una respuesta
+  uniforme.
+- **Rate limit por IP antes de autenticar**: autenticar consulta la base y es caro; un atacante no debería poder
+  forzar esas consultas sin límite. El límite por usuario va después de saber quién es.
+
+</Reveal>

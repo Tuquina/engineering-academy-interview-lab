@@ -1,0 +1,151 @@
+{
+  "id": "sd-news-feed",
+  "title": "Feed de noticias",
+  "description": "Fan-out en escritura para la mayoría de los autores, fan-out en lectura para las celebridades, y el feed se arma desde caché.",
+  "kind": "architecture",
+  "tags": ["system design", "fan-out", "caching"],
+  "nodes": [
+    {
+      "id": "author",
+      "label": "Autor",
+      "kind": "actor",
+      "column": 0,
+      "row": 0,
+      "responsibility": "Publica un post. La mayoría tiene cientos de seguidores; algunos, millones.",
+      "examples": ["App", "Web"]
+    },
+    {
+      "id": "reader",
+      "label": "Lector",
+      "kind": "actor",
+      "column": 0,
+      "row": 2,
+      "responsibility": "Abre el feed y espera verlo en menos de 200 ms.",
+      "examples": ["App", "Web"]
+    },
+    {
+      "id": "post-svc",
+      "label": "Servicio de posts",
+      "kind": "service",
+      "column": 1,
+      "row": 0,
+      "responsibility": "Guarda el post y publica el evento PostCreated.",
+      "examples": ["POST /posts"]
+    },
+    {
+      "id": "posts-db",
+      "label": "Posts",
+      "kind": "database",
+      "column": 2,
+      "row": 0,
+      "responsibility": "Contenido de los posts, particionado por autor.",
+      "examples": ["Cassandra", "PostgreSQL particionado"]
+    },
+    {
+      "id": "fanout-queue",
+      "label": "Cola de fan-out",
+      "kind": "queue",
+      "column": 2,
+      "row": 1,
+      "responsibility": "Desacopla publicar de distribuir: el autor no espera a que se actualicen millones de feeds.",
+      "examples": ["Kafka", "SQS"]
+    },
+    {
+      "id": "fanout",
+      "label": "Workers de fan-out",
+      "kind": "worker",
+      "column": 3,
+      "row": 1,
+      "responsibility": "Para autores con pocos seguidores, agregan el ID del post al feed cacheado de cada seguidor. Las celebridades se saltean.",
+      "examples": ["Consumidores que escriben en Redis"]
+    },
+    {
+      "id": "graph",
+      "label": "Grafo social",
+      "kind": "database",
+      "column": 3,
+      "row": 0,
+      "responsibility": "Quién sigue a quién.",
+      "examples": ["Tabla follows", "Base de grafos"]
+    },
+    {
+      "id": "feed-cache",
+      "label": "Feeds en caché",
+      "kind": "cache",
+      "column": 3,
+      "row": 2,
+      "responsibility": "Por usuario, los IDs de los últimos ~500 posts de su feed (lista ordenada).",
+      "examples": ["Redis Sorted Set feed:{userId}"]
+    },
+    {
+      "id": "feed-svc",
+      "label": "Servicio de feed",
+      "kind": "service",
+      "column": 1,
+      "row": 2,
+      "responsibility": "Lee los IDs del feed cacheado, mezcla los posts recientes de las celebridades que sigue el lector, hidrata y rankea.",
+      "examples": ["GET /feed?cursor="]
+    }
+  ],
+  "edges": [
+    { "id": "nf-author-post", "from": "author", "to": "post-svc", "kind": "sync", "label": "publica" },
+    { "id": "nf-post-db", "from": "post-svc", "to": "posts-db", "kind": "sync", "label": "guarda" },
+    {
+      "id": "nf-post-queue",
+      "from": "post-svc",
+      "to": "fanout-queue",
+      "kind": "async",
+      "label": "PostCreated"
+    },
+    { "id": "nf-queue-fanout", "from": "fanout-queue", "to": "fanout", "kind": "async" },
+    { "id": "nf-fanout-graph", "from": "fanout", "to": "graph", "kind": "sync", "label": "seguidores" },
+    { "id": "nf-fanout-cache", "from": "fanout", "to": "feed-cache", "kind": "sync", "label": "push ID" },
+    { "id": "nf-reader-feed", "from": "reader", "to": "feed-svc", "kind": "sync", "label": "abre el feed" },
+    { "id": "nf-feed-cache", "from": "feed-svc", "to": "feed-cache", "kind": "sync", "label": "IDs" },
+    {
+      "id": "nf-feed-posts",
+      "from": "feed-svc",
+      "to": "posts-db",
+      "kind": "sync",
+      "label": "hidrata + celebridades"
+    }
+  ],
+  "steps": [
+    {
+      "title": "1. Publicar es rápido",
+      "description": "El post se guarda y se publica un evento. El autor recibe la respuesta sin esperar la distribución.",
+      "highlight": [
+        "author",
+        "post-svc",
+        "posts-db",
+        "fanout-queue",
+        "nf-author-post",
+        "nf-post-db",
+        "nf-post-queue"
+      ]
+    },
+    {
+      "title": "2. Fan-out en escritura",
+      "description": "Los workers leen los seguidores del autor y agregan el ID del post al feed cacheado de cada uno. Leer el feed después es barato porque ya está armado.",
+      "highlight": [
+        "fanout-queue",
+        "fanout",
+        "graph",
+        "feed-cache",
+        "nf-queue-fanout",
+        "nf-fanout-graph",
+        "nf-fanout-cache"
+      ]
+    },
+    {
+      "title": "3. Leer el feed",
+      "description": "El servicio toma los IDs del feed cacheado y los hidrata con el contenido de los posts (también cacheado), aplicando el ranking.",
+      "highlight": ["reader", "feed-svc", "feed-cache", "nf-reader-feed", "nf-feed-cache"]
+    },
+    {
+      "title": "4. El caso de las celebridades",
+      "description": "Escribir en 50 millones de feeds por cada post de una celebridad es inviable. Sus posts no se distribuyen: el servicio de feed los busca al leer (fan-out en lectura) y los mezcla.",
+      "highlight": ["feed-svc", "posts-db", "nf-feed-posts"]
+    }
+  ]
+}

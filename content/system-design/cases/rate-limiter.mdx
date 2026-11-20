@@ -1,0 +1,92 @@
+---
+id: case.rate-limiter
+title: "Rate limiter distribuido"
+summary: "Limitar requests por cliente en una API con muchas instancias: algoritmos, estado compartido y fallas."
+difficulty: intermediate
+durationMinutes: 35
+order: 2
+tags: ["rate limiting", "redis", "api gateway"]
+diagram: sd-rate-limiter
+functionalRequirements:
+  - "Limitar la cantidad de requests por cliente (API key, usuario o IP) en una ventana de tiempo."
+  - "Límites distintos por plan y por endpoint."
+  - "Responder 429 con información para reintentar."
+nonFunctionalRequirements:
+  - "Latencia agregada mínima (menos de 2 ms por request)."
+  - "El límite se respeta aunque haya decenas de instancias del gateway."
+  - "Si el limitador falla, la API no debería caerse."
+estimates:
+  - label: "Tráfico"
+    value: "50.000 req/s"
+    detail: "Pico de la API pública."
+  - label: "Clientes activos"
+    value: "1 M"
+    detail: "Una clave de contador por cliente y regla."
+  - label: "Memoria"
+    value: "~100 MB"
+    detail: "1 M claves × ~100 bytes (token bucket: tokens + timestamp)."
+  - label: "Operaciones Redis"
+    value: "50.000/s"
+    detail: "Una operación atómica por request; un nodo de Redis la soporta holgado."
+followUps:
+  - "¿Qué pasa en el borde entre dos ventanas con el algoritmo de ventana fija?"
+  - "Si Redis no responde, ¿dejás pasar o rechazás?"
+  - "¿Cómo limitarías por región sin un Redis global?"
+  - "¿Dónde aplicarías un límite de login para frenar fuerza bruta?"
+relatedPatterns: ["api-gateway"]
+relatedSimulations: ["rate-limiting"]
+---
+
+## API
+
+El limitador es interno; lo que el cliente ve son los headers:
+
+```http
+HTTP/1.1 429 Too Many Requests
+Retry-After: 12
+RateLimit-Limit: 60
+RateLimit-Remaining: 0
+RateLimit-Reset: 12
+```
+
+Internamente: `allow(key, rule) → { allowed, remaining, retryAfterMs }`.
+
+## Modelo de datos
+
+- **Reglas** (configuración): `plan`, `endpoint`, `limit`, `window` o `rate` + `burst`.
+- **Contadores** (Redis): una clave por cliente y regla, con TTL para que las inactivas desaparezcan.
+  - Ventana fija: `rl:{key}:{minuto}` → entero.
+  - Token bucket: hash `{ tokens, updatedAt }`.
+
+## Diseño de alto nivel
+
+El límite se aplica en el **gateway** (o un middleware compartido), antes de cualquier trabajo costoso. Las reglas se
+cachean en memoria; los contadores viven en **Redis** porque con varias instancias detrás de un balanceador un contador
+en memoria por instancia multiplicaría el límite real por la cantidad de instancias.
+
+## Profundización
+
+| Algoritmo              | Cómo funciona                               | Compromiso                                        |
+| ---------------------- | ------------------------------------------- | ------------------------------------------------- |
+| Ventana fija           | Contador por minuto                         | Permite hasta el doble en el borde entre ventanas |
+| Sliding window log     | Timestamps de cada request en un Sorted Set | Exacto; memoria proporcional a las requests       |
+| Sliding window counter | Ponderar la ventana anterior y la actual    | Aproximado, barato y sin el pico del borde        |
+| Token bucket           | Tokens que se recargan a ritmo fijo         | Permite ráfagas controladas; el más usado         |
+| Leaky bucket           | Cola que se vacía a ritmo constante         | Suaviza el tráfico de salida                      |
+
+**Atomicidad**: el chequeo y el consumo tienen que ser una sola operación. Un script Lua ejecuta en Redis "leer
+tokens, recargar según el tiempo, consumir, guardar" sin que otro cliente se intercale.
+
+**Latencia**: una ida y vuelta a Redis en la misma zona es ~0,5 ms. Para límites muy altos se puede combinar un
+contador local con sincronización periódica (menos exacto, menos latencia).
+
+**Fallas**: si Redis no responde en pocos milisegundos, **fail open** (dejar pasar con un límite local de emergencia)
+mantiene la API disponible; **fail closed** protege recursos críticos. Se decide por endpoint: login, fail closed;
+lecturas públicas, fail open.
+
+## Compromisos
+
+- Exactitud vs costo: sliding log es exacto pero caro; token bucket es el equilibrio habitual.
+- Global vs regional: un Redis por región evita latencia entre regiones a cambio de que un cliente pueda consumir el
+  límite en cada región.
+- El rate limiting no reemplaza otras defensas: para DDoS hace falta protección en el borde de la red (CDN/WAF).

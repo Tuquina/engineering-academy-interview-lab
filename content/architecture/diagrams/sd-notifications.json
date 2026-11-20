@@ -1,0 +1,151 @@
+{
+  "id": "sd-notifications",
+  "title": "Sistema de notificaciones",
+  "description": "Un servicio central recibe pedidos, aplica preferencias y deduplicación, y reparte por canal en colas independientes con reintentos.",
+  "kind": "architecture",
+  "tags": ["system design", "colas", "idempotencia"],
+  "nodes": [
+    {
+      "id": "producers",
+      "label": "Servicios productores",
+      "kind": "service",
+      "column": 0,
+      "row": 1,
+      "responsibility": "Pedidos, pagos, marketing: piden notificar con un evento y una clave de idempotencia, sin conocer los canales.",
+      "examples": ["order.shipped", "password.reset"]
+    },
+    {
+      "id": "notif-api",
+      "label": "Servicio de notificaciones",
+      "kind": "service",
+      "column": 1,
+      "row": 1,
+      "responsibility": "Valida, deduplica por clave, consulta preferencias, arma el contenido con plantillas y encola por canal.",
+      "examples": ["POST /notifications"]
+    },
+    {
+      "id": "prefs",
+      "label": "Preferencias y plantillas",
+      "kind": "database",
+      "column": 1,
+      "row": 0,
+      "responsibility": "Canales permitidos por usuario y tipo, horarios de silencio, idioma y plantillas versionadas.",
+      "examples": ["user_preferences", "templates"]
+    },
+    {
+      "id": "q-email",
+      "label": "Cola email",
+      "kind": "queue",
+      "column": 2,
+      "row": 0,
+      "responsibility": "Una cola por canal: un proveedor lento no frena a los demás.",
+      "examples": ["SQS", "RabbitMQ"]
+    },
+    {
+      "id": "q-push",
+      "label": "Cola push",
+      "kind": "queue",
+      "column": 2,
+      "row": 1,
+      "responsibility": "Notificaciones push con prioridad alta para las transaccionales.",
+      "examples": ["SQS", "RabbitMQ"]
+    },
+    {
+      "id": "q-sms",
+      "label": "Cola SMS",
+      "kind": "queue",
+      "column": 2,
+      "row": 2,
+      "responsibility": "SMS, el canal más caro: con rate limit propio.",
+      "examples": ["SQS", "RabbitMQ"]
+    },
+    {
+      "id": "workers",
+      "label": "Workers por canal",
+      "kind": "worker",
+      "column": 3,
+      "row": 1,
+      "responsibility": "Envían al proveedor con timeout, reintentos con backoff y circuit breaker; registran el resultado.",
+      "examples": ["email-worker", "push-worker", "sms-worker"]
+    },
+    {
+      "id": "providers",
+      "label": "Proveedores",
+      "kind": "external",
+      "column": 4,
+      "row": 1,
+      "responsibility": "Entregan el mensaje. Pueden fallar, responder lento o devolver errores permanentes (número inválido).",
+      "examples": ["SES/SendGrid", "APNs/FCM", "Twilio"]
+    },
+    {
+      "id": "dlq",
+      "label": "Dead-letter queue",
+      "kind": "queue",
+      "column": 3,
+      "row": 2,
+      "responsibility": "Mensajes que fallaron después de N reintentos, para revisar y reprocesar.",
+      "examples": ["notifications-dlq"]
+    },
+    {
+      "id": "log",
+      "label": "Registro de envíos",
+      "kind": "database",
+      "column": 3,
+      "row": 0,
+      "responsibility": "Estado de cada notificación (pendiente, enviada, entregada, fallida) y claves de idempotencia.",
+      "examples": ["notification_log"]
+    }
+  ],
+  "edges": [
+    {
+      "id": "nt-prod-api",
+      "from": "producers",
+      "to": "notif-api",
+      "kind": "sync",
+      "label": "evento + clave"
+    },
+    { "id": "nt-api-prefs", "from": "notif-api", "to": "prefs", "kind": "sync", "label": "preferencias" },
+    { "id": "nt-api-email", "from": "notif-api", "to": "q-email", "kind": "async" },
+    { "id": "nt-api-push", "from": "notif-api", "to": "q-push", "kind": "async" },
+    { "id": "nt-api-sms", "from": "notif-api", "to": "q-sms", "kind": "async" },
+    { "id": "nt-push-workers", "from": "q-push", "to": "workers", "kind": "async" },
+    { "id": "nt-workers-providers", "from": "workers", "to": "providers", "kind": "sync", "label": "envía" },
+    { "id": "nt-workers-log", "from": "workers", "to": "log", "kind": "sync", "label": "estado" },
+    { "id": "nt-workers-dlq", "from": "workers", "to": "dlq", "kind": "async", "label": "agotó reintentos" }
+  ],
+  "steps": [
+    {
+      "title": "1. Pedir una notificación",
+      "description": "El servicio de pedidos envía \"order.shipped\" con una clave de idempotencia. No sabe si el usuario prefiere email o push.",
+      "highlight": ["producers", "notif-api", "nt-prod-api"]
+    },
+    {
+      "title": "2. Preferencias y deduplicación",
+      "description": "Si la clave ya se procesó, no se envía de nuevo. Se consultan los canales que el usuario aceptó, su idioma y horario de silencio, y se arma el contenido con la plantilla.",
+      "highlight": ["notif-api", "prefs", "nt-api-prefs"]
+    },
+    {
+      "title": "3. Una cola por canal",
+      "description": "Cada canal tiene su cola y sus workers: si el proveedor de SMS está caído, email y push siguen saliendo.",
+      "highlight": ["notif-api", "q-email", "q-push", "q-sms", "nt-api-email", "nt-api-push", "nt-api-sms"]
+    },
+    {
+      "title": "4. Envío con reintentos",
+      "description": "El worker envía con timeout, registra el resultado y reintenta errores transitorios con backoff y jitter. Los errores permanentes (token inválido) no se reintentan.",
+      "highlight": [
+        "q-push",
+        "workers",
+        "providers",
+        "log",
+        "nt-push-workers",
+        "nt-workers-providers",
+        "nt-workers-log"
+      ]
+    },
+    {
+      "title": "5. Fallas definitivas",
+      "description": "Después de N intentos el mensaje va a la dead-letter queue, con alertas, para corregir la causa y reprocesar.",
+      "highlight": ["workers", "dlq", "nt-workers-dlq"]
+    }
+  ]
+}

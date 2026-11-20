@@ -1,0 +1,98 @@
+---
+id: pattern.strangler-fig
+kind: architecture
+category: integration
+title: "Strangler Fig"
+summary: "Reemplazar un sistema legado de a poco, desviando funcionalidad por funcionalidad hacia el sistema nuevo."
+difficulty: intermediate
+order: 160
+definition: "Strangler Fig (higuera estranguladora) migra un sistema legado de forma incremental: un proxy o gateway intercepta las requests y las enruta al sistema nuevo para las funcionalidades ya migradas y al legado para el resto. Con el tiempo el sistema nuevo crece alrededor del viejo hasta que este queda sin tráfico y se apaga."
+problem: "Un sistema legado crítico necesita modernizarse, pero una reescritura completa tarda años, congela las mejoras, acumula riesgo hasta un único corte final y muchas veces fracasa."
+benefits:
+  - "Cada paso es chico, entrega valor y se puede revertir."
+  - "El riesgo se distribuye en el tiempo en lugar de concentrarse en un gran corte."
+  - "El negocio sigue funcionando y recibiendo mejoras durante la migración."
+costs:
+  - "Durante la migración se operan dos sistemas y hay que mantener los datos sincronizados."
+  - "La capa de enrutamiento agrega complejidad y latencia."
+  - "Riesgo de que la migración se estanque a mitad y queden los dos sistemas para siempre."
+alternatives:
+  - name: "Reescritura completa (big bang)"
+    when: "Sólo en sistemas chicos, con alcance bien conocido y la posibilidad de un corte controlado."
+  - name: "Refactor in place"
+    when: "Si el legado tiene una base aceptable, mejorarlo por dentro (modularizar, agregar tests) puede ser más barato que reemplazarlo."
+commonMistakes:
+  - "Empezar por la parte más compleja y acoplada en lugar de una de bajo riesgo y alto valor."
+  - "Compartir la base de datos del legado sin un plan para separarla."
+  - "No medir el avance ni definir cuándo se apaga el legado."
+avoidWhen:
+  - "El sistema es chico y se puede reemplazar en un único corte de bajo riesgo."
+  - "No es posible interceptar las llamadas (clientes que acceden directo a la base del legado)."
+interviewQuestions:
+  - question: "¿Cómo elegís qué migrar primero?"
+    answer: "Algo con valor de negocio visible, límites claros y bajo acoplamiento con el resto, idealmente con datos propios. Sirve para validar la plataforma nueva, el enrutamiento y la operación con poco riesgo antes de atacar el núcleo."
+  - question: "¿Qué hacés con los datos durante la migración?"
+    answer: "Depende del tramo: el servicio nuevo puede leer del legado mientras tanto, sincronizarse con captura de cambios (CDC) o eventos, o hacer doble escritura con verificación. El objetivo es que cada funcionalidad migrada termine siendo dueña de sus datos."
+diagrams: ["strangler-fig"]
+related: ["api-gateway", "adapter", "hexagonal-architecture"]
+relatedLessons: ["software-architecture.distributed-patterns"]
+tags: ["migración", "legado", "modernización"]
+---
+
+## Motivación
+
+Un e-commerce funciona sobre un monolito de hace diez años. El equipo quiere un catálogo nuevo con búsqueda moderna y
+un checkout más rápido, sin frenar las ventas ni arriesgar todo en un único corte.
+
+## Ejemplo incorrecto
+
+"Congelamos el monolito, reescribimos todo en microservicios durante 18 meses y hacemos el cambio un domingo a la
+madrugada." Mientras tanto el negocio pide cambios que se hacen en los dos sistemas, el alcance crece y el día del corte
+aparecen comportamientos del legado que nadie documentó.
+
+## Implementación correcta
+
+```text
+Fase 1  Proxy delante del monolito: todo el tráfico pasa por él (sin cambios visibles).
+Fase 2  /catalog/* → servicio de catálogo nuevo (lee productos sincronizados por CDC).
+        Resto → monolito.
+Fase 3  /search/* → servicio de búsqueda. Se compara el resultado con el legado en sombra (shadow traffic).
+Fase 4  /checkout/* → servicio nuevo, primero para el 5 % de los usuarios (canary), luego 100 %.
+Fase 5  El monolito sin tráfico se apaga; se elimina la sincronización.
+```
+
+```ts
+// Regla de enrutamiento en el proxy (por ejemplo, un middleware o la configuración del gateway)
+const migrated = [
+  { prefix: "/catalog", target: CATALOG_URL },
+  { prefix: "/search", target: SEARCH_URL },
+  { prefix: "/checkout", target: CHECKOUT_URL, rollout: 0.05 },
+];
+
+function route(request: Request, userId: string): string {
+  const rule = migrated.find((r) => new URL(request.url).pathname.startsWith(r.prefix));
+  if (!rule) return LEGACY_URL;
+  if (rule.rollout !== undefined && hashToUnit(userId) >= rule.rollout) return LEGACY_URL;
+  return rule.target;
+}
+```
+
+Cada fase se puede revertir cambiando una regla. Un **adaptador anticorrupción** traduce el modelo del legado al del
+sistema nuevo para que sus conceptos no contaminen el diseño nuevo.
+
+## Ejercicio
+
+El servicio de checkout nuevo necesita los pedidos históricos, que siguen en la base del monolito. ¿Qué opciones tenés
+y cuál elegirías al principio?
+
+<Reveal>
+
+1. **Leer del legado** mediante una API o vista del monolito (rápido para empezar; acopla al esquema viejo).
+2. **Captura de cambios (CDC)**: replicar los pedidos a la base del servicio nuevo en casi tiempo real (desacopla
+   lecturas; hay que manejar el lag).
+3. **Migración + doble escritura** con verificación hasta que el nuevo sea la fuente de verdad.
+
+Al principio, leer del legado detrás de un **adaptador anticorrupción** permite avanzar rápido; a medida que el
+checkout gana tráfico conviene pasar a CDC y finalmente hacer que el servicio nuevo sea dueño de los pedidos.
+
+</Reveal>

@@ -1,0 +1,87 @@
+---
+id: case.notification-system
+title: "Sistema de notificaciones"
+summary: "Email, push y SMS para toda una empresa: preferencias, colas por canal, reintentos e idempotencia."
+difficulty: intermediate
+durationMinutes: 40
+order: 5
+tags: ["colas", "idempotencia", "resiliencia"]
+diagram: sd-notifications
+functionalRequirements:
+  - "Enviar notificaciones por email, push y SMS desde cualquier servicio."
+  - "Respetar preferencias del usuario (canales, tipos, horarios de silencio)."
+  - "Plantillas por idioma y tipo de notificación."
+  - "Consultar el estado de cada envío."
+nonFunctionalRequirements:
+  - "Las transaccionales (código de verificación) salen en segundos; las de marketing pueden esperar."
+  - "Nunca enviar dos veces la misma notificación por reintentos."
+  - "La caída de un proveedor no afecta a los otros canales."
+  - "Escalar a campañas de millones de destinatarios."
+estimates:
+  - label: "Notificaciones por día"
+    value: "50 M"
+    detail: "80 % push, 18 % email, 2 % SMS."
+  - label: "Promedio"
+    value: "~580/s"
+    detail: "50 M ÷ 86.400 s."
+  - label: "Pico de campaña"
+    value: "~50.000/s"
+    detail: "5 M destinatarios en pocos minutos: por eso las colas absorben el pico."
+  - label: "Costo SMS"
+    value: "Alto"
+    detail: "El canal más caro: rate limit y deduplicación estrictos."
+followUps:
+  - "¿Cómo evitás que un reintento envíe dos veces el mismo SMS?"
+  - "¿Cómo priorizás un código de verificación por sobre una campaña de marketing?"
+  - "¿Cómo respetás el horario de silencio en distintas zonas horarias?"
+  - "¿Qué hacés con los tokens de push que el proveedor marca como inválidos?"
+relatedPatterns: ["circuit-breaker", "transactional-outbox", "factory-method"]
+relatedSimulations: ["retry-backoff", "circuit-breaker", "queue-processing"]
+---
+
+## API
+
+```http
+POST /v1/notifications
+Idempotency-Key: order-981-shipped
+{ "userId": "u_42", "type": "order.shipped", "data": { "orderId": "981", "eta": "2026-11-21" }, "priority": "high" }
+→ 202 { "notificationId": "n_7f3", "status": "queued" }
+
+GET /v1/notifications/n_7f3 → { "status": "delivered", "channel": "push", "attempts": 1 }
+```
+
+## Modelo de datos
+
+- `user_preferences(user_id, type, channels[], quiet_hours, timezone, locale)`
+- `templates(type, channel, locale, version, subject, body)`
+- `notification_log(id, idempotency_key UNIQUE, user_id, type, channel, status, attempts, provider_id, updated_at)`
+- `device_tokens(user_id, platform, token, invalid_at)`
+
+## Diseño de alto nivel
+
+Los servicios productores sólo dicen **qué pasó** y a quién; el servicio de notificaciones decide **cómo** avisar. Una
+**cola por canal** (y por prioridad) aísla fallas y permite escalar cada canal por separado. Los workers aplican
+timeouts, reintentos con backoff y jitter, y circuit breaker por proveedor.
+
+## Profundización
+
+**Idempotencia de punta a punta.** La clave del productor se guarda con restricción única: un pedido repetido devuelve
+la notificación existente. Los workers reciben cada mensaje "al menos una vez", así que antes de enviar verifican el
+estado en el log y, cuando el proveedor lo soporta, le pasan una clave de idempotencia propia.
+
+**Prioridades.** Colas separadas para transaccionales y marketing, con más workers para las primeras. Una campaña de 5
+millones nunca demora un código de verificación.
+
+**Errores transitorios vs permanentes.** Un 5xx o timeout del proveedor se reintenta; un token de push inválido o un
+email rebotado no: se marca el token como inválido y se deja de usar.
+
+**Horario de silencio.** Se calcula en la zona horaria del usuario; las no urgentes se programan para después
+(cola con retraso o tabla de programados).
+
+## Compromisos
+
+- **Servicio central vs cada equipo integrando proveedores**: el central concentra preferencias, cumplimiento legal
+  (opt-out) y métricas, a cambio de ser una dependencia compartida.
+- **Garantía de entrega**: "al menos una vez" + deduplicación es lo alcanzable; "exactamente una vez" con proveedores
+  externos no se puede garantizar al 100 %.
+- **Costo**: SMS es caro; conviene usarlo sólo como respaldo o para lo crítico.

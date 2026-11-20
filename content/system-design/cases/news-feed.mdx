@@ -1,0 +1,89 @@
+---
+id: case.news-feed
+title: "Feed de noticias"
+summary: "El problema del fan-out: distribuir posts a millones de seguidores y leer el feed en milisegundos."
+difficulty: advanced
+durationMinutes: 45
+order: 4
+tags: ["fan-out", "caching", "lectura intensiva"]
+diagram: sd-news-feed
+functionalRequirements:
+  - "Publicar posts con texto e imágenes."
+  - "Ver un feed con los posts de las cuentas que seguís, de más nuevo a más viejo (o rankeado)."
+  - "Paginación infinita."
+nonFunctionalRequirements:
+  - "Leer el feed en menos de 200 ms (p99)."
+  - "Un post nuevo aparece en los feeds en pocos segundos (consistencia eventual aceptable)."
+  - "Alta disponibilidad: el feed es la pantalla principal."
+estimates:
+  - label: "Usuarios activos diarios"
+    value: "200 M"
+    detail: "Abren el feed ~10 veces por día."
+  - label: "Lecturas de feed"
+    value: "~23.000/s"
+    detail: "2.000 M por día ÷ 86.400; picos de 3×."
+  - label: "Posts nuevos"
+    value: "~2.300/s"
+    detail: "200 M posts por día."
+  - label: "Escrituras de fan-out"
+    value: "~460.000/s"
+    detail: "2.300 posts/s × 200 seguidores promedio: el costo está en distribuir, no en publicar."
+followUps:
+  - "¿Qué umbral de seguidores usarías para decidir entre fan-out en escritura y en lectura?"
+  - "¿Cómo manejás que un usuario deje de seguir a alguien?"
+  - "¿Cómo agregarías un ranking por relevancia en lugar de orden cronológico?"
+  - "¿Qué pasa con los feeds de usuarios que no entran hace meses?"
+relatedPatterns: ["cqrs", "observer"]
+relatedSimulations: ["cache-stampede", "queue-processing"]
+---
+
+## API
+
+```http
+POST /v1/posts            { text, mediaIds[] }            → 201 { postId }
+GET  /v1/feed?cursor=…    → { posts: [...], nextCursor }
+```
+
+El cursor es el ID (ordenable por tiempo) del último post recibido, así la paginación es estable aunque lleguen posts
+nuevos.
+
+## Modelo de datos
+
+- `posts(post_id, author_id, text, media, created_at)` particionado por autor.
+- `follows(follower_id, followee_id)` con índices en ambos sentidos.
+- `feed:{userId}` en Redis: Sorted Set de IDs de posts con score = timestamp, recortado a ~500.
+
+## Diseño de alto nivel
+
+Dos estrategias combinadas:
+
+- **Fan-out en escritura (push)**: al publicar, se agrega el ID del post al feed cacheado de cada seguidor. Leer es
+  barato; escribir es caro y proporcional a los seguidores.
+- **Fan-out en lectura (pull)**: al leer, se buscan los posts recientes de cada cuenta seguida y se mezclan. Escribir es
+  barato; leer es caro.
+
+El diseño **híbrido** usa push para la mayoría de los autores y pull para las cuentas con millones de seguidores.
+
+## Profundización
+
+**El umbral de celebridad.** Con 50 M de seguidores, un solo post serían 50 M de escrituras. Por encima de un umbral
+(por ejemplo, 10.000 seguidores) el post no se distribuye; al leer el feed, el servicio consulta los posts recientes de
+las pocas celebridades que sigue el lector (cacheados, porque los piden millones) y los mezcla con el feed
+precalculado.
+
+**Hidratación.** El feed cacheado guarda sólo IDs; el contenido de los posts (también en caché, por ID) se trae en un
+`MGET`. Así, editar o borrar un post no obliga a tocar millones de feeds.
+
+**Usuarios inactivos.** No tiene sentido mantener el feed de quien no entra hace meses: el fan-out se saltea a los
+inactivos y su feed se reconstruye con pull la próxima vez que entren.
+
+**Dejar de seguir.** El feed precalculado puede tener posts de alguien que ya no sigo: se filtran al leer contra la
+lista de seguidos, y se limpian en segundo plano.
+
+## Compromisos
+
+- **Push vs pull**: costo de escritura contra latencia de lectura; el híbrido toma lo mejor de cada uno.
+- **Consistencia eventual**: un post puede tardar segundos en aparecer en todos los feeds; es aceptable para el
+  producto.
+- **Ranking**: un modelo de relevancia necesita features (interacciones, afinidad) y agrega latencia; se rankea un
+  conjunto acotado de candidatos (los ~500 del feed), no todo el historial.

@@ -94,10 +94,27 @@ weight }]`, ≥4), `relatedPatterns` y `relatedSimulations`. El cuerpo es el esc
 El espacio de diseño usa siempre las 8 fases de `SYSTEM_DESIGN_PHASES`
 (`src/modules/system-design/domain/architecture-challenge.ts`).
 
+## 4 bis. Casos clásicos de System Design (`content/system-design/cases/<slug>.mdx`)
+
+Problemas de entrevista resueltos de punta a punta (acortador de URLs, chat, feed, pagos…), con un diagrama
+interactivo y animado.
+
+- Frontmatter: `id` (`case.<slug>`), `title`, `summary`, `difficulty`, `durationMinutes`, `order`, `tags`,
+  `diagram` (ID de un diagrama de `content/architecture/diagrams`, por convención `sd-<slug>`),
+  `functionalRequirements` (≥3), `nonFunctionalRequirements` (≥3), `estimates` (`[{ label, value, detail }]`, ≥2:
+  el `detail` muestra el cálculo), `followUps` (≥2), `relatedPatterns` y `relatedSimulations`.
+- Cuerpo con estas secciones de nivel 2, en orden: `API`, `Modelo de datos`, `Diseño de alto nivel`,
+  `Profundización` y `Compromisos`.
+- El diagrama necesita un recorrido (`steps`, ≥3). Dentro de cada paso, las conexiones resaltadas se animan **en el
+  orden en que aparecen en `highlight`**: listalas en el orden del flujo real.
+
+`tests/content/architecture-content.test.ts` verifica diagrama, secciones y patrones de cada caso.
+
 ## 5. Preguntas del Interview Arena (`content/interview/questions/<área>/<slug>.md`)
 
 El área sale de la carpeta (`typescript`, `nodejs`, `react`, `nextjs`, `architecture`, `system-design`,
-`databases`, `ai-engineering`).
+`databases`, `ai-engineering`, `algorithms`, `devops-security`, `behavioral`). Las de `ai-engineering` y
+`behavioral` tienen su propio modo y no se mezclan en Quick ni en Deep Dive.
 
 ```yaml
 ---

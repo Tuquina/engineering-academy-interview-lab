@@ -1,0 +1,85 @@
+---
+id: case.video-streaming
+title: "Plataforma de video"
+summary: "Subir, procesar y reproducir video a escala: object storage, transcodificación y streaming adaptativo con CDN."
+difficulty: advanced
+durationMinutes: 45
+order: 6
+tags: ["cdn", "object storage", "procesamiento asíncrono"]
+diagram: sd-video-streaming
+functionalRequirements:
+  - "Subir videos de hasta 10 GB."
+  - "Reproducir en distintos dispositivos y calidades."
+  - "Mostrar el estado del procesamiento al creador."
+  - "Contar reproducciones."
+nonFunctionalRequirements:
+  - "La reproducción arranca en menos de 2 s y no se corta (rebuffering mínimo)."
+  - "Las subidas toleran conexiones inestables."
+  - "Costo de ancho de banda y de procesamiento controlado."
+  - "Alta disponibilidad de la reproducción, aunque el procesamiento se atrase."
+estimates:
+  - label: "Subidas"
+    value: "500 h de video/min"
+    detail: "Orden de magnitud de una plataforma grande."
+  - label: "Almacenamiento"
+    value: "~1 PB/día"
+    detail: "Originales + 6 calidades; por eso se aplican políticas de ciclo de vida."
+  - label: "Reproducción"
+    value: "Decenas de Tbps"
+    detail: "Imposible servirlo desde un origen central: la CDN es obligatoria."
+  - label: "Segmento"
+    value: "2–6 s"
+    detail: "Unidad de descarga y de cambio de calidad."
+followUps:
+  - "¿Por qué no subir el video a través de tus propios servidores?"
+  - "¿Cómo paralelizarías la transcodificación de un video de 3 horas?"
+  - "¿Cómo contás vistas sin escribir en la base en cada reproducción?"
+  - "¿Qué hacés con los videos que casi nadie mira?"
+relatedPatterns: []
+relatedSimulations: ["queue-processing", "load-balancing"]
+---
+
+## API
+
+```http
+POST /v1/videos { title, sizeBytes }       → { videoId, uploadId, partUrls[] }   (URLs prefirmadas)
+POST /v1/videos/{id}/complete { parts[] }  → 202 (comienza el procesamiento)
+GET  /v1/videos/{id}                        → { status: "processing" | "ready", manifestUrl }
+```
+
+## Modelo de datos
+
+- `videos(id, owner_id, title, status, duration, created_at)` en PostgreSQL.
+- `renditions(video_id, resolution, bitrate, manifest_path)`.
+- Archivos en object storage: `raw/{id}` y `processed/{id}/{resolución}/seg_N.ts` + `master.m3u8`.
+- Vistas: contadores agregados (no una fila por reproducción en la base transaccional).
+
+## Diseño de alto nivel
+
+1. **Subida** directa al object storage con URLs prefirmadas y multipart upload: los servidores de la aplicación no
+   manejan gigabytes y las partes fallidas se reintentan solas.
+2. **Procesamiento** asíncrono por eventos: una cola reparte el trabajo entre transcodificadores.
+3. **Reproducción** con streaming adaptativo (HLS o DASH) servido desde una **CDN**.
+
+## Profundización
+
+**Transcodificación en paralelo.** El video se divide en segmentos (por ejemplo, de a 1 minuto) que se codifican en
+paralelo en todas las calidades y después se unen los manifiestos. Un video de 3 horas se procesa en minutos con
+suficientes workers. Es la etapa más cara: conviene priorizar (primero 720p para publicar rápido, el resto después).
+
+**Streaming adaptativo.** El manifiesto lista las calidades; el reproductor mide su ancho de banda y elige la calidad de
+cada segmento. Si la red empeora, baja de calidad en lugar de cortar.
+
+**CDN y costos.** La CDN cachea los segmentos populares cerca de los usuarios. Los videos que casi nadie mira se dejan
+en el origen y sus calidades altas pueden generarse bajo demanda; los originales viejos pasan a almacenamiento frío.
+
+**Vistas.** El reproductor envía eventos de reproducción a un stream; un proceso los agrega por ventana de tiempo y
+actualiza contadores. La cifra visible tiene consistencia eventual.
+
+## Compromisos
+
+- **Procesar todas las calidades vs bajo demanda**: costo de cómputo y almacenamiento contra latencia de la primera
+  reproducción en calidades poco usadas.
+- **HLS vs DASH**: HLS tiene soporte nativo en dispositivos Apple; DASH es estándar abierto. Muchas plataformas generan
+  ambos o usan CMAF para compartir segmentos.
+- **Segmentos cortos vs largos**: cortos adaptan la calidad más rápido; largos comprimen mejor y hacen menos requests.

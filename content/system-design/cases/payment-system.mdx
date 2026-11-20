@@ -1,0 +1,96 @@
+---
+id: case.payment-system
+title: "Sistema de pagos"
+summary: "Cobrar sin duplicar ni perder dinero: idempotencia, estados, webhooks, ledger de doble entrada y conciliación."
+difficulty: advanced
+durationMinutes: 45
+order: 8
+tags: ["idempotencia", "consistencia", "pagos"]
+diagram: sd-payments
+functionalRequirements:
+  - "Cobrar un pedido con tarjeta u otros medios a través de un proveedor externo."
+  - "Reembolsos totales y parciales."
+  - "Consultar el estado de un pago."
+  - "Notificar a otros servicios cuando un pago se confirma."
+nonFunctionalRequirements:
+  - "Nunca cobrar dos veces la misma intención de pago."
+  - "Nunca perder el registro de un cobro realizado."
+  - "Auditoría completa de cada movimiento de dinero."
+  - "Cumplir PCI DSS sin almacenar datos de tarjeta."
+estimates:
+  - label: "Pagos por día"
+    value: "10 M"
+    detail: "~115/s promedio; picos de 10× en eventos de ventas."
+  - label: "Latencia aceptable"
+    value: "1–3 s"
+    detail: "Dominada por el proveedor y la red de tarjetas, no por el sistema propio."
+  - label: "Asientos del ledger"
+    value: "≥ 20 M/día"
+    detail: "Al menos dos entradas (débito y crédito) por movimiento."
+  - label: "Retención"
+    value: "Años"
+    detail: "Requisitos contables y legales: los datos no se borran, se agregan correcciones."
+followUps:
+  - "El proveedor respondió con timeout. ¿El pago se hizo o no? ¿Qué hacés?"
+  - "¿Por qué un ledger de doble entrada en lugar de una columna saldo?"
+  - "¿Cómo manejás un webhook que llega antes que la respuesta síncrona?"
+  - "¿Cómo diseñarías los reembolsos parciales?"
+relatedPatterns: ["transactional-outbox", "saga", "state", "event-sourcing"]
+relatedSimulations: ["retry-backoff", "circuit-breaker"]
+---
+
+## API
+
+```http
+POST /v1/payments
+Idempotency-Key: 3f1c7a90-…
+{ "orderId": "o_981", "amount": 125000, "currency": "ARS", "paymentMethodToken": "pm_tok_…" }
+→ 201 { "paymentId": "pay_42", "status": "processing" }
+
+GET  /v1/payments/pay_42                       → { "status": "succeeded" }
+POST /v1/payments/pay_42/refunds { amount }     (también con Idempotency-Key)
+```
+
+Los montos se guardan como **enteros en la unidad mínima** (centavos), nunca como floats.
+
+## Modelo de datos
+
+- `payments(id, idempotency_key UNIQUE, order_id, amount, currency, status, psp_reference, created_at, updated_at)`
+- `payment_events(id, payment_id, type, psp_event_id UNIQUE, payload, received_at)` — historial y deduplicación.
+- `ledger_entries(id, transaction_id, account_id, direction, amount, currency, created_at)` — append-only.
+- `outbox(id, aggregate_id, type, payload, published_at)`.
+
+## Diseño de alto nivel
+
+1. Intención de pago **idempotente** y máquina de estados explícita.
+2. Llamada al proveedor con la **misma clave de idempotencia** (los proveedores serios la soportan).
+3. Confirmación por **webhook** firmado, deduplicado y procesado en una cola.
+4. **Ledger de doble entrada** como fuente de verdad del dinero.
+5. Eventos por **outbox** y **conciliación** diaria contra el proveedor.
+
+## Profundización
+
+**El timeout ambiguo.** Si la llamada al proveedor expira, el cobro pudo haberse realizado. Nunca se reintenta con una
+clave nueva: se reintenta con la **misma** (el proveedor devuelve el resultado original) o se consulta el estado; el
+pago queda en `processing` hasta saberlo. El webhook o la consulta lo resuelven.
+
+**Webhook antes que la respuesta.** El orden no está garantizado. La máquina de estados acepta transiciones válidas en
+cualquier orden (`processing → succeeded`) y las repetidas no hacen nada; el ID de evento del proveedor es único.
+
+**Doble entrada.** Cada movimiento son al menos dos asientos que suman cero: cobrar 1.250 debita "cuenta por cobrar del
+proveedor" y acredita "ventas" del comercio. Un saldo es la suma de los asientos de su cuenta. Si algo no cuadra, el
+error es detectable; con una columna `saldo` actualizada en el lugar, el historial se pierde.
+
+**Reembolsos parciales.** Son nuevas transacciones referenciadas al pago original, validadas contra lo ya reembolsado
+(dentro de una transacción con bloqueo de la fila del pago), y con su propia clave de idempotencia.
+
+**Seguridad.** Los datos de tarjeta van directo del navegador al proveedor (tokenización); el sistema sólo ve un token.
+Así el alcance de PCI DSS se reduce al mínimo.
+
+## Compromisos
+
+- **Síncrono vs asíncrono**: confirmar en la respuesta es mejor experiencia, pero la verdad llega por webhook; la UI
+  muestra "procesando" cuando hace falta.
+- **Consistencia fuerte en el núcleo, eventual en los bordes**: el ledger y los estados del pago son transaccionales;
+  emails y analíticas reaccionan a eventos.
+- **Un proveedor o varios**: varios dan resiliencia y mejores tasas, a cambio de más integración y conciliación.

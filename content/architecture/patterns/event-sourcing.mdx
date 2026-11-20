@@ -1,0 +1,118 @@
+---
+id: pattern.event-sourcing
+kind: architecture
+category: distributed-data
+title: "Event Sourcing"
+summary: "Guardar la secuencia de hechos que ocurrieron en lugar del estado actual, y reconstruir el estado a partir de ellos."
+difficulty: advanced
+order: 115
+definition: 'En Event Sourcing la fuente de verdad es un log append-only de eventos de dominio ("DepósitoRealizado", "RetiroRealizado"). El estado actual de una entidad se obtiene reproduciendo sus eventos en orden; las vistas de lectura se construyen con proyecciones. Nada se actualiza ni se borra: se agregan eventos nuevos, incluso para corregir.'
+problem: "En un sistema de cuentas, guardar sólo el saldo actual pierde el historial: no se puede responder por qué el saldo es ese, auditar cada cambio, reconstruir el estado a una fecha pasada ni generar nuevas vistas a partir de lo que ocurrió."
+benefits:
+  - "Auditoría completa e inmutable: cada cambio queda registrado con su causa."
+  - "Se puede reconstruir el estado en cualquier momento del pasado (viaje en el tiempo)."
+  - "Nuevas proyecciones o reportes se generan reprocesando los eventos existentes."
+  - "Encaja naturalmente con arquitecturas orientadas a eventos."
+costs:
+  - "Mucha más complejidad: proyecciones, consistencia eventual en las lecturas, snapshots."
+  - "Versionar eventos es difícil: los eventos viejos nunca cambian y el código debe entender todas sus versiones."
+  - "Consultas ad hoc sobre el estado requieren proyecciones; el log no se consulta como una tabla."
+  - "Borrar datos personales (GDPR) exige técnicas como el borrado criptográfico."
+alternatives:
+  - name: "Estado actual + tabla de auditoría"
+    when: "Si sólo se necesita saber quién cambió qué y cuándo, una tabla de historial o auditoría es mucho más simple."
+  - name: "CQRS sin Event Sourcing"
+    when: "Si el objetivo es separar lecturas de escrituras, alcanza con proyecciones alimentadas por eventos publicados vía outbox."
+commonMistakes:
+  - "Adoptarlo en todo el sistema en lugar de en el subdominio que lo justifica."
+  - 'Eventos con nombres CRUD ("CuentaActualizada") que no explican qué ocurrió.'
+  - "No planificar snapshots y reproducir millones de eventos en cada lectura."
+  - "Cambiar el esquema de eventos ya guardados en lugar de versionarlos (upcasting)."
+avoidWhen:
+  - "El dominio es CRUD sin reglas ni necesidad de historial."
+  - "El equipo no tiene experiencia y no hay un requisito fuerte de auditoría o reconstrucción."
+interviewQuestions:
+  - question: "¿Event Sourcing y CQRS son lo mismo?"
+    answer: "No. CQRS separa el modelo de escritura del de lectura; se puede hacer con una base relacional común. Event Sourcing cambia cómo se persiste el modelo de escritura: como eventos. Suelen combinarse porque con Event Sourcing casi siempre hacen falta proyecciones de lectura, pero cada uno existe sin el otro."
+  - question: "¿Cómo evitás reproducir todos los eventos de una cuenta con años de movimientos?"
+    answer: "Con snapshots: cada N eventos se guarda el estado calculado junto con la versión; para reconstruir se carga el último snapshot y se aplican sólo los eventos posteriores."
+  - question: "¿Cómo manejás dos comandos concurrentes sobre la misma entidad?"
+    answer: "Con concurrencia optimista sobre la versión del stream: al guardar se indica la versión esperada y el store rechaza la escritura si otro proceso ya agregó eventos; el comando se reintenta con el estado actualizado."
+diagrams: ["event-sourcing"]
+related: ["cqrs", "transactional-outbox", "saga"]
+relatedLessons: ["software-architecture.distributed-patterns"]
+tags: ["event sourcing", "auditoría", "proyecciones", "eventos"]
+---
+
+## Motivación
+
+Una billetera digital necesita responder "¿por qué mi saldo es este?", reconstruir el saldo de cualquier cuenta a fin
+de mes para el regulador y detectar fraudes analizando secuencias de movimientos.
+
+## Ejemplo incorrecto
+
+```ts
+async function withdraw(accountId: string, amountCents: number) {
+  const account = await db.accounts.find(accountId);
+  if (account.balanceCents < amountCents) throw new Error("Saldo insuficiente");
+  await db.accounts.update(accountId, { balanceCents: account.balanceCents - amountCents });
+  // El saldo anterior se perdió. ¿Cuánto había el 31 de octubre? Imposible saberlo con certeza.
+}
+```
+
+## Implementación correcta
+
+```ts
+type AccountEvent =
+  | { type: "AccountOpened"; accountId: string; ownerId: string }
+  | { type: "MoneyDeposited"; amountCents: number }
+  | { type: "MoneyWithdrawn"; amountCents: number };
+
+interface AccountState {
+  balanceCents: number;
+  version: number;
+}
+
+/** El estado es una función pura de los eventos. */
+function evolve(state: AccountState, event: AccountEvent): AccountState {
+  switch (event.type) {
+    case "AccountOpened":
+      return { balanceCents: 0, version: state.version + 1 };
+    case "MoneyDeposited":
+      return { balanceCents: state.balanceCents + event.amountCents, version: state.version + 1 };
+    case "MoneyWithdrawn":
+      return { balanceCents: state.balanceCents - event.amountCents, version: state.version + 1 };
+  }
+}
+
+/** Decidir: valida el comando contra el estado y devuelve los eventos nuevos (o un error). */
+function withdraw(state: AccountState, amountCents: number): AccountEvent[] {
+  if (amountCents <= 0) throw new Error("Monto inválido");
+  if (state.balanceCents < amountCents) throw new Error("Saldo insuficiente");
+  return [{ type: "MoneyWithdrawn", amountCents }];
+}
+
+async function handleWithdraw(accountId: string, amountCents: number) {
+  const events = await eventStore.readStream(`account-${accountId}`);
+  const state = events.reduce(evolve, { balanceCents: 0, version: 0 });
+  const newEvents = withdraw(state, amountCents);
+  // Concurrencia optimista: falla si otro proceso agregó eventos desde que leímos.
+  await eventStore.append(`account-${accountId}`, newEvents, { expectedVersion: state.version });
+}
+```
+
+Las pantallas no reproducen eventos: una **proyección** consume el stream y mantiene una tabla `account_balances`
+para consultas rápidas.
+
+## Ejercicio
+
+Un depósito se registró por error con el monto equivocado. ¿Cómo lo corregís si los eventos son inmutables?
+
+<Reveal>
+
+Agregando eventos compensatorios, como en la contabilidad: un `DepositReversed` (o `MoneyWithdrawn` con motivo
+"corrección") por el monto erróneo y un `MoneyDeposited` con el correcto, ambos con referencia al evento original y a
+quién autorizó la corrección. El historial muestra el error y su corrección; nunca se edita un evento guardado. Las
+proyecciones se actualizan solas al procesar los eventos nuevos.
+
+</Reveal>

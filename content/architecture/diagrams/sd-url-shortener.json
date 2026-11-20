@@ -1,0 +1,133 @@
+{
+  "id": "sd-url-shortener",
+  "title": "Acortador de URLs",
+  "description": "Escritura con generación de IDs sin colisiones, lectura servida desde caché y analíticas fuera del camino crítico.",
+  "kind": "architecture",
+  "tags": ["system design", "caching", "ids distribuidos"],
+  "nodes": [
+    {
+      "id": "user",
+      "label": "Usuario",
+      "kind": "actor",
+      "column": 0,
+      "row": 1,
+      "responsibility": "Crea enlaces cortos y hace clic en ellos. Las lecturas superan a las escrituras 100 a 1.",
+      "examples": ["Navegador", "App", "Bot de redes sociales"]
+    },
+    {
+      "id": "lb",
+      "label": "Load balancer",
+      "kind": "service",
+      "column": 1,
+      "row": 1,
+      "responsibility": "Reparte las requests entre instancias sin estado del servicio y termina TLS.",
+      "examples": ["AWS ALB", "NGINX"]
+    },
+    {
+      "id": "write-api",
+      "label": "Servicio de escritura",
+      "kind": "service",
+      "column": 2,
+      "row": 0,
+      "responsibility": "Valida la URL, obtiene un ID único, lo codifica en base62 y guarda el mapeo.",
+      "examples": ["POST /urls → { code: \"a9X3kQ2\" }"]
+    },
+    {
+      "id": "ids",
+      "label": "Generador de IDs",
+      "kind": "service",
+      "column": 3,
+      "row": 0,
+      "responsibility": "Entrega rangos de IDs a cada instancia (por ejemplo, de a 10.000) para generar códigos sin colisiones ni coordinación por request.",
+      "examples": ["Secuencia por rangos en la base", "Snowflake"]
+    },
+    {
+      "id": "read-api",
+      "label": "Servicio de redirección",
+      "kind": "service",
+      "column": 2,
+      "row": 2,
+      "responsibility": "Resuelve el código y responde 301/302 con la URL larga. Es el camino crítico: debe ser muy rápido.",
+      "examples": ["GET /{code} → 302 Location"]
+    },
+    {
+      "id": "cache",
+      "label": "Caché",
+      "kind": "cache",
+      "column": 3,
+      "row": 2,
+      "responsibility": "Código → URL de los enlaces populares. La distribución de clics es muy desigual: un porcentaje chico de enlaces recibe casi todo el tráfico.",
+      "examples": ["Redis con política LRU"]
+    },
+    {
+      "id": "db",
+      "label": "Base clave-valor",
+      "kind": "database",
+      "column": 4,
+      "row": 1,
+      "responsibility": "Fuente de verdad del mapeo código → URL, particionada por código. Escala horizontal y acceso por clave.",
+      "examples": ["DynamoDB", "Cassandra", "PostgreSQL con índice por código"]
+    },
+    {
+      "id": "queue",
+      "label": "Stream de clics",
+      "kind": "queue",
+      "column": 3,
+      "row": 3,
+      "responsibility": "Recibe un evento por clic sin frenar la redirección.",
+      "examples": ["Kafka", "Kinesis"]
+    },
+    {
+      "id": "analytics",
+      "label": "Analíticas",
+      "kind": "worker",
+      "column": 4,
+      "row": 3,
+      "responsibility": "Agrega clics por enlace, país y referer en lotes.",
+      "examples": ["Consumidor que escribe en un almacén columnar"]
+    }
+  ],
+  "edges": [
+    { "id": "us-user-lb", "from": "user", "to": "lb", "kind": "sync", "label": "HTTPS" },
+    { "id": "us-lb-write", "from": "lb", "to": "write-api", "kind": "sync", "label": "POST /urls" },
+    { "id": "us-write-ids", "from": "write-api", "to": "ids", "kind": "sync", "label": "pide rango" },
+    { "id": "us-write-db", "from": "write-api", "to": "db", "kind": "sync", "label": "guarda" },
+    { "id": "us-lb-read", "from": "lb", "to": "read-api", "kind": "sync", "label": "GET /{code}" },
+    { "id": "us-read-cache", "from": "read-api", "to": "cache", "kind": "sync", "label": "1. busca" },
+    { "id": "us-read-db", "from": "read-api", "to": "db", "kind": "sync", "label": "2. si falta" },
+    { "id": "us-read-queue", "from": "read-api", "to": "queue", "kind": "async", "label": "clic" },
+    { "id": "us-queue-analytics", "from": "queue", "to": "analytics", "kind": "async" }
+  ],
+  "steps": [
+    {
+      "title": "1. Crear un enlace",
+      "description": "El servicio de escritura toma el siguiente ID de su rango local (sin consultar a nadie por cada request), lo codifica en base62 y guarda código → URL.",
+      "highlight": [
+        "user",
+        "lb",
+        "write-api",
+        "ids",
+        "db",
+        "us-user-lb",
+        "us-lb-write",
+        "us-write-ids",
+        "us-write-db"
+      ]
+    },
+    {
+      "title": "2. Redirección con cache hit",
+      "description": "La mayoría de los clics son sobre pocos enlaces populares: el código se resuelve en Redis en menos de un milisegundo y se responde la redirección.",
+      "highlight": ["user", "lb", "read-api", "cache", "us-user-lb", "us-lb-read", "us-read-cache"]
+    },
+    {
+      "title": "3. Cache miss",
+      "description": "Si el código no está en caché se lee de la base y se guarda en Redis con TTL. Un código inexistente también se cachea un rato (caché negativa) para que no lleguen a la base.",
+      "highlight": ["read-api", "cache", "db", "us-read-cache", "us-read-db"]
+    },
+    {
+      "title": "4. Analíticas asíncronas",
+      "description": "Cada clic publica un evento en un stream y la redirección responde sin esperar. Si las analíticas se atrasan o caen, las redirecciones siguen funcionando.",
+      "highlight": ["read-api", "queue", "analytics", "us-read-queue", "us-queue-analytics"]
+    }
+  ]
+}

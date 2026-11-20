@@ -1,0 +1,124 @@
+---
+id: pattern.builder
+kind: design
+category: creational
+title: "Builder"
+summary: "Construir objetos complejos paso a paso, con valores por defecto y validación al final."
+difficulty: basic
+order: 6
+definition: "Builder separa la construcción de un objeto complejo de su representación: se configuran sus partes con métodos encadenados y un paso final (`build`) valida y devuelve el objeto inmutable. En TypeScript muchas veces lo reemplaza un objeto de opciones; Builder aporta cuando hay pasos, combinaciones inválidas o construcción incremental."
+problem: 'Un constructor con diez parámetros, varios opcionales y algunos que sólo tienen sentido juntos, es ilegible (`new Query("users", null, null, 10, true, …)`) y permite crear objetos inválidos.'
+benefits:
+  - "Código de construcción legible y autodocumentado."
+  - "Valida combinaciones en un solo lugar antes de crear el objeto."
+  - "Permite construir de forma incremental y producir objetos inmutables."
+costs:
+  - "Más código que un objeto de opciones."
+  - "El builder y el objeto pueden desincronizarse si no se mantienen juntos."
+alternatives:
+  - name: "Objeto de opciones con valores por defecto"
+    when: "En TypeScript, `createClient({ timeoutMs: 5000 })` con tipos opcionales resuelve la mayoría de los casos sin una clase extra."
+  - name: "Funciones fábrica con nombre"
+    when: "Si hay pocas configuraciones típicas, `Money.fromCents()` o `Report.monthly()` son más claras."
+commonMistakes:
+  - "Usar un builder para objetos de dos o tres campos."
+  - "No validar en `build()` y permitir objetos incompletos."
+  - "Builders mutables compartidos entre llamadas que arrastran estado."
+avoidWhen:
+  - "Un objeto de opciones tipado alcanza."
+  - "El objeto es simple y todos sus campos son obligatorios."
+interviewQuestions:
+  - question: "¿Builder o un objeto de opciones en TypeScript?"
+    answer: "El objeto de opciones es la opción por defecto: es tipado, legible y simple. Builder aporta cuando la construcción tiene pasos u orden, cuando hay que validar combinaciones antes de crear el objeto o cuando se arma incrementalmente, como un query builder."
+  - question: "Nombrá un builder que uses todos los días."
+    answer: "Los query builders (Drizzle, Knex: `db.select().from(users).where(…).limit(10)`), `new URL()` con `searchParams`, o los builders de requests en clientes HTTP y de esquemas como Zod."
+diagrams: []
+related: ["factory-method"]
+relatedLessons: ["software-architecture.design-patterns"]
+tags: ["builder", "creacional", "inmutabilidad"]
+---
+
+## Motivación
+
+Un servicio de reportes arma consultas de búsqueda de productos con filtros opcionales, orden, paginación por cursor y
+un límite máximo. Algunas combinaciones no son válidas: no se puede paginar por cursor si no hay un orden estable.
+
+## Ejemplo incorrecto
+
+```ts
+const query = new ProductSearch("zapatillas", null, ["running"], 20, null, "price", true, null);
+// ¿Qué era el quinto parámetro? ¿El true es el orden descendente o "incluir sin stock"?
+```
+
+## Implementación correcta
+
+```ts
+export class ProductSearchBuilder {
+  private filters: { category?: string; tags: string[] } = { tags: [] };
+  private sort?: { field: "price" | "createdAt"; direction: "asc" | "desc" };
+  private pageSize = 20;
+  private cursor?: string;
+
+  constructor(private readonly text: string) {}
+
+  inCategory(category: string) {
+    this.filters.category = category;
+    return this;
+  }
+  withTags(...tags: string[]) {
+    this.filters.tags.push(...tags);
+    return this;
+  }
+  sortBy(field: "price" | "createdAt", direction: "asc" | "desc" = "asc") {
+    this.sort = { field, direction };
+    return this;
+  }
+  limit(size: number) {
+    this.pageSize = size;
+    return this;
+  }
+  after(cursor: string) {
+    this.cursor = cursor;
+    return this;
+  }
+
+  build(): Readonly<ProductSearch> {
+    if (this.pageSize < 1 || this.pageSize > 100) throw new Error("El límite debe estar entre 1 y 100");
+    if (this.cursor && !this.sort) throw new Error("Paginar por cursor requiere un orden estable");
+    return Object.freeze({
+      text: this.text,
+      filters: { ...this.filters },
+      sort: this.sort,
+      pageSize: this.pageSize,
+      cursor: this.cursor,
+    });
+  }
+}
+
+const search = new ProductSearchBuilder("zapatillas").withTags("running").sortBy("price").limit(20).build();
+```
+
+## Ejercicio
+
+¿Cómo lograrías que el compilador impida llamar a `after()` sin haber llamado antes a `sortBy()`, en lugar de
+validarlo en runtime?
+
+<Reveal>
+
+Con un **builder tipado por estado**: cada método devuelve un tipo distinto que sólo expone los métodos permitidos.
+
+```ts
+interface Unsorted {
+  sortBy(field: SortField): Sorted;
+  build(): ProductSearch;
+}
+interface Sorted {
+  after(cursor: string): Sorted;
+  build(): ProductSearch;
+}
+```
+
+`after` sólo existe en `Sorted`, así que `new Builder("x").after("c")` no compila. Es más código: vale la pena en
+librerías públicas donde el error de uso es frecuente.
+
+</Reveal>

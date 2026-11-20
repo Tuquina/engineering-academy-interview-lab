@@ -1,7 +1,7 @@
 import { Clock, PenTool } from "lucide-react";
 import type { Metadata } from "next";
 import Link from "next/link";
-import { getArchitectureChallenges } from "@/infrastructure/composition/system-design";
+import { getArchitectureChallenges, getCaseStudies } from "@/infrastructure/composition/system-design";
 import { DIFFICULTY_LABELS } from "@/modules/learning/domain/catalog-types";
 import { SIMULATIONS } from "@/modules/system-design/domain/simulations/catalog";
 import { Badge } from "@/shared/ui/badge";
@@ -9,16 +9,47 @@ import { Badge } from "@/shared/ui/badge";
 export const metadata: Metadata = { title: "System Design Studio" };
 
 export default async function SystemDesignPage() {
-  const challenges = await getArchitectureChallenges();
+  const [challenges, cases] = await Promise.all([getArchitectureChallenges(), getCaseStudies()]);
   return (
     <div className="mx-auto max-w-6xl">
       <header className="mb-6">
         <h1 className="text-foreground text-3xl font-bold tracking-tight">System Design Studio</h1>
         <p className="text-muted mt-2 max-w-3xl">
-          Practicá diseño de sistemas con un canvas de arquitectura, simuladores de comportamientos
-          distribuidos y desafíos con requerimientos, preguntas aclaratorias, checklist y rúbrica.
+          Aprendé con casos clásicos resueltos y diagramas animados, practicá con un canvas de arquitectura,
+          simuladores de comportamientos distribuidos y desafíos con requerimientos, preguntas aclaratorias,
+          checklist y rúbrica.
         </p>
       </header>
+
+      <section aria-labelledby="casos" className="mb-10">
+        <h2 id="casos" className="text-foreground mb-1 text-xl font-semibold tracking-tight">
+          Casos clásicos de entrevista
+        </h2>
+        <p className="text-muted mb-3 text-sm">
+          Problemas que se repiten en entrevistas reales, resueltos de punta a punta: requerimientos,
+          estimaciones, un diagrama interactivo con el recorrido animado de cada flujo, profundizaciones y
+          compromisos.
+        </p>
+        <ul className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {cases.map((study) => (
+            <li key={study.id}>
+              <Link
+                href={`/system-design/cases/${study.slug}`}
+                className="border-border bg-surface hover:border-accent/50 flex h-full flex-col gap-3 rounded-lg border p-5 transition-colors"
+              >
+                <h3 className="text-foreground font-semibold">{study.title}</h3>
+                <p className="text-muted flex-1 text-sm">{study.summary}</p>
+                <div className="flex flex-wrap gap-1.5">
+                  <Badge tone="accent">{DIFFICULTY_LABELS[study.difficulty]}</Badge>
+                  {study.tags.slice(0, 3).map((t) => (
+                    <Badge key={t}>{t}</Badge>
+                  ))}
+                </div>
+              </Link>
+            </li>
+          ))}
+        </ul>
+      </section>
 
       <Link
         href="/system-design/canvas"

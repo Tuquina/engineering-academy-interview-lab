@@ -1,0 +1,92 @@
+{
+  "id": "sd-rate-limiter",
+  "title": "Rate limiter distribuido",
+  "description": "El gateway consulta un contador compartido y atómico antes de dejar pasar cada request; las reglas se cachean localmente.",
+  "kind": "architecture",
+  "tags": ["system design", "rate limiting", "redis"],
+  "nodes": [
+    {
+      "id": "client",
+      "label": "Cliente de la API",
+      "kind": "actor",
+      "column": 0,
+      "row": 1,
+      "responsibility": "Integra la API pública con una API key. Puede ser legítimo con picos o abusivo.",
+      "examples": ["Integración de un partner", "Script de scraping"]
+    },
+    {
+      "id": "gateway",
+      "label": "API Gateway",
+      "kind": "service",
+      "column": 1,
+      "row": 1,
+      "responsibility": "Identifica la clave del límite (API key, usuario, IP), consulta el limitador y responde 429 si se superó.",
+      "examples": ["Middleware de rate limit", "Envoy con servicio de rate limit"]
+    },
+    {
+      "id": "rules",
+      "label": "Reglas por plan",
+      "kind": "database",
+      "column": 1,
+      "row": 0,
+      "responsibility": "Límites por plan y por endpoint (free: 60/min, pro: 1.000/min, login: 5/min). Se cachean en memoria del gateway.",
+      "examples": ["Tabla rate_limit_rules", "Archivo de configuración"]
+    },
+    {
+      "id": "redis",
+      "label": "Contadores (Redis)",
+      "kind": "cache",
+      "column": 2,
+      "row": 0,
+      "responsibility": "Estado compartido entre todas las instancias del gateway. Cada verificación es un script Lua atómico (token bucket).",
+      "examples": ["EVALSHA token_bucket.lua key rate capacity now"]
+    },
+    {
+      "id": "api",
+      "label": "Servicios de la API",
+      "kind": "service",
+      "column": 2,
+      "row": 2,
+      "responsibility": "Sólo reciben el tráfico permitido.",
+      "examples": ["orders-service", "search-service"]
+    },
+    {
+      "id": "metrics",
+      "label": "Métricas y alertas",
+      "kind": "worker",
+      "column": 3,
+      "row": 1,
+      "responsibility": "Cuenta los 429 por cliente y regla para detectar abuso o límites mal calibrados.",
+      "examples": ["Prometheus", "Datadog"]
+    }
+  ],
+  "edges": [
+    { "id": "rl-client-gw", "from": "client", "to": "gateway", "kind": "sync", "label": "request + API key" },
+    { "id": "rl-gw-rules", "from": "gateway", "to": "rules", "kind": "sync", "label": "límite (cacheado)" },
+    { "id": "rl-gw-redis", "from": "gateway", "to": "redis", "kind": "sync", "label": "consumir token" },
+    { "id": "rl-gw-api", "from": "gateway", "to": "api", "kind": "sync", "label": "permitido" },
+    { "id": "rl-gw-metrics", "from": "gateway", "to": "metrics", "kind": "async", "label": "429 / allowed" }
+  ],
+  "steps": [
+    {
+      "title": "1. Identificar y buscar la regla",
+      "description": "El gateway extrae la clave (API key) y obtiene el límite de su plan desde una caché local, sin consultar la base en cada request.",
+      "highlight": ["client", "gateway", "rules", "rl-client-gw", "rl-gw-rules"]
+    },
+    {
+      "title": "2. Verificación atómica",
+      "description": "Un script Lua recarga los tokens según el tiempo transcurrido y consume uno en una sola operación. Leer y escribir por separado dejaría pasar requests concurrentes de más.",
+      "highlight": ["gateway", "redis", "rl-gw-redis"]
+    },
+    {
+      "title": "3. Permitir o rechazar",
+      "description": "Si quedaban tokens, la request sigue a la API con headers RateLimit-Remaining. Si no, se responde 429 con Retry-After sin tocar los servicios.",
+      "highlight": ["gateway", "api", "rl-gw-api"]
+    },
+    {
+      "title": "4. Observar",
+      "description": "Se registran los rechazos por cliente y regla: muchos 429 de un cliente legítimo indican un límite mal calibrado; de muchos clientes, un ataque.",
+      "highlight": ["gateway", "metrics", "rl-gw-metrics"]
+    }
+  ]
+}

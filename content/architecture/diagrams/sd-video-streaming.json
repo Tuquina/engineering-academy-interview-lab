@@ -1,0 +1,155 @@
+{
+  "id": "sd-video-streaming",
+  "title": "Plataforma de video",
+  "description": "Subida directa a object storage, transcodificación asíncrona en varias calidades y reproducción adaptativa servida desde la CDN.",
+  "kind": "architecture",
+  "tags": ["system design", "cdn", "procesamiento asíncrono"],
+  "nodes": [
+    {
+      "id": "creator",
+      "label": "Creador",
+      "kind": "actor",
+      "column": 0,
+      "row": 0,
+      "responsibility": "Sube un video de varios GB, posiblemente con una conexión inestable.",
+      "examples": ["App de escritorio", "Web"]
+    },
+    {
+      "id": "viewer",
+      "label": "Espectador",
+      "kind": "actor",
+      "column": 0,
+      "row": 2,
+      "responsibility": "Reproduce el video; su ancho de banda cambia durante la reproducción.",
+      "examples": ["Smart TV", "Celular"]
+    },
+    {
+      "id": "upload-api",
+      "label": "Servicio de subida",
+      "kind": "service",
+      "column": 1,
+      "row": 0,
+      "responsibility": "Crea el registro del video y entrega URLs prefirmadas para subir por partes directamente al storage.",
+      "examples": ["POST /videos → URLs prefirmadas multipart"]
+    },
+    {
+      "id": "raw",
+      "label": "Storage de originales",
+      "kind": "database",
+      "column": 2,
+      "row": 0,
+      "responsibility": "Guarda el archivo original. La subida no pasa por los servidores de la aplicación.",
+      "examples": ["S3", "GCS"]
+    },
+    {
+      "id": "queue",
+      "label": "Cola de procesamiento",
+      "kind": "queue",
+      "column": 3,
+      "row": 0,
+      "responsibility": "Recibe el evento \"subida completa\" y reparte el trabajo de transcodificación.",
+      "examples": ["SQS", "Kafka"]
+    },
+    {
+      "id": "transcoders",
+      "label": "Transcodificadores",
+      "kind": "worker",
+      "column": 3,
+      "row": 1,
+      "responsibility": "Dividen el video en segmentos y los codifican en paralelo en varias resoluciones y bitrates (HLS/DASH). Es lo más costoso en CPU/GPU.",
+      "examples": ["FFmpeg en contenedores", "AWS Elemental MediaConvert"]
+    },
+    {
+      "id": "processed",
+      "label": "Storage de segmentos",
+      "kind": "database",
+      "column": 2,
+      "row": 1,
+      "responsibility": "Segmentos de pocos segundos por calidad y manifiestos (playlists).",
+      "examples": ["video/123/720p/seg_0001.ts", "master.m3u8"]
+    },
+    {
+      "id": "metadata",
+      "label": "Metadatos",
+      "kind": "database",
+      "column": 1,
+      "row": 1,
+      "responsibility": "Título, estado (subiendo, procesando, listo), calidades disponibles, vistas.",
+      "examples": ["PostgreSQL"]
+    },
+    {
+      "id": "cdn",
+      "label": "CDN",
+      "kind": "cache",
+      "column": 1,
+      "row": 2,
+      "responsibility": "Sirve los segmentos desde nodos cercanos al espectador. Casi todo el tráfico de reproducción termina acá.",
+      "examples": ["CloudFront", "Akamai", "Fastly"]
+    }
+  ],
+  "edges": [
+    {
+      "id": "vs-creator-upload",
+      "from": "creator",
+      "to": "upload-api",
+      "kind": "sync",
+      "label": "inicia subida"
+    },
+    {
+      "id": "vs-creator-raw",
+      "from": "creator",
+      "to": "raw",
+      "kind": "sync",
+      "label": "partes (URL prefirmada)"
+    },
+    { "id": "vs-upload-meta", "from": "upload-api", "to": "metadata", "kind": "sync", "label": "estado" },
+    { "id": "vs-raw-queue", "from": "raw", "to": "queue", "kind": "async", "label": "subida completa" },
+    { "id": "vs-queue-trans", "from": "queue", "to": "transcoders", "kind": "async" },
+    {
+      "id": "vs-trans-processed",
+      "from": "transcoders",
+      "to": "processed",
+      "kind": "sync",
+      "label": "segmentos"
+    },
+    { "id": "vs-trans-meta", "from": "transcoders", "to": "metadata", "kind": "sync", "label": "listo" },
+    {
+      "id": "vs-viewer-cdn",
+      "from": "viewer",
+      "to": "cdn",
+      "kind": "sync",
+      "label": "manifiesto + segmentos"
+    },
+    { "id": "vs-cdn-processed", "from": "cdn", "to": "processed", "kind": "sync", "label": "cache miss" }
+  ],
+  "steps": [
+    {
+      "title": "1. Subida directa y por partes",
+      "description": "El servicio entrega URLs prefirmadas y el archivo va directo al storage en partes. Si la conexión se corta, se reintentan sólo las partes que faltan.",
+      "highlight": [
+        "creator",
+        "upload-api",
+        "raw",
+        "metadata",
+        "vs-creator-upload",
+        "vs-creator-raw",
+        "vs-upload-meta"
+      ]
+    },
+    {
+      "title": "2. Procesamiento asíncrono",
+      "description": "Al completarse la subida, el storage emite un evento. La transcodificación tarda minutos y escala con más workers, sin bloquear a nadie.",
+      "highlight": ["raw", "queue", "transcoders", "vs-raw-queue", "vs-queue-trans"]
+    },
+    {
+      "title": "3. Varias calidades en segmentos",
+      "description": "El video se divide en segmentos de pocos segundos codificados en 240p a 4K. Se generan los manifiestos y el video pasa a \"listo\".",
+      "highlight": ["transcoders", "processed", "metadata", "vs-trans-processed", "vs-trans-meta"]
+    },
+    {
+      "title": "4. Reproducción adaptativa desde la CDN",
+      "description": "El reproductor descarga el manifiesto y pide segmento por segmento, eligiendo la calidad según su ancho de banda. La CDN sirve casi todo; el origen sólo recibe los cache miss.",
+      "highlight": ["viewer", "cdn", "processed", "vs-viewer-cdn", "vs-cdn-processed"]
+    }
+  ]
+}

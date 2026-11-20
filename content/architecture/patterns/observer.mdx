@@ -1,0 +1,136 @@
+---
+id: pattern.observer
+kind: design
+category: behavioral
+title: "Observer"
+summary: "Notificar a varios interesados cuando algo cambia, sin que el emisor los conozca."
+difficulty: basic
+order: 55
+definition: "Observer define una relación uno a muchos: un sujeto mantiene una lista de observadores y los notifica cuando ocurre un evento, sin conocer qué hace cada uno. Es la base de los eventos del DOM, EventEmitter de Node.js, los stores reactivos y los eventos de dominio."
+problem: "Cuando se confirma un pedido hay que enviar un email, descontar stock, sumar puntos y avisar a analítica. Si el caso de uso llama a cada servicio directamente, cada reacción nueva obliga a modificarlo, crece su lista de dependencias y un fallo en algo secundario (los puntos) rompe la operación principal."
+benefits:
+  - "El emisor no depende de los receptores: agregar una reacción es registrar un observador."
+  - "Cada reacción se prueba y evoluciona por separado."
+  - "Es el paso intermedio natural hacia eventos asíncronos entre servicios."
+costs:
+  - "El flujo es menos explícito: hay que buscar quién escucha cada evento."
+  - "Errores y orden de ejecución de los observadores tienen que definirse a propósito."
+  - "Observadores que no se desregistran causan memory leaks."
+alternatives:
+  - name: "Llamadas directas"
+    when: "Con una o dos reacciones estables que forman parte de la misma operación, llamarlas explícitamente es más claro."
+  - name: "Mensajería asíncrona (cola o bus de eventos)"
+    when: "Si las reacciones son lentas, pueden fallar o viven en otros servicios, se publica el evento en una cola (idealmente con outbox) en lugar de notificar en memoria."
+commonMistakes:
+  - "Ejecutar observadores lentos (enviar emails) dentro de la transacción principal."
+  - "Dejar que la excepción de un observador corte la notificación a los demás o la operación principal."
+  - "Olvidar desuscribirse (listeners en componentes, sockets, intervalos)."
+avoidWhen:
+  - "La reacción es parte obligatoria de la operación y debe ocurrir en la misma transacción."
+  - "Hay un único receptor y no se esperan más."
+interviewQuestions:
+  - question: "¿Qué diferencia hay entre Observer y Pub/Sub?"
+    answer: "En Observer el sujeto conoce y notifica directamente a sus observadores, normalmente en el mismo proceso y de forma síncrona. En Pub/Sub hay un intermediario (un broker o bus): el publicador y los suscriptores no se conocen, y la entrega suele ser asíncrona y entre procesos."
+  - question: "¿Qué pasa si un observador lanza una excepción?"
+    answer: "Depende de la implementación: si no se aísla, corta la notificación a los demás y puede propagar el error al emisor. Conviene capturar y registrar el error de cada observador, o publicar el evento de forma asíncrona para que una reacción secundaria nunca afecte la operación principal."
+  - question: "¿Cómo garantizarías que el email se envíe aunque el proceso se caiga justo después de guardar el pedido?"
+    answer: "Notificar en memoria no lo garantiza. Se guarda el evento en una tabla outbox en la misma transacción del pedido y un proceso aparte lo publica y reintenta; el consumidor debe ser idempotente."
+diagrams: ["event-driven"]
+related: ["transactional-outbox", "command"]
+relatedLessons: ["nodejs.streams-events"]
+tags: ["observer", "eventos", "desacoplamiento", "EventEmitter"]
+---
+
+## Motivación
+
+En un e-commerce, confirmar un pedido dispara varias reacciones: email de confirmación, reserva de stock, puntos de
+fidelidad y un evento para analítica. Las reacciones cambian seguido (marketing pide una nueva cada trimestre) y no
+todas son críticas.
+
+## Ejemplo incorrecto
+
+```ts
+class ConfirmOrder {
+  constructor(
+    private orders: OrderRepository,
+    private mailer: Mailer,
+    private stock: StockService,
+    private loyalty: LoyaltyService,
+    private analytics: Analytics,
+  ) {}
+
+  async execute(orderId: string) {
+    const order = await this.orders.confirm(orderId);
+    await this.mailer.sendConfirmation(order); // si falla el email, falla la confirmación
+    await this.stock.reserve(order.items);
+    await this.loyalty.addPoints(order.customerId, order.total);
+    await this.analytics.track("order_confirmed", order);
+  }
+}
+```
+
+El caso de uso conoce a todos los interesados, cada reacción nueva lo modifica y un fallo en algo secundario rompe la
+operación principal.
+
+## Implementación correcta
+
+```ts
+type OrderConfirmed = { type: "order.confirmed"; orderId: string; customerId: string; totalCents: number };
+type Listener<E> = (event: E) => void | Promise<void>;
+
+export class EventBus<E extends { type: string }> {
+  private listeners = new Map<E["type"], Set<Listener<E>>>();
+
+  subscribe(type: E["type"], listener: Listener<E>): () => void {
+    const set = this.listeners.get(type) ?? new Set();
+    set.add(listener);
+    this.listeners.set(type, set);
+    return () => set.delete(listener); // desuscripción explícita
+  }
+
+  async publish(event: E): Promise<void> {
+    const listeners = [...(this.listeners.get(event.type) ?? [])];
+    // Cada observador se aísla: el error de uno no afecta a los demás ni al emisor.
+    const results = await Promise.allSettled(listeners.map((listener) => listener(event)));
+    for (const result of results) if (result.status === "rejected") logger.error(result.reason);
+  }
+}
+
+class ConfirmOrder {
+  constructor(
+    private orders: OrderRepository,
+    private events: EventBus<OrderConfirmed>,
+  ) {}
+
+  async execute(orderId: string) {
+    const order = await this.orders.confirm(orderId);
+    await this.events.publish({
+      type: "order.confirmed",
+      orderId: order.id,
+      customerId: order.customerId,
+      totalCents: order.totalCents,
+    });
+  }
+}
+
+// En la raíz de composición:
+bus.subscribe("order.confirmed", (e) => mailer.sendConfirmation(e.orderId));
+bus.subscribe("order.confirmed", (e) => loyalty.addPoints(e.customerId, e.totalCents));
+```
+
+El caso de uso sólo anuncia lo que pasó. Las reacciones se registran en un lugar y se prueban por separado.
+
+## Ejercicio
+
+La reserva de stock **no** es opcional: si falla, el pedido no debería quedar confirmado. ¿Sigue siendo un observador?
+
+<Reveal>
+
+No. Lo que forma parte de la invariante de la operación (confirmar sólo si hay stock) va **dentro** del caso de uso o
+de la misma transacción, con llamadas explícitas. Observer es para reacciones que pueden ocurrir después y fallar sin
+deshacer la operación principal (email, puntos, analítica).
+
+Si el stock vive en otro servicio, la coordinación se resuelve con una **saga**: el pedido queda "pendiente", se
+reserva el stock y recién entonces se confirma, o se compensa si la reserva falla.
+
+</Reveal>

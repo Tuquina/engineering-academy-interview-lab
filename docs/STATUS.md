@@ -475,6 +475,24 @@ Pendiente o limitado:
 - TLS hacia la base sin validar la CA de Supabase; límites del proveedor LLM real en memoria por instancia.
 - Sin dominio propio ni PWA instalable; el inicio de sesión con GitHub requiere crear una OAuth App.
 
+## Ampliación de contenido para búsqueda laboral (2026-11-20)
+
+La plataforma pasa a ser una academia genérica para prepararse para buscar trabajo (sin empresa objetivo).
+
+- [x] Ping diario a la base (Vercel Cron → `/api/cron/keep-alive`) para que Supabase Free no pause el proyecto.
+- [x] 165 flashcards en 12 mazos (todos los cursos + algoritmos y comportamiento) y 16 cheatsheets.
+- [x] Interview Arena: 77 preguntas en 11 áreas (nuevas: algoritmos; calidad, DevOps y seguridad;
+      comportamiento), modo "Entrevista de comportamiento" y sección opcional en la mock.
+- [x] 12 problemas de live coding de estructuras de datos y algoritmos (two sum, ventana deslizante, intervalos,
+      top-k, búsqueda binaria, BFS, orden topológico, LRU, programación dinámica…) con tests públicos, ocultos y de
+      complejidad. En live coding se puede elegir al azar entre algoritmos y problemas prácticos.
+- [x] 19 patrones (nuevos: Factory, Builder, Facade, Observer, Command, Chain of Responsibility, Event Sourcing,
+      API Gateway/BFF, Strangler Fig).
+- [x] System Design: 8 casos clásicos (URL shortener, rate limiter, chat, feed, notificaciones, video, viajes, pagos)
+      con requerimientos, estimaciones, desarrollo y diagrama interactivo.
+- [x] Diagramas animados: un punto recorre cada conexión en la dirección del flujo (en el orden del paso actual),
+      reproducción automática del recorrido y respeto de `prefers-reduced-motion`. 21 diagramas en total.
+
 ## Próximas fases
 
 | Fase                                                                          | Estado     |
@@ -492,10 +510,10 @@ Pendiente o limitado:
 | Elemento                    | Actual                                                    | Objetivo |
 | --------------------------- | --------------------------------------------------------- | -------- |
 | Lecciones sustantivas       | 60                                                        | 40 ✅    |
-| Challenges                  | 11 + 4 de arquitectura (+ 6 ejercicios SQL)               | 25       |
-| Preguntas de evaluación     | 180 knowledge checks + 27 del Interview Arena             | 60 ✅    |
-| Flashcards                  | 32                                                        | 30 ✅    |
-| Diagramas                   | 13 (10 interactivos + 1 flujo + 2 Mermaid)                | 12 ✅    |
+| Challenges                  | 23 + 4 de arquitectura (+ 6 ejercicios SQL)               | 25 ✅    |
+| Preguntas de evaluación     | 180 knowledge checks + 77 del Interview Arena             | 60 ✅    |
+| Flashcards                  | 165                                                       | 30 ✅    |
+| Diagramas                   | 21 interactivos y animados (+ Mermaid en lecciones)       | 12 ✅    |
 | Simuladores o laboratorios  | 13 (3 laboratorios + 6 simuladores + 4 del AI Agents Lab) | 5 ✅     |
-| Escenarios de System Design | 5 (4 del Studio + rate limiting)                          | 5 ✅     |
+| Escenarios de System Design | 12 (8 casos clásicos + 4 desafíos del Studio)             | 5 ✅     |
 | Ruta de 7 días operativa    | No                                                        | 1        |

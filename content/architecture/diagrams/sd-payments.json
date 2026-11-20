@@ -1,0 +1,136 @@
+{
+  "id": "sd-payments",
+  "title": "Sistema de pagos",
+  "description": "Idempotencia en cada paso, un ledger de doble entrada como fuente de verdad, webhooks del proveedor y conciliación diaria.",
+  "kind": "architecture",
+  "tags": ["system design", "pagos", "idempotencia", "consistencia"],
+  "nodes": [
+    {
+      "id": "checkout",
+      "label": "Checkout",
+      "kind": "ui",
+      "column": 0,
+      "row": 1,
+      "responsibility": "Envía el pago con una clave de idempotencia generada antes del primer intento. Nunca maneja datos de tarjeta en crudo (tokenización del proveedor).",
+      "examples": ["Formulario con el SDK del proveedor"]
+    },
+    {
+      "id": "payment-svc",
+      "label": "Servicio de pagos",
+      "kind": "service",
+      "column": 1,
+      "row": 1,
+      "responsibility": "Registra la intención de pago, deduplica por clave, llama al proveedor y gestiona la máquina de estados.",
+      "examples": ["created → processing → succeeded / failed"]
+    },
+    {
+      "id": "payments-db",
+      "label": "Pagos",
+      "kind": "database",
+      "column": 1,
+      "row": 0,
+      "responsibility": "Intenciones de pago con restricción única por clave de idempotencia y estado actual.",
+      "examples": ["payments(idempotency_key UNIQUE, status, amount)"]
+    },
+    {
+      "id": "psp",
+      "label": "Proveedor de pagos",
+      "kind": "external",
+      "column": 2,
+      "row": 1,
+      "responsibility": "Procesa el cobro con la red de tarjetas. Puede responder tarde, fallar por timeout después de cobrar o notificar más tarde por webhook.",
+      "examples": ["Stripe", "Adyen", "Mercado Pago"]
+    },
+    {
+      "id": "webhook",
+      "label": "Receptor de webhooks",
+      "kind": "service",
+      "column": 2,
+      "row": 2,
+      "responsibility": "Verifica la firma, deduplica por ID de evento, responde 2xx rápido y procesa en una cola.",
+      "examples": ["POST /webhooks/psp"]
+    },
+    {
+      "id": "ledger",
+      "label": "Ledger",
+      "kind": "database",
+      "column": 1,
+      "row": 2,
+      "responsibility": "Contabilidad de doble entrada, append-only: cada movimiento debita una cuenta y acredita otra por el mismo monto. Es la fuente de verdad del dinero.",
+      "examples": ["entries(transaction_id, account, debit, credit)"]
+    },
+    {
+      "id": "outbox",
+      "label": "Outbox → eventos",
+      "kind": "queue",
+      "column": 0,
+      "row": 2,
+      "responsibility": "PaymentSucceeded se publica desde la misma transacción que actualiza el pago (outbox), para pedidos, emails y facturación.",
+      "examples": ["Tabla outbox + publicador"]
+    },
+    {
+      "id": "recon",
+      "label": "Conciliación",
+      "kind": "worker",
+      "column": 3,
+      "row": 1,
+      "responsibility": "Compara cada día el ledger con el reporte de liquidación del proveedor y marca diferencias para revisar.",
+      "examples": ["Job diario", "Alertas por diferencias"]
+    }
+  ],
+  "edges": [
+    {
+      "id": "pa-checkout-svc",
+      "from": "checkout",
+      "to": "payment-svc",
+      "kind": "sync",
+      "label": "pagar + Idempotency-Key"
+    },
+    { "id": "pa-svc-db", "from": "payment-svc", "to": "payments-db", "kind": "sync", "label": "intención" },
+    {
+      "id": "pa-svc-psp",
+      "from": "payment-svc",
+      "to": "psp",
+      "kind": "sync",
+      "label": "cobro (misma clave)"
+    },
+    { "id": "pa-psp-webhook", "from": "psp", "to": "webhook", "kind": "async", "label": "resultado" },
+    { "id": "pa-webhook-ledger", "from": "webhook", "to": "ledger", "kind": "sync", "label": "asiento" },
+    {
+      "id": "pa-ledger-outbox",
+      "from": "ledger",
+      "to": "outbox",
+      "kind": "async",
+      "label": "PaymentSucceeded"
+    },
+    { "id": "pa-recon-ledger", "from": "recon", "to": "ledger", "kind": "sync", "label": "compara" },
+    { "id": "pa-recon-psp", "from": "recon", "to": "psp", "kind": "sync", "label": "reporte de liquidación" }
+  ],
+  "steps": [
+    {
+      "title": "1. Intención de pago idempotente",
+      "description": "El checkout envía una clave de idempotencia. Si el usuario hace doble clic o el cliente reintenta, la restricción única devuelve el mismo pago en lugar de crear otro.",
+      "highlight": ["checkout", "payment-svc", "payments-db", "pa-checkout-svc", "pa-svc-db"]
+    },
+    {
+      "title": "2. Cobro en el proveedor",
+      "description": "Se llama al proveedor con la misma clave. Si hay timeout, no se asume que falló: el pago queda \"processing\" y se consulta o se espera el webhook, nunca se cobra de nuevo a ciegas.",
+      "highlight": ["payment-svc", "psp", "pa-svc-psp"]
+    },
+    {
+      "title": "3. Confirmación por webhook",
+      "description": "El proveedor notifica el resultado. Se verifica la firma, se deduplica por ID de evento y se registra el asiento de doble entrada en el ledger.",
+      "highlight": ["psp", "webhook", "ledger", "pa-psp-webhook", "pa-webhook-ledger"]
+    },
+    {
+      "title": "4. Eventos para el resto del sistema",
+      "description": "PaymentSucceeded sale por outbox: pedidos, emails y facturación reaccionan sin acoplarse al servicio de pagos y sin perder eventos si algo se cae.",
+      "highlight": ["ledger", "outbox", "pa-ledger-outbox"]
+    },
+    {
+      "title": "5. Conciliación",
+      "description": "Todos los días se compara el ledger con lo que el proveedor dice que liquidó. Toda diferencia (un cobro sin registro, un reembolso faltante) se investiga.",
+      "highlight": ["recon", "ledger", "psp", "pa-recon-ledger", "pa-recon-psp"]
+    }
+  ]
+}

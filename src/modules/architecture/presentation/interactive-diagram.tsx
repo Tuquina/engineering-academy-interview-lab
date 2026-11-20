@@ -3,17 +3,20 @@
 import "@xyflow/react/dist/style.css";
 import {
   Background,
+  BaseEdge,
   Controls,
+  getBezierPath,
   Handle,
   MarkerType,
   Position,
   ReactFlow,
   type Edge,
+  type EdgeProps,
   type Node,
   type NodeProps,
 } from "@xyflow/react";
-import { ChevronLeft, ChevronRight, Maximize2, Minimize2, Route } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { ChevronLeft, ChevronRight, Maximize2, Minimize2, Pause, Play, Route, Waves } from "lucide-react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { useTheme } from "@/shared/layout/theme-toggle";
 import { cn } from "@/shared/lib/cn";
 import { Button } from "@/shared/ui/button";
@@ -95,6 +98,94 @@ function DiagramNodeView({ data }: NodeProps<Node<NodeData>>) {
 
 const nodeTypes = { diagram: DiagramNodeView };
 
+interface FlowData extends Record<string, unknown> {
+  /** Si hay un "paquete" recorriendo la conexión. */
+  flowing: boolean;
+  color: string;
+  /** Segundos que tarda el paquete en recorrer la conexión. */
+  duration: number;
+  /** Retraso de inicio: dentro de un paso, las conexiones se animan en el orden en que aparecen. */
+  delay: number;
+}
+
+/**
+ * Conexión con un punto que la recorre desde el origen hacia el destino, para ver la dirección del flujo. Los
+ * mensajes asíncronos se mueven más lento que las llamadas síncronas.
+ */
+function FlowEdge({
+  id,
+  sourceX,
+  sourceY,
+  targetX,
+  targetY,
+  sourcePosition,
+  targetPosition,
+  markerEnd,
+  style,
+  label,
+  labelStyle,
+  labelBgStyle,
+  data,
+}: EdgeProps<Edge<FlowData>>) {
+  const [path, labelX, labelY] = getBezierPath({
+    sourceX,
+    sourceY,
+    targetX,
+    targetY,
+    sourcePosition,
+    targetPosition,
+  });
+  return (
+    <>
+      <BaseEdge
+        id={id}
+        path={path}
+        markerEnd={markerEnd}
+        style={style}
+        label={label}
+        labelX={labelX}
+        labelY={labelY}
+        labelStyle={labelStyle}
+        labelShowBg
+        labelBgStyle={labelBgStyle}
+      />
+      {data?.flowing && (
+        <circle r={4.5} fill={data.color} stroke="var(--surface)" strokeWidth={1.5} aria-hidden>
+          <animateMotion
+            dur={`${data.duration}s`}
+            begin={`${data.delay}s`}
+            repeatCount="indefinite"
+            path={path}
+            keyPoints="0;1"
+            keyTimes="0;1"
+            calcMode="linear"
+          />
+        </circle>
+      )}
+    </>
+  );
+}
+
+const edgeTypes = { flow: FlowEdge };
+
+const REDUCED_MOTION = "(prefers-reduced-motion: reduce)";
+
+/** Respeta la preferencia del sistema de reducir animaciones. */
+function usePrefersReducedMotion(): boolean {
+  return useSyncExternalStore(
+    (onChange) => {
+      const query = window.matchMedia(REDUCED_MOTION);
+      query.addEventListener("change", onChange);
+      return () => query.removeEventListener("change", onChange);
+    },
+    () => window.matchMedia(REDUCED_MOTION).matches,
+    () => true, // en el servidor no se anima: el cliente decide al hidratar
+  );
+}
+
+/** Tiempo que se muestra cada paso al reproducir el recorrido automáticamente. */
+const AUTOPLAY_STEP_MS = 6_000;
+
 const EDGE_STYLES: Record<DiagramEdgeKind, { strokeDasharray?: string; stroke: string; animated: boolean }> =
   {
     sync: { stroke: "var(--accent)", animated: false },
@@ -133,6 +224,23 @@ export function InteractiveDiagram({ diagram }: { diagram: ArchitectureDiagram }
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [stepIndex, setStepIndex] = useState<number | null>(null);
   const [fullscreen, setFullscreen] = useState(false);
+  const [playing, setPlaying] = useState(false);
+  const [showFlow, setShowFlow] = useState(true);
+  const reducedMotion = usePrefersReducedMotion();
+  const animate = showFlow && !reducedMotion;
+
+  // Reproducción automática: avanza un paso cada AUTOPLAY_STEP_MS y se detiene después del último.
+  useEffect(() => {
+    if (!playing) return;
+    const timer = window.setTimeout(
+      () => {
+        if (stepIndex !== null && stepIndex >= diagram.steps.length - 1) setPlaying(false);
+        else setStepIndex(stepIndex === null ? 0 : stepIndex + 1);
+      },
+      stepIndex === null ? 0 : AUTOPLAY_STEP_MS,
+    );
+    return () => window.clearTimeout(timer);
+  }, [playing, stepIndex, diagram.steps.length]);
 
   useEffect(() => {
     const onChange = () => setFullscreen(document.fullscreenElement === containerRef.current);
@@ -172,7 +280,7 @@ export function InteractiveDiagram({ diagram }: { diagram: ArchitectureDiagram }
     [diagram.nodes, selectedId, highlight],
   );
 
-  const edges = useMemo<Edge[]>(
+  const edges = useMemo<Edge<FlowData>[]>(
     () =>
       diagram.edges.map((edge) => {
         const from = byId.get(edge.from)!;
@@ -181,13 +289,24 @@ export function InteractiveDiagram({ diagram }: { diagram: ArchitectureDiagram }
         const style = EDGE_STYLES[edge.kind];
         const emphasized = highlight.has(edge.id);
         const dimmed = highlight.size > 0 && !emphasized;
+        // En un paso, las conexiones resaltadas se animan en el orden en que el paso las lista.
+        const order = step
+          ? step.highlight.filter((h) => diagram.edges.some((e) => e.id === h)).indexOf(edge.id)
+          : -1;
         return {
           id: edge.id,
+          type: "flow",
           source: edge.from,
           target: edge.to,
           sourceHandle: `s-${sourceSide}`,
           targetHandle: `t-${targetSide}`,
           label: edge.label,
+          data: {
+            flowing: animate && edge.kind !== "dependency" && (step ? emphasized : true),
+            color: style.stroke,
+            duration: edge.kind === "async" ? 2.6 : 1.6,
+            delay: order > 0 ? order * 0.7 : 0,
+          },
           animated: style.animated && !dimmed,
           markerEnd: { type: MarkerType.ArrowClosed, color: style.stroke },
           style: {
@@ -200,7 +319,7 @@ export function InteractiveDiagram({ diagram }: { diagram: ArchitectureDiagram }
           labelBgStyle: { fill: "var(--surface)" },
         };
       }),
-    [diagram.edges, byId, highlight],
+    [diagram.edges, byId, highlight, step, animate],
   );
 
   const selected = selectedId ? byId.get(selectedId) : undefined;
@@ -232,6 +351,7 @@ export function InteractiveDiagram({ diagram }: { diagram: ArchitectureDiagram }
           nodes={nodes}
           edges={edges}
           nodeTypes={nodeTypes}
+          edgeTypes={edgeTypes}
           colorMode={theme}
           fitView
           fitViewOptions={{ padding: 0.15 }}
@@ -247,15 +367,34 @@ export function InteractiveDiagram({ diagram }: { diagram: ArchitectureDiagram }
           <Background gap={24} size={1} />
           <Controls showInteractive={false} />
         </ReactFlow>
-        <Button
-          size="sm"
-          variant="secondary"
-          className="absolute top-2 right-2 z-10"
-          onClick={toggleFullscreen}
-          aria-label={fullscreen ? "Salir de pantalla completa" : "Ver en pantalla completa"}
-        >
-          {fullscreen ? <Minimize2 /> : <Maximize2 />}
-        </Button>
+        <div className="absolute top-2 right-2 z-10 flex gap-1.5">
+          {!reducedMotion && (
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => setShowFlow((v) => !v)}
+              aria-pressed={showFlow}
+              aria-label={showFlow ? "Pausar la animación del flujo" : "Animar el flujo"}
+              title={showFlow ? "Pausar la animación del flujo" : "Animar el flujo"}
+            >
+              <Waves />
+            </Button>
+          )}
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={toggleFullscreen}
+            aria-label={fullscreen ? "Salir de pantalla completa" : "Ver en pantalla completa"}
+          >
+            {fullscreen ? <Minimize2 /> : <Maximize2 />}
+          </Button>
+        </div>
+        {step && fullscreen && (
+          <div className="border-border bg-surface/95 absolute right-2 bottom-2 left-2 z-10 rounded-lg border p-3 md:left-auto md:max-w-md">
+            <p className="text-foreground text-sm font-medium">{step.title}</p>
+            <p className="text-muted mt-1 text-sm">{step.description}</p>
+          </div>
+        )}
       </div>
 
       <figcaption className="text-muted flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
@@ -290,9 +429,23 @@ export function InteractiveDiagram({ diagram }: { diagram: ArchitectureDiagram }
             <div className="flex items-center gap-2">
               <Button
                 size="sm"
+                variant={playing ? "secondary" : "primary"}
+                onClick={() => {
+                  if (playing) return setPlaying(false);
+                  if (stepIndex === diagram.steps.length - 1) setStepIndex(null);
+                  setPlaying(true);
+                }}
+              >
+                {playing ? <Pause /> : <Play />} {playing ? "Pausar" : "Reproducir"}
+              </Button>
+              <Button
+                size="sm"
                 variant="secondary"
                 disabled={stepIndex === null || stepIndex === 0}
-                onClick={() => setStepIndex((i) => (i === null ? null : i - 1))}
+                onClick={() => {
+                  setPlaying(false);
+                  setStepIndex((i) => (i === null ? null : i - 1));
+                }}
                 aria-label="Paso anterior"
               >
                 <ChevronLeft />
@@ -306,13 +459,23 @@ export function InteractiveDiagram({ diagram }: { diagram: ArchitectureDiagram }
                 size="sm"
                 variant="secondary"
                 disabled={stepIndex === diagram.steps.length - 1}
-                onClick={() => setStepIndex((i) => (i === null ? 0 : i + 1))}
+                onClick={() => {
+                  setPlaying(false);
+                  setStepIndex((i) => (i === null ? 0 : i + 1));
+                }}
                 aria-label={stepIndex === null ? "Comenzar recorrido" : "Paso siguiente"}
               >
                 <ChevronRight />
               </Button>
               {stepIndex !== null && (
-                <Button size="sm" variant="ghost" onClick={() => setStepIndex(null)}>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => {
+                    setPlaying(false);
+                    setStepIndex(null);
+                  }}
+                >
                   Salir
                 </Button>
               )}

@@ -1,0 +1,101 @@
+---
+id: pattern.api-gateway
+kind: architecture
+category: integration
+title: "API Gateway y BFF"
+summary: "Un punto de entrada único delante de los servicios, y backends específicos por tipo de cliente."
+difficulty: intermediate
+order: 150
+definition: "Un API Gateway es el punto de entrada para los clientes de un sistema con varios servicios: enruta cada request al servicio correspondiente y concentra responsabilidades transversales (TLS, autenticación, rate limiting, logging, caché). Un Backend for Frontend (BFF) es un gateway especializado para un tipo de cliente (web, móvil) que agrega y adapta respuestas de varios servicios a lo que esa interfaz necesita."
+problem: "La app móvil necesita llamar a cinco servicios para armar la pantalla de inicio, cada uno con su URL, su autenticación y su formato. Las cinco llamadas desde una red móvil son lentas, cada cambio interno rompe a los clientes y la autenticación se implementa cinco veces."
+benefits:
+  - "Los clientes ven una API estable aunque cambien los servicios internos."
+  - "Autenticación, rate limiting y observabilidad en un solo lugar."
+  - "Un BFF reduce round trips y adapta los datos a cada cliente."
+costs:
+  - "Un componente más que operar y escalar; mal configurado es un punto único de falla."
+  - "Agrega latencia (un salto más)."
+  - "Riesgo de que acumule lógica de negocio y se convierta en un monolito distribuido."
+alternatives:
+  - name: "Llamadas directas a los servicios"
+    when: "Con pocos servicios internos y clientes propios, puede alcanzar con un balanceador y autenticación compartida."
+  - name: "GraphQL"
+    when: "Si distintos clientes necesitan combinaciones flexibles de datos, un gateway GraphQL (o federación) cumple el rol del BFF."
+commonMistakes:
+  - "Poner reglas de negocio en el gateway."
+  - "Un único BFF para todos los clientes, que termina con los mismos problemas que una API genérica."
+  - "No aplicar timeouts ni circuit breakers en las llamadas del gateway a los servicios."
+avoidWhen:
+  - "Un monolito con un único cliente web: el propio backend ya es el punto de entrada."
+interviewQuestions:
+  - question: "¿Qué responsabilidades pondrías en un API Gateway y cuáles no?"
+    answer: "Sí: enrutamiento, terminación TLS, autenticación (validar tokens), rate limiting, CORS, logging y métricas, caché de respuestas públicas, versionado. No: reglas de negocio ni orquestación compleja entre servicios, que pertenecen a los servicios o a un BFF."
+  - question: "¿Cuándo tiene sentido un BFF?"
+    answer: "Cuando los clientes tienen necesidades muy distintas (la web muestra un detalle completo y la app móvil una versión reducida con otra paginación) y cada equipo de frontend necesita evolucionar su API sin coordinar con todos los demás."
+diagrams: ["api-gateway"]
+related: ["facade", "circuit-breaker", "strangler-fig"]
+relatedLessons: ["software-architecture.architecture-styles"]
+tags: ["api gateway", "bff", "integración", "microservicios"]
+---
+
+## Motivación
+
+Un marketplace tiene servicios de catálogo, precios, stock, reseñas y recomendaciones. La web y la app móvil muestran
+la ficha de producto con datos de todos ellos.
+
+## Ejemplo incorrecto
+
+```ts
+// En la app móvil: cinco requests, cinco formas de autenticar, cinco formatos.
+const [product, price, stock, reviews, recs] = await Promise.all([
+  fetch(`https://catalog.internal/products/${id}`, { headers: catalogAuth }),
+  fetch(`https://pricing.internal/v2/prices?sku=${id}`, { headers: pricingAuth }),
+  fetch(`https://stock.internal/availability/${id}`),
+  fetch(`https://reviews.internal/products/${id}/reviews?page=1`),
+  fetch(`https://recs.internal/similar?product=${id}`),
+]);
+```
+
+## Implementación correcta
+
+```ts
+// BFF móvil: una request del cliente, agregación del lado del servidor.
+app.get("/mobile/products/:id", requireUser, rateLimit, async (req, res) => {
+  const id = req.params.id;
+  const [product, price, stock] = await Promise.all([
+    catalog.get(id), // los clientes internos tienen timeout y circuit breaker
+    pricing.get(id, req.user.region),
+    inventory.get(id),
+  ]);
+  // Lo opcional se degrada: si reseñas o recomendaciones fallan, la pantalla igual se muestra.
+  const [reviews, similar] = await Promise.allSettled([reviewsClient.top(id, 3), recs.similar(id, 6)]);
+
+  res.json({
+    id,
+    title: product.title,
+    image: product.images[0]?.mobileUrl,
+    price: price.formatted,
+    inStock: stock.available > 0,
+    reviews: reviews.status === "fulfilled" ? reviews.value : [],
+    similar: similar.status === "fulfilled" ? similar.value : [],
+  });
+});
+```
+
+Delante de los BFF, el **API Gateway** termina TLS, valida el token, aplica rate limiting y enruta `/mobile/*` y
+`/web/*` a cada BFF.
+
+## Ejercicio
+
+El servicio de precios responde lento (3 s) y la ficha de producto tarda lo mismo. ¿Qué cambiarías en el BFF?
+
+<Reveal>
+
+1. **Timeout** corto en la llamada a precios (por ejemplo, 300 ms) y **circuit breaker** para no seguir esperando a un
+   servicio degradado.
+2. **Fallback**: precio cacheado reciente con una marca de "precio a confirmar", o mostrar la ficha sin precio y
+   cargarlo después desde el cliente.
+3. **Caché** de precios por SKU y región con TTL corto en el BFF o en Redis.
+4. Medir con trazas qué parte del tiempo es del servicio de precios y abrir el problema al equipo dueño.
+
+</Reveal>

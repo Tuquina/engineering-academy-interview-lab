@@ -1,0 +1,103 @@
+{
+  "id": "strangler-fig",
+  "title": "Migración con Strangler Fig",
+  "description": "Un proxy desvía funcionalidad por funcionalidad hacia los servicios nuevos; el monolito pierde tráfico hasta poder apagarse.",
+  "kind": "architecture",
+  "tags": ["strangler fig", "migración", "legado"],
+  "nodes": [
+    {
+      "id": "users",
+      "label": "Usuarios",
+      "kind": "actor",
+      "column": 0,
+      "row": 1,
+      "responsibility": "No notan la migración: siguen usando las mismas URLs.",
+      "examples": ["Web", "App"]
+    },
+    {
+      "id": "proxy",
+      "label": "Proxy / gateway",
+      "kind": "service",
+      "column": 1,
+      "row": 1,
+      "responsibility": "Decide por ruta (y por porcentaje de usuarios, si hay canary) si la request va al sistema nuevo o al legado. Cada paso se revierte cambiando una regla.",
+      "examples": ["NGINX", "Envoy", "Middleware en el edge"]
+    },
+    {
+      "id": "monolith",
+      "label": "Monolito legado",
+      "kind": "service",
+      "column": 2,
+      "row": 2,
+      "responsibility": "Sigue atendiendo todo lo que todavía no se migró.",
+      "examples": ["/account/*", "/admin/*"]
+    },
+    {
+      "id": "legacy-db",
+      "label": "Base del legado",
+      "kind": "database",
+      "column": 3,
+      "row": 2,
+      "responsibility": "Fuente de verdad de lo no migrado. Sus cambios se replican al sistema nuevo mientras dure la migración.",
+      "examples": ["Oracle", "MySQL"]
+    },
+    {
+      "id": "catalog",
+      "label": "Servicio de catálogo",
+      "kind": "service",
+      "column": 2,
+      "row": 0,
+      "responsibility": "Primera funcionalidad migrada: bajo acoplamiento y alto valor (búsqueda moderna).",
+      "examples": ["/catalog/*"]
+    },
+    {
+      "id": "acl",
+      "label": "Capa anticorrupción",
+      "kind": "adapter",
+      "column": 3,
+      "row": 1,
+      "responsibility": "Traduce el modelo y los datos del legado al modelo nuevo, para que los conceptos viejos no contaminen el diseño.",
+      "examples": ["Mapper de productos legados", "Consumidor de CDC"]
+    },
+    {
+      "id": "catalog-db",
+      "label": "Base del catálogo",
+      "kind": "database",
+      "column": 3,
+      "row": 0,
+      "responsibility": "El servicio nuevo es dueño de sus datos; se alimenta del legado mientras dura la transición.",
+      "examples": ["PostgreSQL + índice de búsqueda"]
+    }
+  ],
+  "edges": [
+    { "id": "sf-users-proxy", "from": "users", "to": "proxy", "kind": "sync", "label": "todas las requests" },
+    { "id": "sf-proxy-catalog", "from": "proxy", "to": "catalog", "kind": "sync", "label": "/catalog/*" },
+    { "id": "sf-proxy-monolith", "from": "proxy", "to": "monolith", "kind": "sync", "label": "resto" },
+    { "id": "sf-monolith-db", "from": "monolith", "to": "legacy-db", "kind": "sync" },
+    { "id": "sf-legacydb-acl", "from": "legacy-db", "to": "acl", "kind": "async", "label": "CDC" },
+    { "id": "sf-acl-catalogdb", "from": "acl", "to": "catalog-db", "kind": "sync", "label": "modelo nuevo" },
+    { "id": "sf-catalog-db", "from": "catalog", "to": "catalog-db", "kind": "sync" }
+  ],
+  "steps": [
+    {
+      "title": "1. Interceptar el tráfico",
+      "description": "Primero se pone el proxy delante del monolito sin cambiar nada: todo sigue yendo al legado, pero ahora existe el punto donde desviar.",
+      "highlight": ["users", "proxy", "monolith", "sf-users-proxy", "sf-proxy-monolith"]
+    },
+    {
+      "title": "2. Migrar una funcionalidad",
+      "description": "Las rutas /catalog/* pasan al servicio nuevo, con su propia base. Si algo sale mal, se vuelve atrás cambiando la regla del proxy.",
+      "highlight": ["proxy", "catalog", "catalog-db", "sf-proxy-catalog", "sf-catalog-db"]
+    },
+    {
+      "title": "3. Sincronizar los datos",
+      "description": "Mientras el legado siga escribiendo productos, sus cambios se capturan (CDC) y una capa anticorrupción los traduce al modelo nuevo.",
+      "highlight": ["legacy-db", "acl", "catalog-db", "sf-legacydb-acl", "sf-acl-catalogdb"]
+    },
+    {
+      "title": "4. Repetir hasta apagar el legado",
+      "description": "Se migra funcionalidad por funcionalidad. Cuando el monolito ya no recibe tráfico, se apaga junto con la sincronización.",
+      "highlight": ["proxy", "monolith", "sf-proxy-monolith"]
+    }
+  ]
+}

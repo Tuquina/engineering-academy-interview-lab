@@ -4,7 +4,9 @@ import type {
   ArchitectureChallenge,
   ArchitectureChallengeSummary,
 } from "@/modules/system-design/domain/architecture-challenge";
+import type { CaseStudy } from "@/modules/system-design/domain/case-study";
 import { loadArchitectureChallenges } from "@/modules/system-design/infrastructure/file-system-architecture-challenge-source";
+import { loadCaseStudies } from "@/modules/system-design/infrastructure/file-system-case-study-source";
 
 let production: Promise<ArchitectureChallenge[]> | null = null;
 
@@ -17,6 +19,19 @@ export const getArchitectureChallenges = cache((): Promise<ArchitectureChallenge
     throw error;
   });
   return production;
+});
+
+let productionCases: Promise<CaseStudy[]> | null = null;
+
+/** Casos de estudio clásicos de System Design (cacheados por proceso en producción). */
+export const getCaseStudies = cache((): Promise<CaseStudy[]> => {
+  const root = path.join(process.cwd(), "content");
+  if (process.env.NODE_ENV !== "production") return loadCaseStudies(root);
+  productionCases ??= loadCaseStudies(root).catch((error: unknown) => {
+    productionCases = null;
+    throw error;
+  });
+  return productionCases;
 });
 
 export function toArchitectureChallengeSummary(

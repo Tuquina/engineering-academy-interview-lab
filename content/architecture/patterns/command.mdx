@@ -1,0 +1,110 @@
+---
+id: pattern.command
+kind: design
+category: behavioral
+title: "Command"
+summary: "Representar una acción como un objeto: se puede encolar, registrar, reintentar o deshacer."
+difficulty: intermediate
+order: 60
+definition: "Command encapsula una solicitud como un objeto con todo lo necesario para ejecutarla. Separar el pedido de su ejecución permite encolarlo, ejecutarlo más tarde, registrarlo para auditoría, reintentarlo o deshacerlo. En arquitectura aparece como los comandos de CQRS y los jobs de una cola."
+problem: "Una aplicación de edición necesita deshacer y rehacer; un backend necesita ejecutar tareas en segundo plano con reintentos y registrar quién pidió qué. Si cada acción es una llamada directa a un método, no hay nada que guardar, encolar ni deshacer."
+benefits:
+  - "Las acciones se vuelven datos: se serializan, encolan, auditan y reintentan."
+  - "Permite deshacer/rehacer guardando el historial de comandos."
+  - "Un único punto de ejecución donde aplicar validación, autorización, logging y transacciones."
+costs:
+  - "Más tipos y archivos por acción."
+  - "Los comandos serializados se versionan: cambiar su forma afecta a los que ya están encolados."
+alternatives:
+  - name: "Llamada directa a un método"
+    when: "Si la acción se ejecuta en el momento y no hace falta encolarla, auditarla ni deshacerla."
+  - name: "Event Sourcing"
+    when: "Si lo que interesa guardar son los hechos que ocurrieron (eventos) para reconstruir el estado, no los pedidos."
+commonMistakes:
+  - "Comandos que devuelven datos para mostrar (mezcla de comando y consulta)."
+  - "Encolar comandos con objetos no serializables o referencias a entidades en memoria."
+  - "Jobs no idempotentes que, al reintentarse, duplican efectos."
+avoidWhen:
+  - "Acciones simples, síncronas y sin necesidad de historial ni reintento."
+interviewQuestions:
+  - question: "¿Qué diferencia hay entre un comando y un evento?"
+    answer: 'Un comando es una intención dirigida a un destinatario ("ReservarStock"), en imperativo, que puede rechazarse. Un evento es un hecho que ya ocurrió ("StockReservado"), en pasado, que se publica a quien le interese y no se rechaza.'
+  - question: "¿Cómo implementarías deshacer en un editor?"
+    answer: "Cada acción del usuario es un comando con `execute` y `undo`. Se guardan en una pila de historial; deshacer saca el último y llama a `undo`, y lo pasa a una pila de rehacer. Cualquier comando nuevo vacía la pila de rehacer."
+diagrams: ["cqrs"]
+related: ["observer", "cqrs"]
+relatedLessons: ["software-architecture.design-patterns"]
+tags: ["command", "colas", "deshacer", "jobs"]
+---
+
+## Motivación
+
+Un editor de tableros (tipo Trello) permite mover tarjetas, renombrarlas y borrarlas, con **deshacer/rehacer**.
+Además, cada acción se sincroniza con el servidor y debe poder reintentarse si no hay conexión.
+
+## Ejemplo incorrecto
+
+```ts
+function moveCard(board: Board, cardId: string, toColumn: string) {
+  board.columns.forEach((c) => (c.cards = c.cards.filter((id) => id !== cardId)));
+  board.columns.find((c) => c.id === toColumn)!.cards.push(cardId);
+  api.moveCard(cardId, toColumn); // si falla, se pierde; no hay forma de deshacer
+}
+```
+
+## Implementación correcta
+
+```ts
+export interface Command {
+  readonly type: string;
+  execute(board: Board): Board;
+  undo(board: Board): Board;
+}
+
+export const moveCard = (cardId: string, from: string, to: string): Command => ({
+  type: "card.move",
+  execute: (board) => relocate(board, cardId, from, to),
+  undo: (board) => relocate(board, cardId, to, from),
+});
+
+export class History {
+  private done: Command[] = [];
+  private undone: Command[] = [];
+
+  run(board: Board, command: Command): Board {
+    this.done.push(command);
+    this.undone = []; // una acción nueva invalida el rehacer
+    outbox.enqueue(command); // se sincroniza y reintenta aparte
+    return command.execute(board);
+  }
+  undo(board: Board): Board {
+    const command = this.done.pop();
+    if (!command) return board;
+    this.undone.push(command);
+    return command.undo(board);
+  }
+  redo(board: Board): Board {
+    const command = this.undone.pop();
+    if (!command) return board;
+    this.done.push(command);
+    return command.execute(board);
+  }
+}
+```
+
+Cada acción es un objeto con su inversa. El historial no conoce los detalles de cada una y la cola de sincronización
+puede reintentarlas.
+
+## Ejercicio
+
+En el backend, el comando `SendInvoice` se encola y un worker lo ejecuta. Si el worker se cae después de enviar el
+email pero antes de confirmar el job, el comando se reintenta. ¿Cómo evitás enviar dos emails?
+
+<Reveal>
+
+Haciendo el comando **idempotente**: incluye un ID único (`commandId`) y el worker registra los IDs procesados en la
+misma transacción que el efecto local, o le pasa ese ID al proveedor de email como clave de idempotencia. Si el ID ya
+fue procesado, el reintento no hace nada. La cola garantiza "al menos una vez"; la idempotencia convierte eso en un
+efecto "exactamente una vez".
+
+</Reveal>

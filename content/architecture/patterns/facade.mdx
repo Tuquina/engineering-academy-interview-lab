@@ -1,0 +1,99 @@
+---
+id: pattern.facade
+kind: design
+category: structural
+title: "Facade"
+summary: "Una interfaz simple sobre un subsistema complejo, para que los clientes no conozcan sus detalles."
+difficulty: basic
+order: 25
+definition: 'Facade ofrece una interfaz de alto nivel que coordina varias piezas de un subsistema. Los clientes llaman a una operación con significado de negocio ("checkout") en lugar de orquestar ellos mismos los pasos y las dependencias internas.'
+problem: "Para cobrar un carrito, cada pantalla y cada endpoint llama a inventario, cálculo de impuestos, pasarela de pago, generación de factura y envío de email, en el orden correcto. La secuencia se duplica y un cambio en el subsistema obliga a tocar todos los clientes."
+benefits:
+  - "Los clientes dependen de una operación estable y no de muchas piezas internas."
+  - "La secuencia y las reglas de coordinación viven en un solo lugar."
+  - "Se puede cambiar el subsistema sin tocar a los clientes."
+costs:
+  - "Puede crecer hasta volverse una clase que hace de todo (god object)."
+  - "Oculta capacidades del subsistema que algunos clientes avanzados necesitan."
+alternatives:
+  - name: "Caso de uso (application service)"
+    when: "En arquitectura hexagonal, un caso de uso cumple el rol de fachada para una operación de negocio concreta."
+  - name: "API Gateway / BFF"
+    when: "A nivel de sistema distribuido, una fachada sobre varios servicios para un tipo de cliente."
+commonMistakes:
+  - "Meter lógica de negocio compleja en la fachada en lugar de coordinar."
+  - "Una sola fachada para todo el sistema con decenas de métodos."
+  - "Impedir por completo el acceso al subsistema cuando algún cliente lo necesita."
+avoidWhen:
+  - "El subsistema ya es simple o los clientes necesitan control fino de cada paso."
+interviewQuestions:
+  - question: "¿Qué diferencia hay entre Facade y Adapter?"
+    answer: "Adapter convierte una interfaz en otra que el cliente ya espera, normalmente sobre un único componente. Facade crea una interfaz nueva y más simple que coordina varios componentes de un subsistema."
+  - question: "¿Un API Gateway es una fachada?"
+    answer: "Sí, a nivel de arquitectura: expone un punto de entrada simple sobre varios servicios internos. Además suele concentrar responsabilidades transversales como autenticación, rate limiting y enrutamiento."
+diagrams: []
+related: ["adapter", "hexagonal-architecture", "api-gateway"]
+relatedLessons: ["software-architecture.design-patterns"]
+tags: ["facade", "estructural", "orquestación"]
+---
+
+## Motivación
+
+El checkout de una tienda coordina inventario, impuestos, pago, factura y notificación. Lo usan la web, la app móvil y
+un endpoint para revendedores.
+
+## Ejemplo incorrecto
+
+```ts
+// En el handler web (y copiado en el móvil y en el de revendedores)
+const reserved = await inventory.reserve(cart.items);
+const taxes = await taxService.calculate(cart, address);
+const charge = await paymentGateway.charge(customer.cardToken, cart.total + taxes.total);
+const invoice = await invoicing.create(customer, cart, taxes, charge.id);
+await mailer.send(customer.email, renderInvoice(invoice));
+```
+
+Cada cliente conoce el orden, maneja los errores a su manera y ninguno libera la reserva si el pago falla.
+
+## Implementación correcta
+
+```ts
+export class CheckoutService {
+  constructor(
+    private inventory: Inventory,
+    private taxes: TaxCalculator,
+    private payments: PaymentGateway,
+    private invoicing: Invoicing,
+    private notifications: Notifications,
+  ) {}
+
+  /** Una operación con significado de negocio; los clientes no conocen los pasos. */
+  async checkout(cart: Cart, customer: Customer): Promise<CheckoutResult> {
+    const reservation = await this.inventory.reserve(cart.items);
+    try {
+      const taxes = await this.taxes.calculate(cart, customer.address);
+      const charge = await this.payments.charge(customer.paymentMethod, cart.totalCents + taxes.totalCents);
+      const invoice = await this.invoicing.create({ cart, customer, taxes, chargeId: charge.id });
+      await this.notifications.invoiceIssued(customer, invoice); // idealmente asíncrono
+      return { ok: true, invoiceId: invoice.id };
+    } catch (error) {
+      await this.inventory.release(reservation); // la compensación vive en un solo lugar
+      throw error;
+    }
+  }
+}
+```
+
+## Ejercicio
+
+La fachada crece: ahora también aplica cupones, puntos de fidelidad y envío. ¿Cuándo deja de ser una buena idea y qué
+harías?
+
+<Reveal>
+
+Cuando concentra **reglas de negocio** además de coordinar, o cuando partes distintas cambian por motivos distintos.
+Opciones: mover las reglas al dominio (un agregado `Order` que calcula totales con cupones y puntos), dejar en la
+fachada sólo la orquestación, y separar flujos (checkout, devoluciones) en casos de uso independientes. Si los pasos
+cruzan servicios y pueden fallar a mitad, la coordinación pasa a ser una **saga**.
+
+</Reveal>

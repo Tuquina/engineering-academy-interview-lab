@@ -1,0 +1,140 @@
+{
+  "id": "api-gateway",
+  "title": "API Gateway y Backends for Frontends",
+  "description": "El gateway concentra TLS, autenticación y rate limiting; cada BFF agrega y adapta datos de varios servicios para su tipo de cliente.",
+  "kind": "architecture",
+  "tags": ["api gateway", "bff", "microservicios"],
+  "nodes": [
+    {
+      "id": "web",
+      "label": "Cliente web",
+      "kind": "ui",
+      "column": 0,
+      "row": 0,
+      "responsibility": "Muestra la ficha completa del producto con reseñas y recomendaciones.",
+      "examples": ["Next.js"]
+    },
+    {
+      "id": "mobile",
+      "label": "App móvil",
+      "kind": "ui",
+      "column": 0,
+      "row": 2,
+      "responsibility": "Muestra una versión reducida, con imágenes más chicas y menos datos por request.",
+      "examples": ["iOS", "Android"]
+    },
+    {
+      "id": "gateway",
+      "label": "API Gateway",
+      "kind": "boundary",
+      "column": 1,
+      "row": 1,
+      "responsibility": "Punto de entrada único delante de los backends.",
+      "examples": ["Kong", "AWS API Gateway"]
+    },
+    {
+      "id": "edge",
+      "label": "Gateway",
+      "kind": "service",
+      "column": 1,
+      "row": 1,
+      "parent": "gateway",
+      "responsibility": "Termina TLS, valida tokens, aplica rate limiting y CORS, registra métricas y enruta /web y /mobile al BFF correspondiente.",
+      "examples": ["Kong", "AWS API Gateway", "Envoy", "NGINX"]
+    },
+    {
+      "id": "bff-web",
+      "label": "BFF web",
+      "kind": "service",
+      "column": 2,
+      "row": 0,
+      "responsibility": "Agrega catálogo, precio, stock, reseñas y recomendaciones en una respuesta pensada para la web.",
+      "examples": ["GET /web/products/:id"]
+    },
+    {
+      "id": "bff-mobile",
+      "label": "BFF móvil",
+      "kind": "service",
+      "column": 2,
+      "row": 2,
+      "responsibility": "Agrega sólo lo que la app muestra; degrada lo opcional si un servicio falla.",
+      "examples": ["GET /mobile/products/:id"]
+    },
+    {
+      "id": "catalog",
+      "label": "Catálogo",
+      "kind": "service",
+      "column": 3,
+      "row": 0,
+      "responsibility": "Datos del producto: título, descripción, imágenes.",
+      "examples": ["catalog-service"]
+    },
+    {
+      "id": "pricing",
+      "label": "Precios",
+      "kind": "service",
+      "column": 3,
+      "row": 1,
+      "responsibility": "Precio por región y promociones vigentes.",
+      "examples": ["pricing-service"]
+    },
+    {
+      "id": "reviews",
+      "label": "Reseñas",
+      "kind": "service",
+      "column": 3,
+      "row": 2,
+      "responsibility": "Reseñas y puntaje promedio. Es opcional para mostrar la ficha.",
+      "examples": ["reviews-service"]
+    },
+    {
+      "id": "cache",
+      "label": "Caché",
+      "kind": "cache",
+      "column": 2,
+      "row": 1,
+      "responsibility": "Respuestas y datos poco cambiantes (precios por región con TTL corto) compartidos por los BFF.",
+      "examples": ["Redis"]
+    }
+  ],
+  "edges": [
+    { "id": "gw-web-edge", "from": "web", "to": "edge", "kind": "sync", "label": "HTTPS" },
+    { "id": "gw-mobile-edge", "from": "mobile", "to": "edge", "kind": "sync", "label": "HTTPS" },
+    { "id": "gw-edge-bffweb", "from": "edge", "to": "bff-web", "kind": "sync", "label": "/web/*" },
+    { "id": "gw-edge-bffmobile", "from": "edge", "to": "bff-mobile", "kind": "sync", "label": "/mobile/*" },
+    { "id": "gw-bffweb-catalog", "from": "bff-web", "to": "catalog", "kind": "sync" },
+    { "id": "gw-bffweb-pricing", "from": "bff-web", "to": "pricing", "kind": "sync" },
+    { "id": "gw-bffmobile-pricing", "from": "bff-mobile", "to": "pricing", "kind": "sync" },
+    {
+      "id": "gw-bffmobile-reviews",
+      "from": "bff-mobile",
+      "to": "reviews",
+      "kind": "sync",
+      "label": "opcional"
+    },
+    { "id": "gw-bffweb-cache", "from": "bff-web", "to": "cache", "kind": "sync" },
+    { "id": "gw-bffmobile-cache", "from": "bff-mobile", "to": "cache", "kind": "sync" }
+  ],
+  "steps": [
+    {
+      "title": "1. Un único punto de entrada",
+      "description": "Web y móvil hablan sólo con el gateway. Ahí se valida el token y se aplica rate limiting una vez, en lugar de en cada servicio.",
+      "highlight": ["web", "mobile", "edge", "gw-web-edge", "gw-mobile-edge"]
+    },
+    {
+      "title": "2. Enrutamiento por tipo de cliente",
+      "description": "El gateway enruta /web/* al BFF web y /mobile/* al BFF móvil. Cada equipo de frontend evoluciona su BFF sin coordinar con los demás.",
+      "highlight": ["edge", "bff-web", "bff-mobile", "gw-edge-bffweb", "gw-edge-bffmobile"]
+    },
+    {
+      "title": "3. Agregación en paralelo",
+      "description": "El BFF móvil consulta precios y reseñas en paralelo, con timeouts. La app hace una sola request en lugar de cinco desde una red lenta.",
+      "highlight": ["bff-mobile", "pricing", "reviews", "gw-bffmobile-pricing", "gw-bffmobile-reviews"]
+    },
+    {
+      "title": "4. Degradar lo opcional y cachear",
+      "description": "Si reseñas no responde, la ficha se muestra igual sin ellas. Los precios por región se cachean con TTL corto para no depender en cada request del servicio de precios.",
+      "highlight": ["bff-mobile", "bff-web", "cache", "gw-bffmobile-cache", "gw-bffweb-cache"]
+    }
+  ]
+}

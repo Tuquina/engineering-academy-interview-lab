@@ -1,0 +1,85 @@
+---
+id: case.ride-hailing
+title: "App de viajes"
+summary: "Ubicaciones en tiempo real, búsqueda geoespacial y asignación de conductores sin duplicados."
+difficulty: advanced
+durationMinutes: 45
+order: 7
+tags: ["geoespacial", "tiempo real", "concurrencia"]
+diagram: sd-ride-hailing
+functionalRequirements:
+  - "Los conductores disponibles reportan su ubicación."
+  - "Un pasajero pide un viaje y se le asigna un conductor cercano."
+  - "Ambos ven la posición del otro durante el viaje."
+  - "Tarifa estimada y estados del viaje."
+nonFunctionalRequirements:
+  - "Matching en pocos segundos."
+  - "Un conductor nunca queda asignado a dos viajes a la vez."
+  - "Alta disponibilidad en horas pico y por ciudad."
+estimates:
+  - label: "Conductores activos"
+    value: "1 M"
+    detail: "Reportan ubicación cada 4 segundos."
+  - label: "Actualizaciones"
+    value: "250.000/s"
+    detail: "1 M ÷ 4 s: no van a la base transaccional, van a memoria."
+  - label: "Viajes"
+    value: "~230/s"
+    detail: "20 M viajes por día; picos de 3–5× en hora pico."
+  - label: "Índice en memoria"
+    value: "~100 MB"
+    detail: "1 M conductores × ~100 bytes (ID, coordenadas, estado)."
+followUps:
+  - "¿Por qué geohash o H3 en lugar de calcular la distancia a todos los conductores?"
+  - "¿Qué pasa si dos pasajeros reciben al mismo conductor como mejor candidato?"
+  - "¿Cómo particionarías el sistema por ciudad?"
+  - "¿Cómo calcularías la tarifa dinámica por demanda?"
+relatedPatterns: ["state"]
+relatedSimulations: ["load-balancing"]
+---
+
+## API
+
+```http
+PUT  /v1/drivers/me/location { lat, lng, heading }        (cada ~4 s, o por WebSocket)
+POST /v1/trips { pickup, dropoff }                         → 201 { tripId, status: "requested", estimate }
+POST /v1/trips/{id}/accept                                 (conductor)
+GET  /v1/trips/{id}                                        → estado + posición del conductor
+```
+
+## Modelo de datos
+
+- **En memoria** (Redis o un servicio propio): `drivers:geo` con `GEOADD` o celdas H3 → conductores disponibles.
+- **Transaccional** (PostgreSQL): `trips(id, rider_id, driver_id, status, pickup, dropoff, fare, created_at)`,
+  `drivers(id, vehicle, rating, status)`.
+- **Histórico de ubicaciones**: a un almacenamiento barato (logs, data lake) para análisis, no a la base transaccional.
+
+## Diseño de alto nivel
+
+Separar los datos por naturaleza: las **ubicaciones** son efímeras, enormes en volumen y toleran perder alguna; los
+**viajes** son pocos, valiosos y transaccionales. Cada uno va a la tecnología que corresponde.
+
+## Profundización
+
+**Búsqueda geoespacial.** Calcular la distancia a un millón de conductores por cada pedido es inviable. El mapa se
+divide en **celdas** (geohash o H3 hexagonal); cada conductor está en su celda y la búsqueda mira la celda del pasajero y
+sus vecinas, ampliando el radio si no hay candidatos. Redis ofrece `GEOSEARCH` con radio.
+
+**Matching sin duplicados.** Dos pedidos simultáneos pueden elegir al mismo conductor. La asignación usa una operación
+atómica: `SET driver:{id}:trip {tripId} NX EX 20` (sólo uno la gana) y, al confirmar, una transacción en la base que
+actualiza el viaje sólo si sigue en `requested` y el conductor sigue disponible. El perdedor pasa al siguiente
+candidato.
+
+**Máquina de estados.** `requested → offered → matched → arrived → in_progress → completed` (más `cancelled`). Cada
+transición valida el estado actual, lo que evita condiciones de carrera como cancelar un viaje ya iniciado.
+
+**Particionado por ciudad.** El matching es local: cada región/ciudad puede tener su propio índice y sus instancias, lo
+que limita el impacto de una falla y la latencia.
+
+## Compromisos
+
+- **Precisión vs carga**: reportar cada 4 s en lugar de cada 1 s divide la carga por 4 con un error de pocos metros.
+- **Óptimo global vs rápido**: asignar el mejor conductor para el conjunto de pedidos (batching de unos segundos) mejora
+  la eficiencia, a costa de un poco de espera.
+- **Consistencia**: el índice de ubicaciones es eventualmente consistente; la asignación, en cambio, debe ser
+  estrictamente consistente.

@@ -1,0 +1,122 @@
+{
+  "id": "sd-chat",
+  "title": "Chat en tiempo real",
+  "description": "Conexiones WebSocket persistentes, persistencia antes del ack, enrutamiento entre servidores con pub/sub y push para usuarios desconectados.",
+  "kind": "architecture",
+  "tags": ["system design", "websocket", "mensajería"],
+  "nodes": [
+    {
+      "id": "alice",
+      "label": "Emisor",
+      "kind": "actor",
+      "column": 0,
+      "row": 0,
+      "responsibility": "Envía un mensaje con un clientMessageId único para poder reintentar sin duplicar.",
+      "examples": ["App móvil", "Web"]
+    },
+    {
+      "id": "bob",
+      "label": "Receptor",
+      "kind": "actor",
+      "column": 0,
+      "row": 2,
+      "responsibility": "Recibe el mensaje en vivo si está conectado; si no, por push y al reconectar.",
+      "examples": ["App móvil"]
+    },
+    {
+      "id": "gw-a",
+      "label": "Gateway WS 1",
+      "kind": "service",
+      "column": 1,
+      "row": 0,
+      "responsibility": "Mantiene decenas de miles de conexiones WebSocket. No tiene lógica de negocio.",
+      "examples": ["Servidor Node.js con ws", "Envoy"]
+    },
+    {
+      "id": "gw-b",
+      "label": "Gateway WS 2",
+      "kind": "service",
+      "column": 1,
+      "row": 2,
+      "responsibility": "Otro servidor de conexiones; el receptor puede estar en cualquiera.",
+      "examples": ["Servidor Node.js con ws"]
+    },
+    {
+      "id": "chat",
+      "label": "Servicio de chat",
+      "kind": "service",
+      "column": 2,
+      "row": 1,
+      "responsibility": "Valida, asigna un ID ordenable, persiste y publica. Responde el ack recién después de persistir.",
+      "examples": ["sendMessage()", "IDs Snowflake / ULID"]
+    },
+    {
+      "id": "presence",
+      "label": "Presencia",
+      "kind": "cache",
+      "column": 3,
+      "row": 0,
+      "responsibility": "Qué usuario está conectado y en qué gateway, con TTL renovado por heartbeat.",
+      "examples": ["Redis: user:42 → gw-2 (TTL 60 s)"]
+    },
+    {
+      "id": "messages",
+      "label": "Mensajes",
+      "kind": "database",
+      "column": 3,
+      "row": 1,
+      "responsibility": "Particionados por conversación y ordenados por ID. Consulta típica: los mensajes posteriores a X.",
+      "examples": ["Cassandra/ScyllaDB", "PostgreSQL particionado"]
+    },
+    {
+      "id": "pubsub",
+      "label": "Pub/Sub",
+      "kind": "queue",
+      "column": 2,
+      "row": 2,
+      "responsibility": "Lleva el mensaje al gateway donde está conectado el receptor.",
+      "examples": ["Redis Pub/Sub", "Kafka", "NATS"]
+    },
+    {
+      "id": "push",
+      "label": "Notificaciones push",
+      "kind": "external",
+      "column": 3,
+      "row": 2,
+      "responsibility": "Avisa a usuarios desconectados.",
+      "examples": ["APNs", "Firebase Cloud Messaging"]
+    }
+  ],
+  "edges": [
+    { "id": "ch-alice-gwa", "from": "alice", "to": "gw-a", "kind": "sync", "label": "WebSocket" },
+    { "id": "ch-gwa-chat", "from": "gw-a", "to": "chat", "kind": "sync", "label": "mensaje" },
+    { "id": "ch-chat-messages", "from": "chat", "to": "messages", "kind": "sync", "label": "persiste" },
+    { "id": "ch-chat-presence", "from": "chat", "to": "presence", "kind": "sync", "label": "¿dónde está?" },
+    { "id": "ch-chat-pubsub", "from": "chat", "to": "pubsub", "kind": "async", "label": "publica" },
+    { "id": "ch-pubsub-gwb", "from": "pubsub", "to": "gw-b", "kind": "async" },
+    { "id": "ch-gwb-bob", "from": "gw-b", "to": "bob", "kind": "sync", "label": "entrega" },
+    { "id": "ch-chat-push", "from": "chat", "to": "push", "kind": "async", "label": "si está offline" }
+  ],
+  "steps": [
+    {
+      "title": "1. Enviar y persistir antes del ack",
+      "description": "El mensaje llega por el WebSocket, el servicio le asigna un ID ordenable y lo guarda. Recién entonces confirma al emisor: un ack nunca promete algo que se puede perder.",
+      "highlight": ["alice", "gw-a", "chat", "messages", "ch-alice-gwa", "ch-gwa-chat", "ch-chat-messages"]
+    },
+    {
+      "title": "2. Encontrar al receptor",
+      "description": "El registro de presencia dice en qué gateway está conectado el receptor. El mensaje se publica en el canal de ese gateway.",
+      "highlight": ["chat", "presence", "pubsub", "ch-chat-presence", "ch-chat-pubsub"]
+    },
+    {
+      "title": "3. Entrega en vivo",
+      "description": "El gateway del receptor recibe el mensaje y lo empuja por su WebSocket. El receptor confirma y el estado pasa a entregado.",
+      "highlight": ["pubsub", "gw-b", "bob", "ch-pubsub-gwb", "ch-gwb-bob"]
+    },
+    {
+      "title": "4. Receptor desconectado",
+      "description": "Si no hay presencia, se envía una notificación push. Al reconectar, el cliente pide todo lo posterior a su último ID visto: la sincronización no depende de que el push llegue.",
+      "highlight": ["chat", "push", "bob", "ch-chat-push"]
+    }
+  ]
+}

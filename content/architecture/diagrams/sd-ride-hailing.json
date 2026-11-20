@@ -1,0 +1,148 @@
+{
+  "id": "sd-ride-hailing",
+  "title": "App de viajes",
+  "description": "Las ubicaciones de los conductores llegan como stream a un índice geoespacial en memoria; el matching asigna un conductor con una operación atómica.",
+  "kind": "architecture",
+  "tags": ["system design", "geoespacial", "tiempo real"],
+  "nodes": [
+    {
+      "id": "driver",
+      "label": "Conductor",
+      "kind": "actor",
+      "column": 0,
+      "row": 0,
+      "responsibility": "Envía su ubicación cada ~4 segundos mientras está disponible y acepta o rechaza viajes.",
+      "examples": ["App del conductor"]
+    },
+    {
+      "id": "rider",
+      "label": "Pasajero",
+      "kind": "actor",
+      "column": 0,
+      "row": 2,
+      "responsibility": "Pide un viaje y sigue al conductor en el mapa.",
+      "examples": ["App del pasajero"]
+    },
+    {
+      "id": "location-svc",
+      "label": "Servicio de ubicación",
+      "kind": "service",
+      "column": 1,
+      "row": 0,
+      "responsibility": "Recibe las posiciones (alto volumen, datos efímeros) y actualiza el índice geoespacial.",
+      "examples": ["Conexión persistente / UDP-like", "Batching de actualizaciones"]
+    },
+    {
+      "id": "geo-index",
+      "label": "Índice geoespacial",
+      "kind": "cache",
+      "column": 2,
+      "row": 0,
+      "responsibility": "Conductores disponibles por celda (geohash/H3), en memoria. Responde \"conductores cerca de este punto\" en milisegundos.",
+      "examples": ["Redis GEOADD/GEOSEARCH", "Celdas H3"]
+    },
+    {
+      "id": "trip-svc",
+      "label": "Servicio de viajes",
+      "kind": "service",
+      "column": 1,
+      "row": 2,
+      "responsibility": "Crea el viaje, calcula la tarifa estimada y gestiona su máquina de estados.",
+      "examples": ["requested → matched → in_progress → completed"]
+    },
+    {
+      "id": "matching",
+      "label": "Matching",
+      "kind": "service",
+      "column": 2,
+      "row": 1,
+      "responsibility": "Busca candidatos cercanos, ordena por ETA y ofrece el viaje; asigna con una operación atómica para no dar un conductor a dos pasajeros.",
+      "examples": ["Oferta con timeout de 15 s", "SET driver:7:trip NX"]
+    },
+    {
+      "id": "trips-db",
+      "label": "Viajes",
+      "kind": "database",
+      "column": 2,
+      "row": 2,
+      "responsibility": "Fuente de verdad de viajes, pagos y estados. Transaccional.",
+      "examples": ["PostgreSQL"]
+    },
+    {
+      "id": "notify",
+      "label": "Notificaciones en tiempo real",
+      "kind": "service",
+      "column": 3,
+      "row": 1,
+      "responsibility": "Empuja ofertas al conductor y la posición del conductor al pasajero.",
+      "examples": ["WebSocket", "Push"]
+    }
+  ],
+  "edges": [
+    {
+      "id": "rh-driver-loc",
+      "from": "driver",
+      "to": "location-svc",
+      "kind": "sync",
+      "label": "ubicación cada 4 s"
+    },
+    {
+      "id": "rh-loc-geo",
+      "from": "location-svc",
+      "to": "geo-index",
+      "kind": "sync",
+      "label": "actualiza celda"
+    },
+    { "id": "rh-rider-trip", "from": "rider", "to": "trip-svc", "kind": "sync", "label": "pide viaje" },
+    { "id": "rh-trip-db", "from": "trip-svc", "to": "trips-db", "kind": "sync", "label": "requested" },
+    {
+      "id": "rh-trip-matching",
+      "from": "trip-svc",
+      "to": "matching",
+      "kind": "async",
+      "label": "buscar conductor"
+    },
+    { "id": "rh-matching-geo", "from": "matching", "to": "geo-index", "kind": "sync", "label": "cercanos" },
+    { "id": "rh-matching-notify", "from": "matching", "to": "notify", "kind": "sync", "label": "oferta" },
+    { "id": "rh-notify-driver", "from": "notify", "to": "driver", "kind": "async", "label": "¿aceptás?" },
+    { "id": "rh-matching-db", "from": "matching", "to": "trips-db", "kind": "sync", "label": "matched" }
+  ],
+  "steps": [
+    {
+      "title": "1. Ubicaciones en un índice en memoria",
+      "description": "Miles de conductores reportan su posición cada pocos segundos. No se guarda cada punto en la base transaccional: se actualiza un índice geoespacial en memoria.",
+      "highlight": ["driver", "location-svc", "geo-index", "rh-driver-loc", "rh-loc-geo"]
+    },
+    {
+      "title": "2. Pedir un viaje",
+      "description": "El viaje se crea en estado \"requested\" en la base transaccional y se dispara el matching en forma asíncrona.",
+      "highlight": [
+        "rider",
+        "trip-svc",
+        "trips-db",
+        "matching",
+        "rh-rider-trip",
+        "rh-trip-db",
+        "rh-trip-matching"
+      ]
+    },
+    {
+      "title": "3. Buscar y ofrecer",
+      "description": "El matching consulta las celdas cercanas, ordena candidatos por tiempo estimado de llegada y ofrece el viaje al mejor, con un timeout para pasar al siguiente.",
+      "highlight": [
+        "matching",
+        "geo-index",
+        "notify",
+        "driver",
+        "rh-matching-geo",
+        "rh-matching-notify",
+        "rh-notify-driver"
+      ]
+    },
+    {
+      "title": "4. Asignar sin duplicados",
+      "description": "Si el conductor acepta, la asignación es atómica (un conductor no puede quedar en dos viajes) y el viaje pasa a \"matched\". Desde ahí el pasajero ve al conductor en tiempo real.",
+      "highlight": ["matching", "trips-db", "rh-matching-db"]
+    }
+  ]
+}

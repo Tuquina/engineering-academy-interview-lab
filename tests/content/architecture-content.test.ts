@@ -12,7 +12,9 @@ import { LearningQueries } from "@/modules/learning/application/learning-queries
 import type { Catalog } from "@/modules/learning/domain/catalog";
 import { FileSystemContentSource } from "@/modules/learning/infrastructure/file-system-content-source";
 import type { ArchitectureChallenge } from "@/modules/system-design/domain/architecture-challenge";
+import { missingCaseSections, type CaseStudy } from "@/modules/system-design/domain/case-study";
 import { loadArchitectureChallenges } from "@/modules/system-design/infrastructure/file-system-architecture-challenge-source";
+import { loadCaseStudies } from "@/modules/system-design/infrastructure/file-system-case-study-source";
 
 /**
  * Verifica el contenido de la Fase 4 contra el catálogo real: secciones obligatorias de cada patrón, referencias
@@ -23,13 +25,15 @@ let architecture: ArchitectureContent;
 let challenges: ArchitectureChallenge[];
 let questions: InterviewQuestion[];
 let catalog: Catalog;
+let cases: CaseStudy[];
 
 beforeAll(async () => {
-  [architecture, challenges, questions, catalog] = await Promise.all([
+  [architecture, challenges, questions, catalog, cases] = await Promise.all([
     loadArchitectureContent(contentRoot),
     loadArchitectureChallenges(contentRoot),
     loadInterviewQuestions(contentRoot),
     new LearningQueries(new FileSystemContentSource(contentRoot)).getCatalog(),
+    loadCaseStudies(contentRoot),
   ]);
 });
 
@@ -82,6 +86,24 @@ describe("biblioteca de patrones", () => {
     expect(architecture.profiles.length).toBeGreaterThanOrEqual(3);
     for (const profile of architecture.profiles) {
       expect(Object.keys(profile.assessments).sort()).toEqual([...COMPARISON_DIMENSIONS].sort());
+    }
+  });
+});
+
+describe("casos clásicos de System Design", () => {
+  it("hay al menos ocho casos con slugs únicos", () => {
+    expect(cases.length).toBeGreaterThanOrEqual(8);
+    expect(new Set(cases.map((c) => c.slug)).size).toBe(cases.length);
+  });
+
+  it("cada caso tiene diagrama con recorrido, secciones requeridas y patrones existentes", () => {
+    for (const study of cases) {
+      const diagram = architecture.diagrams.find((d) => d.id === study.diagram);
+      expect(diagram, `${study.slug} → diagrama ${study.diagram}`).toBeDefined();
+      expect(diagram!.steps.length, study.slug).toBeGreaterThanOrEqual(3);
+      expect(missingCaseSections(study.body), study.slug).toEqual([]);
+      for (const slug of study.relatedPatterns)
+        expect(patternExists(slug), `${study.slug} → ${slug}`).toBe(true);
     }
   });
 });

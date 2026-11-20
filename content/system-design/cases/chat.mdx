@@ -1,0 +1,98 @@
+---
+id: case.chat
+title: "Chat en tiempo real"
+summary: "Mensajería 1 a 1 y en grupos con entrega confiable, orden, presencia y usuarios desconectados."
+difficulty: advanced
+durationMinutes: 45
+order: 3
+tags: ["websocket", "pub/sub", "consistencia"]
+diagram: sd-chat
+functionalRequirements:
+  - "Enviar mensajes 1 a 1 y en grupos (hasta 500 miembros)."
+  - "Entrega en tiempo real a los conectados y sincronización al reconectar."
+  - "Estados enviado, entregado y leído."
+  - "Historial de conversaciones en varios dispositivos."
+nonFunctionalRequirements:
+  - "Latencia de entrega menor a 300 ms entre usuarios conectados."
+  - "Ningún mensaje confirmado se pierde."
+  - "Orden consistente dentro de cada conversación."
+  - "Escalar a decenas de millones de conexiones simultáneas."
+estimates:
+  - label: "Usuarios activos diarios"
+    value: "50 M"
+    detail: "Con ~40 mensajes por usuario por día."
+  - label: "Mensajes"
+    value: "~23.000/s"
+    detail: "2.000 M mensajes por día ÷ 86.400 s; picos de 3×."
+  - label: "Almacenamiento"
+    value: "~200 GB/día"
+    detail: "2.000 M × ~100 bytes; años de historial = cientos de TB."
+  - label: "Conexiones"
+    value: "~10 M"
+    detail: "Simultáneas; ~50.000 por servidor de gateway → ~200 servidores."
+followUps:
+  - "¿Cómo garantizás el orden si dos dispositivos envían a la vez?"
+  - "¿Cómo manejás un grupo de 100.000 miembros?"
+  - "¿Qué cambia si los mensajes deben estar cifrados de punta a punta?"
+  - '¿Cómo implementás el indicador de "escribiendo…" sin saturar el sistema?'
+relatedPatterns: ["observer"]
+relatedSimulations: ["queue-processing", "retry-backoff"]
+---
+
+## API
+
+```text
+WebSocket (bidireccional)
+→ send       { clientMessageId, conversationId, body }
+← ack        { clientMessageId, messageId, sentAt }
+← message    { messageId, conversationId, senderId, body, sentAt }
+→ delivered  { messageId }   → read { conversationId, upToMessageId }
+
+HTTP
+GET /conversations/{id}/messages?after={messageId}&limit=50   (sincronización e historial)
+```
+
+## Modelo de datos
+
+| Tabla           | Clave de partición | Orden        | Contenido                          |
+| --------------- | ------------------ | ------------ | ---------------------------------- |
+| `messages`      | `conversation_id`  | `message_id` | emisor, cuerpo, timestamp          |
+| `conversations` | `conversation_id`  | —            | miembros, tipo (1 a 1 / grupo)     |
+| `inbox`         | `user_id`          | `updated_at` | últimas conversaciones del usuario |
+| `receipts`      | `conversation_id`  | `user_id`    | último ID entregado y leído        |
+
+Los IDs **ordenables por tiempo** (Snowflake, ULID) permiten paginar con `after` y ordenar sin depender del reloj del
+cliente.
+
+## Diseño de alto nivel
+
+- **Gateways WebSocket** sin lógica de negocio: sólo mantienen conexiones. Escalan horizontalmente.
+- **Servicio de chat**: valida, asigna ID, persiste y publica.
+- **Presencia** en Redis: usuario → gateway, con TTL renovado por heartbeat.
+- **Pub/Sub** para llevar el mensaje al gateway del receptor.
+- **Push** (APNs/FCM) para desconectados.
+
+## Profundización
+
+**Entrega confiable.** El ack al emisor sale **después** de persistir. El `clientMessageId` permite deduplicar si el
+cliente reintenta porque no recibió el ack. El receptor no depende del push en vivo: al reconectar pide los mensajes
+posteriores a su último ID visto. Así, perder un evento de pub/sub sólo retrasa la entrega, no la pierde.
+
+**Orden.** Dentro de una conversación, el servicio asigna el ID; si dos dispositivos envían a la vez, el orden es el de
+llegada al servidor, igual para todos los lectores. No hay orden global entre conversaciones, y no hace falta.
+
+**Grupos grandes.** Escribir una copia por miembro (fan-out en escritura) no escala con 100.000 miembros. El mensaje se
+guarda una vez por conversación; cada miembro lee del log de la conversación y el push en vivo sólo va a los
+conectados. Los receipts de grupos grandes se agregan (contadores) en lugar de uno por persona.
+
+**Escribiendo…** son eventos efímeros: van por pub/sub sin persistir, con throttling en el cliente (uno cada pocos
+segundos).
+
+## Compromisos
+
+- **WebSocket vs long polling**: WebSocket es eficiente y bidireccional; long polling queda como respaldo detrás de
+  proxies que no lo soportan.
+- **Cassandra vs PostgreSQL**: Cassandra escala escrituras masivas particionando por conversación; PostgreSQL alcanza
+  para volúmenes moderados y simplifica consultas.
+- **Cifrado de punta a punta**: el servidor no puede leer ni buscar mensajes; la búsqueda y el historial multi
+  dispositivo pasan a resolverse en el cliente.

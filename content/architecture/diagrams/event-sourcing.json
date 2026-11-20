@@ -1,0 +1,122 @@
+{
+  "id": "event-sourcing",
+  "title": "Event Sourcing con proyecciones",
+  "description": "Los comandos se validan contra el estado reconstruido desde los eventos; el event store es append-only y las proyecciones mantienen las vistas de lectura.",
+  "kind": "architecture",
+  "tags": ["event sourcing", "proyecciones", "cqrs"],
+  "nodes": [
+    {
+      "id": "client",
+      "label": "App de la billetera",
+      "kind": "ui",
+      "column": 0,
+      "row": 1,
+      "responsibility": "Envía comandos (retirar, depositar) y consulta el saldo y los movimientos.",
+      "examples": ["POST /accounts/42/withdrawals", "GET /accounts/42/balance"]
+    },
+    {
+      "id": "handler",
+      "label": "Command handler",
+      "kind": "service",
+      "column": 1,
+      "row": 0,
+      "responsibility": "Carga los eventos del stream, reconstruye el estado, valida el comando y agrega los eventos nuevos con la versión esperada.",
+      "examples": ["handleWithdraw(accountId, amount)"]
+    },
+    {
+      "id": "aggregate",
+      "label": "Agregado Account",
+      "kind": "domain",
+      "column": 2,
+      "row": 0,
+      "responsibility": "Funciones puras: evolve(estado, evento) y decide(estado, comando) → eventos nuevos.",
+      "examples": ["evolve()", "withdraw() → MoneyWithdrawn"]
+    },
+    {
+      "id": "store",
+      "label": "Event store",
+      "kind": "database",
+      "column": 3,
+      "row": 0,
+      "responsibility": "Log append-only por stream con control de concurrencia optimista. Nunca se actualiza ni se borra un evento.",
+      "examples": ["EventStoreDB", "Tabla events(stream_id, version, type, data) en PostgreSQL"]
+    },
+    {
+      "id": "projector",
+      "label": "Proyector",
+      "kind": "worker",
+      "column": 3,
+      "row": 2,
+      "responsibility": "Lee los eventos en orden y actualiza vistas de lectura. Guarda su posición y es idempotente.",
+      "examples": ["Worker que actualiza account_balances", "Reprocesar desde cero para una vista nueva"]
+    },
+    {
+      "id": "read-model",
+      "label": "Vistas de lectura",
+      "kind": "database",
+      "column": 2,
+      "row": 2,
+      "responsibility": "Tablas desnormalizadas listas para consultar: saldo actual, últimos movimientos, reportes.",
+      "examples": ["account_balances", "monthly_statements"]
+    },
+    {
+      "id": "query",
+      "label": "Query handler",
+      "kind": "service",
+      "column": 1,
+      "row": 2,
+      "responsibility": "Responde consultas leyendo las vistas; no reproduce eventos.",
+      "examples": ["getBalance(accountId)"]
+    }
+  ],
+  "edges": [
+    { "id": "es-client-handler", "from": "client", "to": "handler", "kind": "sync", "label": "comando" },
+    {
+      "id": "es-handler-store-read",
+      "from": "handler",
+      "to": "store",
+      "kind": "sync",
+      "label": "lee stream"
+    },
+    { "id": "es-handler-aggregate", "from": "handler", "to": "aggregate", "kind": "sync", "label": "decide" },
+    {
+      "id": "es-aggregate-store",
+      "from": "aggregate",
+      "to": "store",
+      "kind": "sync",
+      "label": "append (versión esperada)"
+    },
+    { "id": "es-store-projector", "from": "store", "to": "projector", "kind": "async", "label": "eventos" },
+    {
+      "id": "es-projector-read",
+      "from": "projector",
+      "to": "read-model",
+      "kind": "sync",
+      "label": "actualiza"
+    },
+    { "id": "es-client-query", "from": "client", "to": "query", "kind": "sync", "label": "consulta" },
+    { "id": "es-query-read", "from": "query", "to": "read-model", "kind": "sync" }
+  ],
+  "steps": [
+    {
+      "title": "1. El comando reconstruye el estado",
+      "description": "El handler lee todos los eventos del stream de la cuenta (o el último snapshot y los posteriores) y aplica evolve() para obtener el saldo actual y la versión.",
+      "highlight": ["client", "handler", "store", "es-client-handler", "es-handler-store-read"]
+    },
+    {
+      "title": "2. El dominio decide y se agregan eventos",
+      "description": "Si el saldo alcanza, el agregado devuelve MoneyWithdrawn. Se agrega al stream indicando la versión esperada: si otro proceso escribió en el medio, la escritura falla y el comando se reintenta.",
+      "highlight": ["handler", "aggregate", "store", "es-handler-aggregate", "es-aggregate-store"]
+    },
+    {
+      "title": "3. Las proyecciones se actualizan en forma asíncrona",
+      "description": "El proyector procesa el evento nuevo y actualiza la vista de saldos. Hay consistencia eventual: durante unos milisegundos la vista puede no reflejar el retiro.",
+      "highlight": ["store", "projector", "read-model", "es-store-projector", "es-projector-read"]
+    },
+    {
+      "title": "4. Las consultas leen vistas, no eventos",
+      "description": "El saldo y los movimientos salen de tablas preparadas. Una vista nueva (por ejemplo, un reporte para el regulador) se crea reprocesando todos los eventos desde el principio.",
+      "highlight": ["client", "query", "read-model", "es-client-query", "es-query-read"]
+    }
+  ]
+}
