@@ -1,0 +1,120 @@
+{
+  "id": "llm-agents",
+  "title": "LLMs y agentes de IA",
+  "description": "Tokens, prompting, tool calling, RAG, evaluaciones y guardrails.",
+  "courseId": "llm-agents",
+  "cards": [
+    {
+      "id": "llm.tokens",
+      "front": "¿Qué es un token y por qué importa contarlos?",
+      "back": "La unidad en que el modelo lee y genera texto (fragmentos de palabras). Determina el costo (se cobra entrada y salida), la latencia (la salida se genera token a token) y el límite de la ventana de contexto.",
+      "difficulty": "basic",
+      "tags": ["fundamentos"],
+      "lessonId": "llm-agents.tokens-context"
+    },
+    {
+      "id": "llm.context-window",
+      "front": "¿Qué pasa si una conversación supera la ventana de contexto?",
+      "back": "La request falla o hay que recortar. Estrategias: resumir turnos viejos, conservar sólo los últimos N mensajes más los datos clave, o recuperar lo relevante bajo demanda (RAG). Además, aun dentro del límite, mucho contexto irrelevante empeora las respuestas y encarece.",
+      "difficulty": "intermediate",
+      "tags": ["contexto", "memoria"],
+      "lessonId": "llm-agents.memory-context"
+    },
+    {
+      "id": "llm.temperature",
+      "front": "¿Qué controla la temperatura?",
+      "back": "Cuán aleatorio es el muestreo del siguiente token: baja = más determinista y repetible (extracción, clasificación); alta = más variado (ideas, redacción). Aun en 0 no hay garantía de salidas idénticas, por eso las evaluaciones se repiten.",
+      "difficulty": "basic",
+      "tags": ["fundamentos"],
+      "lessonId": "llm-agents.introduction"
+    },
+    {
+      "id": "llm.structured-output",
+      "front": "¿Cómo obtener salidas estructuradas confiables de un LLM?",
+      "back": "Definir un JSON Schema (con tool calling o la opción de salida estructurada del proveedor), validar la respuesta en el código (Zod) y tener una estrategia ante errores: reintentar con el error de validación o degradar. Nunca confiar en que el texto libre tenga el formato pedido.",
+      "difficulty": "intermediate",
+      "tags": ["prompting", "validación"],
+      "lessonId": "llm-agents.prompting-tools"
+    },
+    {
+      "id": "llm.agent-loop",
+      "front": "¿Cómo funciona el loop de un agente con herramientas?",
+      "back": "1) Se envían mensajes y definiciones de herramientas. 2) El modelo responde texto o pide ejecutar una herramienta con argumentos. 3) La aplicación valida, ejecuta y devuelve el resultado. 4) Se repite hasta una respuesta final o un límite de pasos, tiempo o costo.",
+      "difficulty": "intermediate",
+      "tags": ["agentes", "tool calling"],
+      "lessonId": "llm-agents.agent-engineering"
+    },
+    {
+      "id": "llm.workflow-vs-agent",
+      "front": "¿Cuándo un workflow fijo es mejor que un agente autónomo?",
+      "back": "Cuando los pasos son conocidos de antemano: el código controla el flujo y el LLM resuelve pasos puntuales (clasificar, extraer, redactar). Es más predecible, barato y fácil de evaluar. Un agente se justifica cuando el camino depende de lo que se descubre en el proceso.",
+      "difficulty": "intermediate",
+      "tags": ["agentes", "arquitectura"],
+      "lessonId": "llm-agents.agent-engineering"
+    },
+    {
+      "id": "llm.rag",
+      "front": "¿Qué es RAG y qué partes tiene?",
+      "back": "Retrieval-Augmented Generation: antes de generar, se recuperan fragmentos relevantes de una base de conocimiento y se incluyen en el prompt. Partes: chunking, embeddings, índice vectorial (o híbrido con búsqueda léxica), recuperación + reranking, y la generación con citas.",
+      "difficulty": "intermediate",
+      "tags": ["rag"],
+      "lessonId": "llm-agents.hallucinations-rag"
+    },
+    {
+      "id": "llm.hallucination",
+      "front": "¿Cómo se reducen las alucinaciones en un producto?",
+      "back": "Darle al modelo los datos (RAG o herramientas) en lugar de pedirle que recuerde, pedir citas y verificarlas, permitir que diga \"no sé\", restringir el dominio en el prompt y medir con evaluaciones de fidelidad al contexto.",
+      "difficulty": "intermediate",
+      "tags": ["calidad", "rag"],
+      "lessonId": "llm-agents.hallucinations-rag"
+    },
+    {
+      "id": "llm.prompt-injection",
+      "front": "¿Qué es prompt injection y cómo se mitiga?",
+      "back": "Instrucciones maliciosas dentro de datos que el modelo lee (un email, una web, un documento) que intentan cambiar su comportamiento. Mitigar: tratar el contenido externo como datos, herramientas con mínimo privilegio, confirmación humana para acciones sensibles, validar argumentos en el servidor y no exponer secretos en el contexto.",
+      "difficulty": "advanced",
+      "tags": ["seguridad"],
+      "lessonId": "llm-agents.guardrails-observability"
+    },
+    {
+      "id": "llm.eval-types",
+      "front": "Tipos de evaluación de un sistema con LLM.",
+      "back": "Verificaciones deterministas (herramienta llamada, JSON válido, contiene o no un dato), LLM-as-judge con rúbrica (tono, utilidad; calibrado contra juicio humano), revisión humana por muestreo y métricas en producción (resolución, escalamientos, costo).",
+      "difficulty": "intermediate",
+      "tags": ["evals"],
+      "lessonId": "llm-agents.evals"
+    },
+    {
+      "id": "llm.golden-dataset",
+      "front": "¿Qué es un golden dataset y cómo se usa?",
+      "back": "Un conjunto de casos representativos (incluidos los difíciles y los fallos reales) con lo que se espera de cada uno. Se corre ante cada cambio de prompt, modelo o herramienta para detectar regresiones, igual que una suite de tests.",
+      "difficulty": "intermediate",
+      "tags": ["evals"],
+      "lessonId": "llm-agents.evals"
+    },
+    {
+      "id": "llm.cost-latency",
+      "front": "Tres palancas para bajar costo y latencia de un sistema con LLM.",
+      "back": "1) Prompt caching del prefijo estable (instrucciones, herramientas). 2) Modelos más chicos para pasos simples y el grande sólo donde hace falta. 3) Menos tokens: contexto acotado, salidas cortas y streaming para la latencia percibida. Batch para trabajos no interactivos.",
+      "difficulty": "advanced",
+      "tags": ["costos", "performance"],
+      "lessonId": "llm-agents.tokens-context"
+    },
+    {
+      "id": "llm.observability",
+      "front": "¿Qué conviene registrar de cada ejecución de un agente?",
+      "back": "Un trace por conversación con cada llamada al modelo (prompt y versión, modelo, tokens, latencia, costo), cada herramienta con argumentos y resultado, decisiones de guardrails y el resultado final. Permite depurar, auditar y construir datasets de evaluación.",
+      "difficulty": "intermediate",
+      "tags": ["observabilidad"],
+      "lessonId": "llm-agents.guardrails-observability"
+    },
+    {
+      "id": "llm.human-in-the-loop",
+      "front": "¿Cuándo debe intervenir una persona en un flujo con agentes?",
+      "back": "Antes de acciones irreversibles o de alto impacto (pagos, borrados, mensajes a terceros), cuando la confianza es baja, ante pedidos fuera de política o cuando el usuario lo pide. La escalada debe incluir el contexto para no hacer repetir todo.",
+      "difficulty": "basic",
+      "tags": ["guardrails"],
+      "lessonId": "llm-agents.guardrails-observability"
+    }
+  ]
+}

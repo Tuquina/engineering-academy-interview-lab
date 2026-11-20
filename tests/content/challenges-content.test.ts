@@ -57,7 +57,8 @@ describe("challenges de código", () => {
         `${challenge.id} (starter)`,
       ).toEqual([]);
     }
-  });
+    // Compila dos programas por challenge: el tiempo crece con el catálogo.
+  }, 60_000);
 
   it("cada solución de referencia pasa todos sus tests públicos y ocultos", async () => {
     for (const challenge of codeChallenges()) {

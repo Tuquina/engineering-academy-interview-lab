@@ -1,0 +1,49 @@
+---
+id: challenge.course-schedule
+kind: code
+title: "Orden de cursada con correlativas"
+summary: "Orden topológico y detección de ciclos en un grafo dirigido (algoritmo de Kahn)."
+difficulty: advanced
+durationMinutes: 30
+technologies: ["algoritmos", "typescript"]
+topics: ["grafos", "orden topológico", "ciclos"]
+skills: ["modelado con grafos", "BFS"]
+interviewType: live-coding
+order: 29
+constraints:
+  - "Las materias se numeran de 0 a n - 1; 1 ≤ n ≤ 10⁴ y hasta 5·10⁴ correlativas."
+  - "Cada correlativa `[a, b]` significa: para cursar `a` hay que aprobar antes `b`."
+acceptanceCriteria:
+  - "Devuelve un orden válido que incluye todas las materias, o `null` si es imposible (hay un ciclo)."
+  - "Cada materia aparece después de todas sus correlativas."
+  - "Las materias sin correlativas pueden ir en cualquier posición válida."
+hints:
+  - "Modelá un grafo dirigido: una arista `b → a` por cada correlativa `[a, b]`. ¿Qué materias se pueden cursar primero?"
+  - 'Las que tienen grado de entrada 0. Al "cursarlas", restá 1 al grado de entrada de las que dependen de ellas.'
+  - "Si al terminar el orden no tiene las n materias, quedaron nodos en un ciclo."
+followUpQuestions:
+  - "¿Cómo lo resolverías con DFS y tres colores (no visitado, en proceso, terminado)?"
+  - "¿Cómo calcularías la mínima cantidad de cuatrimestres si podés cursar varias materias a la vez?"
+  - "¿Dónde aparece este problema en sistemas reales (builds, migraciones, pipelines)?"
+relatedLessons: []
+---
+
+## Enunciado
+
+Hay `n` materias numeradas de `0` a `n - 1` y una lista de **correlativas**: `[a, b]` significa que para cursar `a`
+primero hay que aprobar `b`. Devolvé un **orden** en el que se puedan cursar todas, o `null` si es imposible.
+
+```ts
+export function findOrder(n: number, prerequisites: readonly (readonly [number, number])[]): number[] | null;
+```
+
+## Ejemplos
+
+| `n` | `prerequisites`                    | Un resultado válido             |
+| --- | ---------------------------------- | ------------------------------- |
+| `2` | `[[1, 0]]`                         | `[0, 1]`                        |
+| `4` | `[[1, 0], [2, 0], [3, 1], [3, 2]]` | `[0, 1, 2, 3]` o `[0, 2, 1, 3]` |
+| `2` | `[[1, 0], [0, 1]]`                 | `null` (ciclo)                  |
+| `1` | `[]`                               | `[0]`                           |
+
+Cualquier orden válido es aceptado.

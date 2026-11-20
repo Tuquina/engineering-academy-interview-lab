@@ -16,7 +16,7 @@ export interface Deck {
   readonly id: string;
   readonly title: string;
   readonly description: string;
-  /** Curso del catálogo al que pertenece el mazo (se usa como categoría). */
-  readonly courseId: string;
+  /** Curso del catálogo al que pertenece el mazo (se usa como categoría); `null` en mazos transversales. */
+  readonly courseId: string | null;
   readonly cards: readonly Flashcard[];
 }

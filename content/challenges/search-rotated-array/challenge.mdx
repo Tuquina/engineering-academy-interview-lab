@@ -1,0 +1,48 @@
+---
+id: challenge.search-rotated-array
+kind: code
+title: "Buscar en un array ordenado y rotado"
+summary: "Búsqueda binaria con un invariante extra: en cada paso una de las mitades está ordenada."
+difficulty: intermediate
+durationMinutes: 25
+technologies: ["algoritmos", "typescript"]
+topics: ["búsqueda binaria", "arrays"]
+skills: ["invariantes", "casos límite"]
+interviewType: live-coding
+order: 27
+constraints:
+  - "Los valores son distintos y el array estaba ordenado de forma ascendente antes de rotarlo."
+  - "1 ≤ nums.length ≤ 10⁵."
+  - "Objetivo: O(log n)."
+acceptanceCriteria:
+  - "Devuelve el índice de `target` o -1 si no está."
+  - "Funciona sin rotación, con rotación en cualquier posición y con un solo elemento."
+  - "Hace O(log n) comparaciones."
+hints:
+  - "Calculá `mid`. Comparando `nums[lo]` con `nums[mid]` sabés cuál de las dos mitades está ordenada."
+  - "Si la mitad izquierda está ordenada y `target` está entre `nums[lo]` y `nums[mid]`, buscá ahí; si no, en la derecha."
+  - "Simétrico para la mitad derecha. Cuidado con los `<` y `<=` en los bordes."
+followUpQuestions:
+  - "¿Cómo encontrarías el índice de rotación (el mínimo) en O(log n)?"
+  - "¿Qué cambia si puede haber valores repetidos?"
+  - "¿Por qué `lo + ((hi - lo) >> 1)` en lugar de `(lo + hi) / 2`?"
+relatedLessons: []
+---
+
+## Enunciado
+
+Un array ordenado de forma ascendente, con valores distintos, fue **rotado** en una posición desconocida
+(`[0, 1, 2, 4, 5, 6, 7]` → `[4, 5, 6, 7, 0, 1, 2]`). Devolvé el índice de `target` o `-1` si no está, en **O(log n)**.
+
+```ts
+export function searchRotated(nums: readonly number[], target: number): number;
+```
+
+## Ejemplos
+
+| `nums`                  | `target` | Resultado |
+| ----------------------- | -------- | --------- |
+| `[4, 5, 6, 7, 0, 1, 2]` | `0`      | `4`       |
+| `[4, 5, 6, 7, 0, 1, 2]` | `3`      | `-1`      |
+| `[1]`                   | `1`      | `0`       |
+| `[1, 3]`                | `3`      | `1`       |

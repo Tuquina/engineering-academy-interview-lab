@@ -1,0 +1,69 @@
+---
+title: "Redis"
+description: "Estructuras de datos, comandos clave, patrones de caching y coordinación, persistencia y riesgos."
+order: 7
+tags: ["redis", "caching", "coordinación"]
+relatedLessons: ["redis.introduction", "redis.data-types", "redis.patterns", "redis.tradeoffs"]
+---
+
+## Estructuras y comandos
+
+| Estructura  | Para qué                                          | Comandos                                                    |
+| ----------- | ------------------------------------------------- | ----------------------------------------------------------- |
+| String      | Caché de valores, contadores, flags               | `GET`, `SET … EX/PX/NX`, `INCR`, `MGET`                     |
+| Hash        | Objetos con campos                                | `HSET`, `HGET`, `HGETALL`, `HINCRBY`                        |
+| List        | Colas simples, últimos N                          | `LPUSH`, `RPOP`, `BRPOP`, `LRANGE`, `LTRIM`                 |
+| Set         | Conjuntos únicos, membresía                       | `SADD`, `SISMEMBER`, `SINTER`, `SCARD`                      |
+| Sorted Set  | Rankings, colas por prioridad, ventanas de tiempo | `ZADD`, `ZRANGE … REV`, `ZRANGEBYSCORE`, `ZREMRANGEBYSCORE` |
+| Stream      | Log de eventos con grupos de consumidores         | `XADD`, `XREADGROUP`, `XACK`, `XAUTOCLAIM`                  |
+| HyperLogLog | Conteo aproximado de únicos con poca memoria      | `PFADD`, `PFCOUNT`                                          |
+| Bitmap      | Flags por ID (actividad diaria)                   | `SETBIT`, `BITCOUNT`                                        |
+
+Evitar en producción: `KEYS *` (usar `SCAN`), `FLUSHALL`, comandos O(N) sobre claves enormes.
+
+## Patrones
+
+```text
+Cache-aside
+  valor = GET key
+  si no existe → leer de la base → SET key valor EX 300 (+ jitter)
+  al escribir en la base → DEL key
+
+Lock con expiración
+  SET lock:job:42 <token> NX PX 30000     → OK = lo tengo
+  liberar con Lua: si GET == token → DEL
+
+Rate limit (ventana fija)
+  n = INCR rl:{user}:{minuto}
+  si n == 1 → EXPIRE rl:{user}:{minuto} 60
+  si n > límite → 429
+
+Ranking
+  ZINCRBY leaderboard 10 user:7
+  ZRANGE leaderboard 0 9 REV WITHSCORES
+
+Idempotencia
+  SET idem:{key} <resultado> NX EX 86400 → si ya existe, devolver lo guardado
+```
+
+## Cache stampede
+
+Cuando expira una clave muy pedida, miles de requests van a la base a la vez. Mitigaciones:
+
+- **Lock de recálculo**: sólo una request recalcula; el resto espera o sirve el valor viejo.
+- **TTL con jitter** para que no expiren muchas claves juntas.
+- **Refresh anticipado** (stale-while-revalidate) antes del vencimiento.
+
+## Persistencia y memoria
+
+| Opción             | Comportamiento                                          |
+| ------------------ | ------------------------------------------------------- |
+| RDB                | Snapshots periódicos; se pierde desde el último         |
+| AOF (`everysec`)   | Log de escrituras; pierde ~1 s como máximo              |
+| `maxmemory-policy` | `allkeys-lru`/`lfu` para caché; `noeviction` para datos |
+
+## Cuándo NO usar Redis
+
+- Como fuente de verdad de datos que no podés perder (salvo configuración y operación cuidadosas).
+- Para consultas relacionales o reportes: eso es PostgreSQL.
+- Como broker con garantías fuertes y retención larga: evaluar Kafka, SQS o RabbitMQ.

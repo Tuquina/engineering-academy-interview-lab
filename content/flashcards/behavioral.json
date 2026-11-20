@@ -1,0 +1,91 @@
+{
+  "id": "behavioral",
+  "title": "Entrevistas de comportamiento y búsqueda",
+  "description": "Método STAR, preguntas habituales y cómo presentarte.",
+  "cards": [
+    {
+      "id": "beh.star",
+      "front": "¿Qué es el método STAR?",
+      "back": "Una estructura para contar experiencias: Situación (contexto breve), Tarea (tu responsabilidad), Acción (qué hiciste vos, en primera persona) y Resultado (medible si se puede, y qué aprendiste). La mayor parte del tiempo va en la Acción.",
+      "difficulty": "basic",
+      "tags": ["star"]
+    },
+    {
+      "id": "beh.tell-me-about-yourself",
+      "front": "¿Cómo responder \"contame sobre vos\"?",
+      "back": "1–2 minutos: presente (rol y en qué sos fuerte), pasado relevante (1–2 logros concretos) y futuro (por qué este puesto encaja). No recorrer el CV entero ni contar la vida personal.",
+      "difficulty": "basic",
+      "tags": ["presentación"]
+    },
+    {
+      "id": "beh.conflict",
+      "front": "¿Qué busca el entrevistador con \"contame un conflicto con un compañero\"?",
+      "back": "Ver si separás a la persona del problema, escuchás, usás datos para decidir y priorizás el objetivo del equipo. Elegí un conflicto real de criterio técnico o prioridades, con un final constructivo; nunca hablar mal de otros.",
+      "difficulty": "intermediate",
+      "tags": ["star", "colaboración"]
+    },
+    {
+      "id": "beh.failure",
+      "front": "¿Cómo contar un error o un fracaso?",
+      "back": "Uno real y con consecuencias, asumiendo tu parte sin excusas, qué hiciste para mitigarlo y qué cambiaste después (proceso, tests, alertas). Lo que se evalúa es el aprendizaje y la responsabilidad, no que nunca te equivoques.",
+      "difficulty": "intermediate",
+      "tags": ["star"]
+    },
+    {
+      "id": "beh.impact-metrics",
+      "front": "¿Cómo hacer que un logro suene concreto?",
+      "back": "Cuantificar: latencia de 1,2 s a 300 ms, 40 % menos incidentes, migración sin downtime de 20 M de filas, onboarding de 2 semanas a 3 días. Si no hay números exactos, órdenes de magnitud honestos.",
+      "difficulty": "basic",
+      "tags": ["cv", "star"]
+    },
+    {
+      "id": "beh.questions-to-ask",
+      "front": "¿Qué preguntas conviene hacerle al entrevistador?",
+      "back": "Sobre el equipo y el trabajo real: cómo es un día típico, cómo se despliega y se maneja una guardia, cómo se mide el éxito en los primeros 90 días, qué desafíos técnicos tienen ahora, cómo es el proceso de code review. Muestra interés y te ayuda a decidir.",
+      "difficulty": "basic",
+      "tags": ["cierre"]
+    },
+    {
+      "id": "beh.why-leaving",
+      "front": "¿Cómo responder \"por qué querés cambiar de trabajo\"?",
+      "back": "En positivo y hacia adelante: lo que buscás (crecimiento, un stack, un tipo de producto) y por qué este puesto lo ofrece. Evitar quejas del empleador actual.",
+      "difficulty": "basic",
+      "tags": ["presentación"]
+    },
+    {
+      "id": "beh.salary",
+      "front": "¿Cómo manejar la pregunta de expectativa salarial?",
+      "back": "Investigar el rango de mercado para el rol, el seniority y la región antes. Si es temprano, preguntar el rango del puesto; si hay que dar un número, dar un rango cuyo piso te sirva y aclarar que depende del paquete total.",
+      "difficulty": "intermediate",
+      "tags": ["negociación"]
+    },
+    {
+      "id": "beh.cv-bullets",
+      "front": "¿Cómo se escribe un buen bullet de CV técnico?",
+      "back": "Verbo de acción + qué hiciste + cómo (tecnología) + resultado medible. Ejemplo: \"Rediseñé el procesamiento de webhooks con una cola e idempotencia en PostgreSQL, eliminando cobros duplicados y bajando los reintentos un 70 %\".",
+      "difficulty": "basic",
+      "tags": ["cv"]
+    },
+    {
+      "id": "beh.take-home",
+      "front": "¿Qué evalúan en un take-home y qué conviene entregar?",
+      "back": "Criterio más que cantidad: código claro, tests de lo importante, manejo de errores y un README con cómo correrlo, decisiones tomadas, compromisos y qué harías con más tiempo. Respetar el tiempo sugerido.",
+      "difficulty": "intermediate",
+      "tags": ["take-home"]
+    },
+    {
+      "id": "beh.dont-know",
+      "front": "¿Qué hacer si no sabés la respuesta a una pregunta técnica?",
+      "back": "Decirlo con honestidad y razonar en voz alta desde lo que sí sabés (\"no lo usé, pero esperaría que…\"), o explicar cómo lo averiguarías. Inventar se detecta y resta mucho más que un \"no sé\" bien manejado.",
+      "difficulty": "basic",
+      "tags": ["actitud"]
+    },
+    {
+      "id": "beh.leadership",
+      "front": "\"Contame una vez que lideraste algo sin ser el jefe\": ¿qué historia elegir?",
+      "back": "Una en la que detectaste un problema, propusiste una solución, convenciste con datos o un prototipo y coordinaste a otros para llevarla a cabo (una migración, un estándar de testing, mejorar una guardia). Mostrar iniciativa e influencia, no autoridad.",
+      "difficulty": "intermediate",
+      "tags": ["star", "liderazgo"]
+    }
+  ]
+}

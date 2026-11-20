@@ -1,0 +1,24 @@
+## Enfoque
+
+Para cada número `x` necesito saber si **ya vi** su complemento `target - x`. Un `Map` de valor → índice responde eso
+en O(1) promedio, así que recorro el array una sola vez:
+
+1. Calculo el complemento.
+2. Si está en el mapa, encontré el par: el índice guardado es menor que el actual, así que ya sale ordenado.
+3. Si no, guardo el número actual.
+
+Consultar **antes** de insertar evita usar el mismo elemento dos veces (`[3, 3]` con objetivo 6 funciona porque el
+segundo 3 encuentra al primero).
+
+## Complejidad
+
+- Tiempo: O(n), una pasada con operaciones O(1) promedio.
+- Memoria: O(n) por el mapa.
+
+La versión ingenua compara todos los pares: con 10⁵ elementos son ~5·10⁹ comparaciones.
+
+## Variantes
+
+- **Array ordenado**: dos punteros desde los extremos (si la suma es chica, avanzo el izquierdo; si es grande,
+  retrocedo el derecho). O(n) de tiempo y O(1) de memoria.
+- **Todos los pares únicos**: ordenar y usar dos punteros salteando duplicados (base de 3Sum).

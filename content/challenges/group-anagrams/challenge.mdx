@@ -1,0 +1,49 @@
+---
+id: challenge.group-anagrams
+kind: code
+title: "Agrupar anagramas"
+summary: "Elegir una buena clave canónica para agrupar con un hash map."
+difficulty: intermediate
+durationMinutes: 20
+technologies: ["algoritmos", "typescript"]
+topics: ["hash map", "strings", "agrupamiento"]
+skills: ["hashing", "diseño de claves"]
+interviewType: live-coding
+order: 24
+constraints:
+  - "Las palabras tienen sólo letras minúsculas de la a a la z."
+  - "0 ≤ words.length ≤ 10⁴ y cada palabra tiene hasta 100 letras."
+acceptanceCriteria:
+  - "Cada grupo contiene todas las palabras que son anagramas entre sí, incluidas las repetidas."
+  - "Dentro de cada grupo se conserva el orden de aparición."
+  - "Los grupos se devuelven en el orden en que aparece su primera palabra."
+hints:
+  - "Dos palabras son anagramas si tienen las mismas letras con la misma frecuencia. ¿Qué representación es idéntica para ambas?"
+  - 'Ordenar las letras de la palabra da una clave canónica: "eat" y "tea" → "aet".'
+  - "Un `Map` mantiene el orden de inserción de las claves, lo que te da el orden de los grupos gratis."
+followUpQuestions:
+  - "¿Cómo armarías la clave en O(k) en lugar de O(k log k) para palabras de largo k?"
+  - "¿Qué cambia si las palabras tienen mayúsculas, acentos o Unicode?"
+  - "¿Cómo detectarías si dos strings son anagramas con O(1) de memoria extra?"
+relatedLessons: []
+---
+
+## Enunciado
+
+Dada una lista de palabras, agrupá las que son **anagramas** entre sí (mismas letras, con la misma cantidad de cada
+una, en cualquier orden).
+
+```ts
+export function groupAnagrams(words: readonly string[]): string[][];
+```
+
+## Ejemplo
+
+```ts
+groupAnagrams(["eat", "tea", "tan", "ate", "nat", "bat"]);
+// [["eat", "tea", "ate"], ["tan", "nat"], ["bat"]]
+```
+
+- Los grupos aparecen en el orden de su primera palabra (`"eat"`, luego `"tan"`, luego `"bat"`).
+- Dentro de cada grupo se conserva el orden original.
+- `[""]` devuelve `[[""]]` y `[]` devuelve `[]`.

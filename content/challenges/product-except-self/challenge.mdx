@@ -1,0 +1,49 @@
+---
+id: challenge.product-except-self
+kind: code
+title: "Producto del array excepto uno mismo"
+summary: "Prefijos y sufijos: resolver en O(n) sin usar la división."
+difficulty: intermediate
+durationMinutes: 20
+technologies: ["algoritmos", "typescript"]
+topics: ["arrays", "prefijos"]
+skills: ["sumas y productos prefijos", "casos límite"]
+interviewType: live-coding
+order: 26
+constraints:
+  - "2 ≤ nums.length ≤ 10⁵; los valores pueden ser 0 o negativos."
+  - "No usar la división."
+  - "Objetivo: O(n) de tiempo y O(1) de memoria extra (sin contar el resultado)."
+acceptanceCriteria:
+  - "`result[i]` es el producto de todos los elementos menos `nums[i]`."
+  - "Funciona con uno o varios ceros."
+  - "Resuelve 10⁵ elementos dentro del tiempo límite."
+hints:
+  - "El producto de todos menos `i` es (producto de los de la izquierda) × (producto de los de la derecha)."
+  - "Una pasada de izquierda a derecha calcula los prefijos; otra de derecha a izquierda, los sufijos."
+  - "Podés guardar los prefijos en el array resultado y multiplicar los sufijos con una sola variable acumulada."
+followUpQuestions:
+  - "¿Por qué la solución con división falla cuando hay un cero?"
+  - '¿Cómo resolverías "suma de un rango [i, j]" con muchas consultas?'
+  - "¿Qué riesgo numérico hay con productos muy grandes en JavaScript?"
+relatedLessons: []
+---
+
+## Enunciado
+
+Dado un array `nums`, devolvé un array `result` donde `result[i]` es el producto de **todos los elementos de `nums`
+excepto `nums[i]`**, sin usar la división.
+
+```ts
+export function productExceptSelf(nums: readonly number[]): number[];
+```
+
+## Ejemplos
+
+| `nums`              | Resultado         |
+| ------------------- | ----------------- |
+| `[1, 2, 3, 4]`      | `[24, 12, 8, 6]`  |
+| `[-1, 1, 0, -3, 3]` | `[0, 0, 9, 0, 0]` |
+| `[2, 3]`            | `[3, 2]`          |
+
+Los resultados entran en el rango de enteros seguros de JavaScript.

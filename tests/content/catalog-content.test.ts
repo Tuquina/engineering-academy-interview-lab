@@ -80,7 +80,8 @@ describe("flashcards y cheatsheets", () => {
     const decks = await loadDecks(contentRoot);
     expect(decks.flatMap((d) => d.cards).length).toBeGreaterThanOrEqual(30);
     for (const deck of decks) {
-      expect(catalog.getCourseById(deck.courseId), `${deck.id}: curso ${deck.courseId}`).toBeDefined();
+      if (deck.courseId)
+        expect(catalog.getCourseById(deck.courseId), `${deck.id}: curso ${deck.courseId}`).toBeDefined();
       for (const card of deck.cards) {
         if (card.lessonId) expect(catalog.getLessonById(card.lessonId), `${card.id}: lección`).toBeDefined();
       }

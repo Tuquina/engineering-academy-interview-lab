@@ -12,6 +12,8 @@ import { formatClock, useElapsedSeconds } from "./use-elapsed";
 
 export interface LiveCodingChallenge extends CodeChallengeWorkspaceProps {
   readonly title: string;
+  /** `algorithms`: problemas clásicos de estructuras de datos y algoritmos; `practical`: problemas de backend reales. */
+  readonly track: "algorithms" | "practical";
 }
 
 /**

@@ -1,0 +1,49 @@
+---
+id: challenge.merge-intervals
+kind: code
+title: "Fusionar intervalos superpuestos"
+summary: "Ordenar y recorrer una vez: la base de problemas de agendas, reservas y rangos de fechas."
+difficulty: intermediate
+durationMinutes: 20
+technologies: ["algoritmos", "typescript"]
+topics: ["intervalos", "ordenamiento"]
+skills: ["ordenamiento", "casos límite"]
+interviewType: live-coding
+order: 23
+constraints:
+  - "Cada intervalo es `[inicio, fin]` con inicio ≤ fin; vienen en cualquier orden."
+  - "0 ≤ intervals.length ≤ 10⁵."
+  - "No modificar el array recibido."
+acceptanceCriteria:
+  - "Devuelve intervalos disjuntos, ordenados por inicio, que cubren exactamente lo mismo."
+  - "Intervalos que se tocan en un extremo (`[1, 4]` y `[4, 5]`) se fusionan."
+  - "No muta la entrada."
+hints:
+  - "Si los intervalos estuvieran ordenados por inicio, ¿con quién podría solaparse cada uno?"
+  - "Ordená por inicio y compará cada intervalo sólo con el último del resultado."
+  - "Si el inicio actual es ≤ al fin del último, se solapan: el nuevo fin es el máximo de ambos (puede estar contenido)."
+followUpQuestions:
+  - "¿Cómo insertarías un intervalo nuevo en una lista ya fusionada y ordenada en O(n)?"
+  - "¿Cuántas salas de reunión necesitás como mínimo para un conjunto de reuniones?"
+  - "¿Cómo detectarías en SQL reservas que se superponen?"
+relatedLessons: []
+---
+
+## Enunciado
+
+Dado un array de intervalos `[inicio, fin]`, fusioná todos los que se **superponen** y devolvé el resultado ordenado
+por inicio.
+
+```ts
+export function mergeIntervals(intervals: readonly (readonly [number, number])[]): [number, number][];
+```
+
+## Ejemplos
+
+| Entrada                               | Resultado                     |
+| ------------------------------------- | ----------------------------- |
+| `[[1, 3], [2, 6], [8, 10], [15, 18]]` | `[[1, 6], [8, 10], [15, 18]]` |
+| `[[1, 4], [4, 5]]`                    | `[[1, 5]]`                    |
+| `[[1, 10], [2, 3]]`                   | `[[1, 10]]`                   |
+| `[[5, 6], [1, 2]]`                    | `[[1, 2], [5, 6]]`            |
+| `[]`                                  | `[]`                          |

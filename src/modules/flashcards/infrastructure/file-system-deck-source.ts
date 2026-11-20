@@ -10,7 +10,7 @@ const deckFileSchema = z.strictObject({
   id,
   title: text,
   description: text,
-  courseId: id,
+  courseId: id.nullable().default(null),
   cards: z
     .array(
       z.strictObject({

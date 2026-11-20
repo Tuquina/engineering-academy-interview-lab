@@ -1,0 +1,60 @@
+---
+title: "Seguridad web para desarrolladores"
+description: "Las vulnerabilidades más comunes (OWASP), cómo prevenirlas y la checklist mínima de una API."
+order: 15
+tags: ["seguridad", "owasp", "auth"]
+relatedLessons: ["nodejs.auth-security", "nextjs.production"]
+---
+
+## Vulnerabilidades frecuentes
+
+| Vulnerabilidad                | Ejemplo                                               | Prevención                                                   |
+| ----------------------------- | ----------------------------------------------------- | ------------------------------------------------------------ |
+| Control de acceso roto (IDOR) | `GET /invoices/123` devuelve facturas de otro usuario | Verificar en el servidor que el recurso pertenece al usuario |
+| Inyección SQL                 | Concatenar input en una consulta                      | Consultas parametrizadas / ORM; nunca concatenar             |
+| XSS                           | Mostrar HTML del usuario sin escapar                  | Escapar por defecto (React lo hace), sanitizar HTML, CSP     |
+| CSRF                          | Un sitio ajeno dispara un POST con tu cookie          | `SameSite=Lax/Strict`, tokens CSRF, verificar `Origin`       |
+| SSRF                          | El servidor hace fetch a una URL que da el usuario    | Lista de destinos permitidos; bloquear IPs internas          |
+| Fallas criptográficas         | Contraseñas con SHA-256 o en texto plano              | Argon2id/scrypt/bcrypt; TLS en todo                          |
+| Configuración insegura        | Stack traces en producción, buckets públicos          | Errores genéricos al cliente; revisar permisos               |
+| Componentes vulnerables       | Dependencias con CVEs                                 | Actualizar, auditar, lockfile, Dependabot                    |
+| Fallas de autenticación       | Sin límite de intentos, sesiones eternas              | Rate limiting, MFA, expiración y rotación de sesiones        |
+| Deserialización / validación  | Confiar en el JSON recibido                           | Validar con esquemas (Zod) en cada borde                     |
+
+## Cookies de sesión
+
+```http
+Set-Cookie: session=…; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=2592000
+```
+
+- `HttpOnly`: JavaScript no la puede leer (mitiga robo por XSS).
+- `Secure`: sólo por HTTPS.
+- `SameSite`: limita el envío en requests de otros sitios (CSRF).
+
+## Headers de seguridad
+
+| Header                            | Para qué                                        |
+| --------------------------------- | ----------------------------------------------- |
+| `Content-Security-Policy`         | Restringe de dónde se cargan scripts y recursos |
+| `Strict-Transport-Security`       | Fuerza HTTPS                                    |
+| `X-Content-Type-Options: nosniff` | Evita que el navegador adivine tipos            |
+| `Referrer-Policy`                 | Controla qué URL se envía como referer          |
+| `Permissions-Policy`              | Desactiva APIs del navegador que no usás        |
+
+## CORS
+
+- Es una restricción del **navegador**, no una protección del servidor.
+- `Access-Control-Allow-Origin: *` nunca junto con credenciales.
+- Listar orígenes permitidos explícitamente.
+
+## Checklist mínima de una API
+
+- [ ] Autenticación en cada endpoint que no sea público.
+- [ ] Autorización por recurso (¿este usuario puede ver/modificar este ID?).
+- [ ] Validación de entrada con límites de tamaño.
+- [ ] Rate limiting por IP y por usuario en login y endpoints caros.
+- [ ] Secretos en variables de entorno o un gestor, nunca en el repo.
+- [ ] Logs sin contraseñas, tokens ni datos sensibles.
+- [ ] Errores genéricos hacia afuera, detalle en logs internos.
+- [ ] Dependencias actualizadas y auditadas.
+- [ ] Principio de mínimo privilegio en la base y en la nube.

@@ -1,0 +1,98 @@
+---
+title: "HTTP y diseño de APIs REST"
+description: "Métodos, códigos de estado, idempotencia, paginación, versionado, caché y webhooks."
+order: 12
+tags: ["http", "rest", "apis", "webhooks"]
+relatedLessons: ["nodejs.http-apis", "nodejs.webhooks-idempotency", "typescript.type-safe-apis"]
+---
+
+## Métodos
+
+| Método   | Uso                    | Seguro | Idempotente                                    |
+| -------- | ---------------------- | ------ | ---------------------------------------------- |
+| `GET`    | Leer                   | Sí     | Sí                                             |
+| `POST`   | Crear / acciones       | No     | No (hacerlo idempotente con `Idempotency-Key`) |
+| `PUT`    | Reemplazar completo    | No     | Sí                                             |
+| `PATCH`  | Modificar parcialmente | No     | No necesariamente                              |
+| `DELETE` | Borrar                 | No     | Sí                                             |
+
+**Seguro**: no modifica estado. **Idempotente**: repetirlo deja el mismo estado que hacerlo una vez.
+
+## Códigos de estado
+
+| Código      | Cuándo                                          |
+| ----------- | ----------------------------------------------- |
+| 200         | OK con cuerpo                                   |
+| 201         | Creado (con `Location`)                         |
+| 202         | Aceptado, se procesa en forma asíncrona         |
+| 204         | OK sin cuerpo                                   |
+| 301/308     | Redirección permanente (308 conserva el método) |
+| 304         | No modificado (caché con `ETag`)                |
+| 400         | Request mal formada                             |
+| 401         | Falta autenticación o es inválida               |
+| 403         | Autenticado, sin permiso                        |
+| 404         | No existe (o no querés revelar que existe)      |
+| 409         | Conflicto con el estado actual                  |
+| 412         | Falló una precondición (`If-Match`)             |
+| 422         | Bien formada pero semánticamente inválida       |
+| 429         | Demasiadas requests (`Retry-After`)             |
+| 500         | Error inesperado del servidor                   |
+| 502/503/504 | Upstream inválido / no disponible / timeout     |
+
+## Diseño de recursos
+
+```text
+GET    /v1/orders?status=paid&limit=50&cursor=…
+POST   /v1/orders                      Idempotency-Key: 8f1c…
+GET    /v1/orders/{orderId}
+PATCH  /v1/orders/{orderId}            If-Match: "v7"
+POST   /v1/orders/{orderId}/cancel     (acción que no es CRUD)
+GET    /v1/customers/{id}/orders       (subrecurso)
+```
+
+- Sustantivos en plural, IDs opacos, JSON consistente (`camelCase` o `snake_case`, uno solo).
+- Errores con forma estable: `{ "error": { "code": "insufficient_funds", "message": "…", "details": … } }` (o RFC 9457 Problem Details).
+- Validar la entrada en el borde y devolver todos los errores de validación juntos.
+
+## Paginación
+
+| Tipo   | Ventaja                                              | Problema                                                         |
+| ------ | ---------------------------------------------------- | ---------------------------------------------------------------- |
+| Offset | Simple, saltar a la página N                         | Lento con offsets grandes; duplica o saltea si cambian los datos |
+| Cursor | Estable y eficiente (`WHERE (created_at, id) < (…)`) | No permite saltar a una página arbitraria                        |
+
+## Idempotencia
+
+1. El cliente envía `Idempotency-Key` única por operación lógica.
+2. El servidor guarda la clave con el resultado (restricción `UNIQUE`).
+3. Si llega repetida: devuelve la respuesta guardada; si está en curso: 409.
+4. Las claves expiran (por ejemplo, 24 h).
+
+## Versionado y evolución
+
+- Cambios compatibles (agregar campos opcionales) no necesitan versión nueva.
+- Romper contrato → `/v2` o header de versión; mantener la anterior con fecha de baja.
+- Los clientes deben ignorar campos desconocidos.
+
+## Caché HTTP
+
+- `Cache-Control: public, max-age=60, stale-while-revalidate=300`
+- `ETag` + `If-None-Match` → 304 sin cuerpo.
+- `private` / `no-store` para datos de usuario.
+
+## Webhooks
+
+- Firmar el cuerpo (HMAC con secreto compartido) y verificar la firma y el timestamp (anti-replay).
+- Responder 2xx rápido y procesar en una cola.
+- Esperar reintentos y duplicados: deduplicar por ID del evento.
+- No asumir orden: usar versiones o timestamps del recurso.
+
+## Autenticación
+
+| Mecanismo                     | Uso típico                                               |
+| ----------------------------- | -------------------------------------------------------- |
+| Cookie de sesión `HttpOnly`   | Apps web propias                                         |
+| OAuth 2.0 + PKCE              | Login con terceros, apps móviles y SPA                   |
+| JWT de acceso corto + refresh | APIs con varios clientes                                 |
+| API keys                      | Integraciones servidor a servidor (rotables, con scopes) |
+| mTLS                          | Servicio a servicio en redes internas                    |

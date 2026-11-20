@@ -1,0 +1,50 @@
+---
+id: challenge.top-k-frequent
+kind: code
+title: "Los k elementos más frecuentes"
+summary: "Contar con un hash map y seleccionar los mayores sin ordenar todo: heap o bucket sort."
+difficulty: intermediate
+durationMinutes: 25
+technologies: ["algoritmos", "typescript"]
+topics: ["hash map", "heap", "bucket sort"]
+skills: ["selección", "análisis de complejidad"]
+interviewType: live-coding
+order: 25
+constraints:
+  - "1 ≤ k ≤ cantidad de valores distintos."
+  - "nums.length ≤ 10⁵; los valores pueden ser negativos."
+  - "Objetivo: mejor que O(n log n)."
+acceptanceCriteria:
+  - "Devuelve los k valores con mayor frecuencia, de mayor a menor frecuencia."
+  - "Ante igual frecuencia, el valor más chico va primero."
+  - "Resuelve 10⁵ elementos dentro del tiempo límite."
+hints:
+  - "Primero contá frecuencias con un `Map`. ¿Cuánto cuesta después ordenar las entradas?"
+  - "La frecuencia de un valor está entre 1 y n: podés usar un array de cubetas donde el índice es la frecuencia."
+  - "Recorré las cubetas de la mayor frecuencia a la menor hasta juntar k valores (ordená cada cubeta para el desempate)."
+followUpQuestions:
+  - "¿Cómo lo resolverías con un min-heap de tamaño k? ¿Cuál es su complejidad?"
+  - "¿Qué harías si los datos llegan como un stream infinito?"
+  - "¿Y si el conteo no entra en la memoria de una sola máquina?"
+relatedLessons: []
+---
+
+## Enunciado
+
+Dado un array de enteros `nums` y un entero `k`, devolvé los `k` valores **más frecuentes**.
+
+```ts
+export function topKFrequent(nums: readonly number[], k: number): number[];
+```
+
+El resultado va de **mayor a menor frecuencia**; si dos valores aparecen la misma cantidad de veces, va primero el
+**menor**.
+
+## Ejemplos
+
+| `nums`               | `k` | Resultado |
+| -------------------- | --- | --------- |
+| `[1, 1, 1, 2, 2, 3]` | `2` | `[1, 2]`  |
+| `[4, 4, 7, 7, 9]`    | `2` | `[4, 7]`  |
+| `[5]`                | `1` | `[5]`     |
+| `[-1, -1, 2, 2, 2]`  | `1` | `[2]`     |

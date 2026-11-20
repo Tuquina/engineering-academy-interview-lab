@@ -1,0 +1,96 @@
+---
+title: "LLMs y agentes"
+description: "Vocabulario, loop de herramientas, RAG, memoria, evaluaciones, seguridad y costos."
+order: 13
+tags: ["llm", "agentes", "rag", "evals"]
+relatedLessons:
+  [
+    "llm-agents.introduction",
+    "llm-agents.prompting-tools",
+    "llm-agents.agent-engineering",
+    "llm-agents.evals",
+    "llm-agents.guardrails-observability",
+  ]
+---
+
+## Vocabulario
+
+| Término                 | Qué es                                                                    |
+| ----------------------- | ------------------------------------------------------------------------- |
+| Token                   | Unidad de texto que procesa el modelo; define costo, latencia y límites   |
+| Ventana de contexto     | Máximo de tokens de entrada + salida por request                          |
+| Temperatura             | Aleatoriedad del muestreo                                                 |
+| System prompt           | Instrucciones de rol, reglas y formato                                    |
+| Tool / function calling | El modelo pide ejecutar una función con argumentos JSON                   |
+| Embedding               | Vector numérico que representa el significado de un texto                 |
+| RAG                     | Recuperar información relevante y pasarla en el prompt                    |
+| Agente                  | LLM en un loop que decide qué herramientas usar hasta cumplir el objetivo |
+| Eval                    | Prueba sistemática de la calidad de las respuestas                        |
+
+## Workflow o agente
+
+| Workflow (el código decide el flujo)              | Agente (el modelo decide el próximo paso)  |
+| ------------------------------------------------- | ------------------------------------------ |
+| Pasos conocidos: clasificar → extraer → responder | Camino que depende de lo que descubre      |
+| Predecible, barato, fácil de testear              | Flexible, más caro, más difícil de evaluar |
+| Empezar por acá                                   | Cuando el workflow no alcanza              |
+
+## Loop de herramientas
+
+```ts
+let messages = [systemPrompt, ...history, userMessage];
+for (let step = 0; step < MAX_STEPS; step++) {
+  const reply = await model.generate({ messages, tools });
+  if (reply.type === "text") return reply.text;
+  const args = schemaFor(reply.tool).safeParse(reply.args); // validar SIEMPRE
+  const result = args.success
+    ? await runTool(reply.tool, args.data, { user }) // autorización con el usuario real
+    : { error: args.error.message };
+  messages = [...messages, reply, { role: "tool", content: result }];
+}
+throw new Error("Se alcanzó el límite de pasos");
+```
+
+Buenas herramientas: nombres y descripciones claras, pocos parámetros con tipos estrictos, errores útiles para que el modelo corrija, idempotentes cuando escriben.
+
+## RAG
+
+1. **Ingesta**: dividir documentos en chunks (con solapamiento y metadatos).
+2. **Indexar**: embeddings en un índice vectorial (pgvector, etc.), idealmente híbrido con búsqueda léxica.
+3. **Recuperar**: top-k por similitud + filtros (tenant, permisos) + reranking.
+4. **Generar**: respuesta basada en los fragmentos, con citas; decir "no sé" si no están.
+
+Fallas típicas: chunks mal cortados, recuperar documentos que el usuario no puede ver, contexto excesivo, no medir la calidad de la recuperación.
+
+## Memoria
+
+| Tipo                  | Dónde vive                                         |
+| --------------------- | -------------------------------------------------- |
+| Conversación reciente | Últimos mensajes en el prompt                      |
+| Resumen               | Texto generado que reemplaza turnos viejos         |
+| Hechos del usuario    | Base de datos, recuperados bajo demanda            |
+| Estado de negocio     | **Siempre** en tu sistema, nunca sólo en el prompt |
+
+## Evaluaciones
+
+- **Deterministas**: ¿llamó la herramienta correcta con los argumentos esperados? ¿JSON válido? ¿no reveló datos?
+- **LLM-as-judge** con rúbrica explícita, calibrado contra etiquetas humanas.
+- **Golden dataset** versionado con casos difíciles y fallos reales; correrlo en cada cambio.
+- Repetir cada caso varias veces: la salida no es determinista.
+- En producción: tasa de resolución, escalamientos, feedback, costo y latencia por conversación.
+
+## Seguridad
+
+- **Prompt injection**: tratar todo contenido externo como datos; mínimo privilegio en herramientas.
+- Confirmación humana antes de acciones irreversibles.
+- Autorización en el servidor con la identidad real, nunca con lo que diga el modelo.
+- No poner secretos en el prompt; filtrar PII en logs.
+- Límites de pasos, tiempo, tokens y costo por conversación.
+
+## Costo y latencia
+
+- Prompt caching del prefijo estable (system + herramientas).
+- Modelos chicos para pasos simples, el grande donde aporta.
+- Streaming para la latencia percibida.
+- Batch para procesos no interactivos.
+- Medir tokens por paso: el contexto que crece en cada turno es el costo oculto.

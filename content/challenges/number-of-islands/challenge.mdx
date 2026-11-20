@@ -1,0 +1,50 @@
+---
+id: challenge.number-of-islands
+kind: code
+title: "Contar islas en una grilla"
+summary: "Recorrido de grafos implícitos con BFS o DFS: contar componentes conexas."
+difficulty: intermediate
+durationMinutes: 25
+technologies: ["algoritmos", "typescript"]
+topics: ["grafos", "bfs", "dfs", "matrices"]
+skills: ["recorrido de grafos", "casos límite"]
+interviewType: live-coding
+order: 28
+constraints:
+  - 'La grilla tiene entre 0 y 300 filas y columnas; cada celda es "1" (tierra) o "0" (agua).'
+  - "Las celdas se conectan en horizontal y vertical, no en diagonal."
+  - "No modificar la grilla recibida."
+acceptanceCriteria:
+  - "Cuenta cada grupo conectado de tierra como una isla."
+  - "Funciona con grillas vacías, de una fila o de una columna."
+  - "No desborda la pila con una isla que ocupa toda una grilla de 300×300."
+hints:
+  - "Cada celda de tierra es un nodo y sus vecinas de tierra son aristas. Una isla es una componente conexa."
+  - "Recorré la grilla; cuando encuentres tierra no visitada, sumá una isla y marcá toda su componente con un recorrido."
+  - "Una DFS recursiva puede desbordar la pila con 90.000 celdas: usá BFS con una cola o una pila explícita."
+followUpQuestions:
+  - "¿Cómo calcularías el tamaño de la isla más grande?"
+  - "¿Y si las celdas se agregan de a una y hay que responder la cantidad de islas después de cada una? (Union-Find)"
+  - "¿Qué cambia si se consideran las diagonales?"
+relatedLessons: []
+---
+
+## Enunciado
+
+Dada una grilla de `"1"` (tierra) y `"0"` (agua), devolvé la cantidad de **islas**. Una isla es un grupo de tierra
+conectado horizontal o verticalmente; todo lo que rodea la grilla es agua.
+
+```ts
+export function numIslands(grid: readonly (readonly string[])[]): number;
+```
+
+## Ejemplo
+
+```text
+1 1 0 0 0
+1 1 0 0 0
+0 0 1 0 0
+0 0 0 1 1
+```
+
+Resultado: `3`. Las celdas en diagonal no están conectadas.

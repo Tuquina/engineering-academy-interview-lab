@@ -1,0 +1,78 @@
+---
+title: "Next.js App Router"
+description: "Archivos especiales, renderizado estático y dinámico, caché, mutaciones y despliegue."
+order: 5
+tags: ["nextjs", "app router", "caché"]
+relatedLessons:
+  ["nextjs.routing", "nextjs.server-client-components", "nextjs.data-mutations", "nextjs.production"]
+---
+
+## Archivos especiales de una ruta
+
+| Archivo         | Para qué                                                     |
+| --------------- | ------------------------------------------------------------ |
+| `page.tsx`      | La UI de la ruta; hace que el segmento sea accesible         |
+| `layout.tsx`    | UI compartida que persiste entre navegaciones de sus hijas   |
+| `template.tsx`  | Como un layout, pero se vuelve a montar en cada navegación   |
+| `loading.tsx`   | Fallback de `Suspense` mientras cargan los datos (streaming) |
+| `error.tsx`     | Error boundary del segmento (Client Component con `reset`)   |
+| `not-found.tsx` | UI para `notFound()` o rutas inexistentes                    |
+| `route.ts`      | Endpoint HTTP (`GET`, `POST`…) en lugar de una página        |
+| `[slug]`        | Segmento dinámico; `[...slug]` atrapa varios niveles         |
+| `(grupo)`       | Agrupa rutas sin afectar la URL                              |
+| `@slot`         | Rutas paralelas (varias vistas en el mismo layout)           |
+
+## Estático o dinámico
+
+- **Estático** (por defecto): se prerenderiza en el build y lo sirve la CDN.
+- **Dinámico**: se renderiza por request. Lo vuelven dinámico `cookies()`, `headers()`, `searchParams`, `connection()` o datos sin caché.
+- `generateStaticParams` lista los slugs a prerenderizar en rutas dinámicas.
+
+```tsx
+export async function generateStaticParams() {
+  const posts = await getPosts();
+  return posts.map((p) => ({ slug: p.slug }));
+}
+
+export default async function Page({ params }: { params: Promise<{ slug: string }> }) {
+  const { slug } = await params;
+  const post = await getPost(slug);
+  if (!post) notFound();
+  return <Article post={post} />;
+}
+```
+
+## Mutaciones
+
+```tsx
+// app/actions.ts
+"use server";
+export async function createTodo(formData: FormData) {
+  const session = await requireUser(); // autorizar SIEMPRE
+  const input = TodoSchema.parse(Object.fromEntries(formData)); // validar SIEMPRE
+  await db.insert(todos).values({ ...input, userId: session.id });
+  revalidatePath("/todos"); // invalidar lo cacheado
+}
+```
+
+| Herramienta          | Úsala para                                                      |
+| -------------------- | --------------------------------------------------------------- |
+| Server Action        | Mutaciones disparadas desde tu propia UI (formularios, botones) |
+| Route Handler        | Webhooks, APIs para terceros, métodos distintos de POST         |
+| `revalidatePath/Tag` | Invalidar páginas o datos después de escribir                   |
+| `router.refresh()`   | Volver a pedir los Server Components de la ruta actual          |
+
+## Composición server/client
+
+- El límite `"use client"` va lo más abajo posible (un botón, no la página entera).
+- Un Client Component no importa un Server Component: lo recibe como `children`.
+- Props de server a client: sólo serializables (no funciones, salvo Server Actions).
+- Para datos sensibles, `import "server-only"` evita que un módulo termine en el bundle del cliente.
+
+## Producción
+
+- **Serverless**: sin estado en memoria entre instancias, límite de duración, conexiones a la base vía pooler.
+- **Imágenes**: `next/image` (tamaños, lazy loading, formatos modernos).
+- **Fuentes**: `next/font` (sin saltos de layout, self-hosted).
+- **SEO**: `metadata` / `generateMetadata`, `sitemap.ts`, `robots.ts`.
+- **Seguridad**: headers (CSP, HSTS), validar todo input en el servidor, no exponer variables sin el prefijo `NEXT_PUBLIC_` salvo que sean públicas.

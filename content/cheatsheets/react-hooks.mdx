@@ -1,0 +1,85 @@
+---
+title: "React: hooks y renderizado"
+description: "Qué hook usar en cada caso, reglas, errores frecuentes con efectos y cuándo optimizar."
+order: 4
+tags: ["react", "hooks", "performance"]
+relatedLessons: ["react.state-effects", "react.memo-refs-context", "react.rendering-reconciliation"]
+---
+
+## Qué hook usar
+
+| Necesito…                                              | Hook                                 |
+| ------------------------------------------------------ | ------------------------------------ |
+| Un valor que, al cambiar, actualiza la pantalla        | `useState`                           |
+| Estado con transiciones complejas o varios campos      | `useReducer`                         |
+| Sincronizar con algo externo (suscripción, API, timer) | `useEffect`                          |
+| Medir o mutar el DOM antes de pintar                   | `useLayoutEffect` (con moderación)   |
+| Guardar un valor sin re-renderizar / acceder al DOM    | `useRef`                             |
+| Cachear un cálculo caro                                | `useMemo`                            |
+| Mantener estable la identidad de una función           | `useCallback`                        |
+| Leer datos compartidos sin pasar props                 | `useContext`                         |
+| Suscribirse a un store externo                         | `useSyncExternalStore`               |
+| Marcar una actualización como no urgente               | `useTransition` / `useDeferredValue` |
+| IDs únicos para accesibilidad (`htmlFor`, `aria-*`)    | `useId`                              |
+| Estado de un formulario con Server Actions             | `useActionState`, `useFormStatus`    |
+
+## Reglas de los hooks
+
+- Llamarlos siempre en el nivel superior del componente o de otro hook, nunca dentro de condiciones, bucles o callbacks.
+- El render debe ser **puro**: sin efectos secundarios, sin mutar props ni estado, sin leer `ref.current`.
+- Los custom hooks empiezan con `use` y comparten lógica, no estado (cada llamada tiene el suyo).
+
+## Estado
+
+```tsx
+// Derivar en lugar de duplicar estado
+const fullName = `${first} ${last}`; // no un useState + useEffect
+
+// Actualizaciones encadenadas: forma funcional
+setCount((c) => c + 1);
+
+// Objetos y arrays: crear uno nuevo (inmutabilidad)
+setUser((u) => ({ ...u, name }));
+setItems((list) => list.filter((i) => i.id !== id));
+
+// Reiniciar el estado de un componente: cambiar su key
+<Profile key={userId} userId={userId} />;
+```
+
+## Efectos sin sorpresas
+
+```tsx
+useEffect(() => {
+  const controller = new AbortController();
+  fetch(`/api/users/${id}`, { signal: controller.signal })
+    .then((r) => r.json())
+    .then(setUser)
+    .catch((e) => {
+      if (e.name !== "AbortError") setError(e);
+    });
+  return () => controller.abort(); // evita la carrera entre requests
+}, [id]);
+```
+
+| Síntoma                                       | Causa probable                                     |
+| --------------------------------------------- | -------------------------------------------------- |
+| Bucle infinito de renders                     | El efecto actualiza un estado que está en sus deps |
+| El efecto corre en cada render                | Una dependencia es un objeto o función nueva       |
+| Un timer ve siempre el valor inicial          | Stale closure: dependencias mal declaradas         |
+| Datos de una búsqueda anterior pisan la nueva | Falta cancelar o ignorar la respuesta vieja        |
+| El efecto se ejecuta dos veces en desarrollo  | Strict Mode: verifica que la limpieza funcione     |
+
+## Performance: medir antes de optimizar
+
+1. Usar el **Profiler** de React DevTools para ver qué re-renderiza y cuánto tarda.
+2. Bajar el estado al componente que lo usa o pasar contenido como `children`.
+3. Recién entonces `memo` + `useMemo`/`useCallback` para estabilizar props.
+4. Listas largas: virtualización (solo se renderiza lo visible).
+
+## Server vs Client Components (Next.js)
+
+| Server Component (por defecto)      | Client Component (`"use client"`)             |
+| ----------------------------------- | --------------------------------------------- |
+| Lee datos y secretos directamente   | Estado, efectos y handlers de eventos         |
+| No envía su JavaScript al navegador | Se hidrata y ocupa bundle                     |
+| Puede ser `async`                   | APIs del navegador (`window`, `localStorage`) |

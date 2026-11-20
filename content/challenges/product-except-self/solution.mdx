@@ -1,0 +1,29 @@
+## Enfoque: prefijos y sufijos
+
+El producto de todos menos `i` se separa en dos partes:
+
+```text
+result[i] = (nums[0] × … × nums[i-1]) × (nums[i+1] × … × nums[n-1])
+             └──── prefijo de i ────┘   └──── sufijo de i ────┘
+```
+
+1. Una pasada de izquierda a derecha guarda en `result[i]` el **prefijo** (producto de lo anterior a `i`).
+2. Una pasada de derecha a izquierda multiplica cada `result[i]` por el **sufijo**, acumulado en una sola variable.
+
+Así no hace falta la división y los ceros no son un caso especial.
+
+## Complejidad
+
+- Tiempo: O(n), dos pasadas.
+- Memoria: O(1) extra (el array resultado no cuenta).
+
+## Por qué no dividir
+
+`total / nums[i]` falla con un cero: si hay uno, `total` es 0 y en esa posición da `0 / 0 = NaN`, cuando la respuesta
+correcta es el producto del resto. Se puede parchear contando ceros, pero el enunciado pide no dividir y la solución
+con prefijos es más general.
+
+## El mismo patrón en otros problemas
+
+Las **sumas prefijas** responden "suma del rango [i, j]" en O(1) tras O(n) de preparación:
+`sum(i..j) = prefix[j + 1] - prefix[i]`. Con un mapa de prefijos vistos se cuentan los subarrays que suman k en O(n).

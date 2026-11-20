@@ -67,6 +67,62 @@
       "difficulty": "advanced",
       "tags": ["consistencia", "distribuidos"],
       "lessonId": null
+    },
+    {
+      "id": "arch.solid",
+      "front": "Enumerá los principios SOLID en una línea cada uno.",
+      "back": "S: una clase, una razón para cambiar. O: extender comportamiento sin modificar código existente. L: un subtipo debe poder reemplazar a su tipo base sin sorpresas. I: interfaces chicas y específicas. D: depender de abstracciones; el detalle depende de la política, no al revés.",
+      "difficulty": "basic",
+      "tags": ["principios"],
+      "lessonId": "software-architecture.principles"
+    },
+    {
+      "id": "arch.coupling-cohesion",
+      "front": "Acoplamiento y cohesión: ¿qué se busca?",
+      "back": "Alta cohesión (lo que cambia junto vive junto) y bajo acoplamiento (los módulos se conocen por contratos chicos y estables). Es la base para poder cambiar una parte sin romper otras.",
+      "difficulty": "basic",
+      "tags": ["principios"],
+      "lessonId": "software-architecture.principles"
+    },
+    {
+      "id": "arch.strategy-vs-state",
+      "front": "Strategy vs State: si la estructura es parecida, ¿qué los diferencia?",
+      "back": "En Strategy el cliente elige el algoritmo y las estrategias no se conocen entre sí. En State el objeto cambia de comportamiento según su estado interno y los estados deciden las transiciones al siguiente.",
+      "difficulty": "intermediate",
+      "tags": ["patrones de diseño"],
+      "lessonId": "software-architecture.design-patterns"
+    },
+    {
+      "id": "arch.adapter-vs-facade",
+      "front": "Adapter vs Facade vs Decorator.",
+      "back": "Adapter: convierte una interfaz existente en la que espera el cliente. Facade: ofrece una interfaz simple sobre un subsistema complejo. Decorator: envuelve un objeto con la misma interfaz para agregar comportamiento (logging, caché, reintentos).",
+      "difficulty": "intermediate",
+      "tags": ["patrones de diseño"],
+      "lessonId": "software-architecture.design-patterns"
+    },
+    {
+      "id": "arch.ddd-aggregate",
+      "front": "¿Qué es un agregado en DDD?",
+      "back": "Un grupo de objetos que se modifica como una unidad para proteger sus invariantes, con una raíz por la que entra todo cambio. Una transacción modifica un solo agregado; entre agregados se coordina con eventos o sagas.",
+      "difficulty": "advanced",
+      "tags": ["ddd"],
+      "lessonId": "software-architecture.architecture-styles"
+    },
+    {
+      "id": "arch.bounded-context",
+      "front": "¿Qué es un bounded context?",
+      "back": "Un límite dentro del cual un modelo y su lenguaje tienen un significado preciso (\"Cliente\" en Facturación no es lo mismo que en Soporte). Es una buena guía para definir módulos o servicios.",
+      "difficulty": "intermediate",
+      "tags": ["ddd"],
+      "lessonId": "software-architecture.architecture-styles"
+    },
+    {
+      "id": "arch.strangler-fig",
+      "front": "¿Qué es el patrón Strangler Fig?",
+      "back": "Migrar un sistema legado de a poco: un proxy o gateway enruta funcionalidad por funcionalidad al sistema nuevo hasta que el viejo queda sin tráfico y se apaga. Evita la reescritura big bang.",
+      "difficulty": "intermediate",
+      "tags": ["migración"],
+      "lessonId": "software-architecture.distributed-patterns"
     }
   ]
 }

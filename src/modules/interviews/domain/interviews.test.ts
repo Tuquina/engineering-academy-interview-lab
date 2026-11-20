@@ -27,6 +27,7 @@ const bank: QuestionData[] = [
   ...Array.from({ length: 8 }, (_, i) => question(`q${i}`, i % 2 ? "nodejs" : "react", "quick")),
   ...Array.from({ length: 4 }, (_, i) => question(`d${i}`, "architecture", "deep-dive")),
   ...Array.from({ length: 3 }, (_, i) => question(`ai${i}`, "ai-engineering", i ? "deep-dive" : "quick")),
+  ...Array.from({ length: 3 }, (_, i) => question(`b${i}`, "behavioral", i ? "deep-dive" : "quick")),
 ];
 const sources: SessionSources = {
   questions: bank,
@@ -84,6 +85,16 @@ describe("armado de sesiones", () => {
     expect(ai.steps.every((s) => s.kind === "question" && s.questionId.startsWith("ai"))).toBe(true);
   });
 
+  it("las preguntas de comportamiento tienen su modo y no se mezclan con las técnicas", () => {
+    const behavioral = buildSession("behavioral", { minutes: 15 }, sources, fixedRandom, "s");
+    expect(behavioral.steps).toHaveLength(3);
+    expect(behavioral.steps.every((s) => s.kind === "question" && s.questionId.startsWith("b"))).toBe(true);
+    const quick = buildSession("quick", { minutes: 10 }, sources, fixedRandom, "s");
+    const deep = buildSession("deep-dive", { minutes: 40 }, sources, fixedRandom, "s");
+    for (const step of [...quick.steps, ...deep.steps])
+      expect(step.kind === "question" && step.questionId.startsWith("b")).toBe(false);
+  });
+
   it("system design y live coding respetan el problema elegido", () => {
     const plan = buildSession(
       "system-design",
@@ -104,14 +115,22 @@ describe("armado de sesiones", () => {
       "mock",
       {
         minutes: 0,
-        sections: { quick: true, deepDive: false, ai: true, systemDesign: true, liveCoding: true },
+        sections: {
+          behavioral: true,
+          quick: true,
+          deepDive: false,
+          ai: true,
+          systemDesign: true,
+          liveCoding: true,
+        },
       },
       sources,
       fixedRandom,
       "s",
     );
-    expect(plan.plannedMinutes).toBe(8 + 10 + 20 + 25);
+    expect(plan.plannedMinutes).toBe(10 + 8 + 10 + 20 + 25);
     expect([...new Set(plan.steps.map((s) => s.section))]).toEqual([
+      "Comportamiento",
       "Preguntas rápidas",
       "AI Engineering",
       "Live coding",

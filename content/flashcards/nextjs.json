@@ -1,0 +1,120 @@
+{
+  "id": "nextjs",
+  "title": "Next.js",
+  "description": "App Router, Server Components, caché, mutaciones y despliegue.",
+  "courseId": "nextjs",
+  "cards": [
+    {
+      "id": "next.server-components-default",
+      "front": "En el App Router, ¿los componentes son de servidor o de cliente por defecto?",
+      "back": "De servidor. Se ejecutan sólo en el servidor, pueden leer datos directamente y no envían su JavaScript al navegador. Un archivo con `\"use client\"` marca el límite a partir del cual los componentes también se hidratan en el cliente.",
+      "difficulty": "basic",
+      "tags": ["server components"],
+      "lessonId": "nextjs.server-client-components"
+    },
+    {
+      "id": "next.use-client-boundary",
+      "front": "¿Qué cosas obligan a usar `\"use client\"`?",
+      "back": "Estado y efectos (`useState`, `useEffect`), handlers de eventos, APIs del navegador (`window`, `localStorage`) y librerías que dependen de ellos. Conviene empujar el límite lo más abajo posible en el árbol.",
+      "difficulty": "basic",
+      "tags": ["server components"],
+      "lessonId": "nextjs.server-client-components"
+    },
+    {
+      "id": "next.server-in-client",
+      "front": "¿Puede un Client Component importar un Server Component?",
+      "back": "No directamente: al importarlo se convertiría en código de cliente. Sí puede recibirlo como `children` u otra prop, porque el Server Component ya se renderizó en el servidor y llega como resultado serializado.",
+      "difficulty": "intermediate",
+      "tags": ["server components", "composición"],
+      "lessonId": "nextjs.server-client-components"
+    },
+    {
+      "id": "next.serializable-props",
+      "front": "¿Qué props puede pasar un Server Component a un Client Component?",
+      "back": "Sólo valores serializables: strings, números, objetos y arrays planos, `Date`, `Map`, `Set`, promesas y JSX. No funciones comunes ni instancias de clases; la excepción son las Server Actions, que se pasan como referencia.",
+      "difficulty": "intermediate",
+      "tags": ["server components"],
+      "lessonId": "nextjs.server-client-components"
+    },
+    {
+      "id": "next.static-dynamic",
+      "front": "¿Qué vuelve dinámica una ruta que podría ser estática?",
+      "back": "Leer datos de la request (`cookies()`, `headers()`, `searchParams`), usar `connection()` o hacer fetch sin caché. Sin eso la ruta se prerenderiza en el build y se sirve desde la CDN.",
+      "difficulty": "intermediate",
+      "tags": ["renderizado", "caché"],
+      "lessonId": "nextjs.data-mutations"
+    },
+    {
+      "id": "next.generate-static-params",
+      "front": "¿Para qué sirve `generateStaticParams`?",
+      "back": "Lista los valores de los segmentos dinámicos (por ejemplo, todos los slugs) para prerenderizar esas páginas en el build. Las rutas no listadas se renderizan bajo demanda o devuelven 404 según `dynamicParams`.",
+      "difficulty": "basic",
+      "tags": ["routing", "renderizado"],
+      "lessonId": "nextjs.routing"
+    },
+    {
+      "id": "next.layout-vs-template",
+      "front": "`layout.tsx` vs `template.tsx`.",
+      "back": "El layout persiste entre navegaciones de sus rutas hijas: mantiene estado y no se vuelve a montar. El template se monta de nuevo en cada navegación (útil para animaciones de entrada o reiniciar estado).",
+      "difficulty": "intermediate",
+      "tags": ["routing"],
+      "lessonId": "nextjs.routing"
+    },
+    {
+      "id": "next.loading-error",
+      "front": "¿Qué hacen `loading.tsx` y `error.tsx`?",
+      "back": "`loading.tsx` envuelve el segmento en un `<Suspense>` y muestra ese fallback mientras se cargan los datos (streaming). `error.tsx` es un error boundary (Client Component) que recibe el error y una función `reset` para reintentar.",
+      "difficulty": "basic",
+      "tags": ["routing", "streaming"],
+      "lessonId": "nextjs.routing"
+    },
+    {
+      "id": "next.server-actions",
+      "front": "¿Qué es una Server Action y qué hay que validar siempre?",
+      "back": "Una función con `\"use server\"` que el cliente invoca como un POST. Es un endpoint público: hay que validar la entrada (por ejemplo, con Zod) y verificar autenticación y autorización dentro de la acción, aunque el botón esté oculto en la UI.",
+      "difficulty": "intermediate",
+      "tags": ["mutaciones", "seguridad"],
+      "lessonId": "nextjs.data-mutations"
+    },
+    {
+      "id": "next.revalidate",
+      "front": "Después de una mutación, ¿cómo se actualiza el contenido cacheado?",
+      "back": "Con `revalidatePath(ruta)` o `revalidateTag(tag)` dentro de la Server Action o el Route Handler, para invalidar la caché de esas páginas o datos. `router.refresh()` vuelve a pedir los Server Components de la ruta actual desde el cliente.",
+      "difficulty": "intermediate",
+      "tags": ["caché", "mutaciones"],
+      "lessonId": "nextjs.data-mutations"
+    },
+    {
+      "id": "next.route-handlers",
+      "front": "¿Cuándo usar un Route Handler (`route.ts`) en lugar de una Server Action?",
+      "back": "Para endpoints HTTP que consumen otros clientes: webhooks, APIs públicas, integraciones, respuestas que no son de un formulario propio o métodos distintos de POST. Las Server Actions son para mutaciones disparadas desde la propia interfaz.",
+      "difficulty": "intermediate",
+      "tags": ["api"],
+      "lessonId": "nextjs.data-mutations"
+    },
+    {
+      "id": "next.middleware",
+      "front": "¿Qué conviene hacer (y qué no) en el middleware/proxy de Next.js?",
+      "back": "Decisiones rápidas sobre la request antes de rutear: redirecciones, reescrituras, headers, chequeo superficial de sesión. No consultas lentas a la base ni lógica de negocio: corre en cada request coincidente y suma latencia.",
+      "difficulty": "advanced",
+      "tags": ["routing", "performance"],
+      "lessonId": "nextjs.production"
+    },
+    {
+      "id": "next.serverless-limits",
+      "front": "¿Qué limitaciones tiene desplegar Next.js en funciones serverless?",
+      "back": "Sin estado en memoria compartido entre instancias, tiempo máximo de ejecución, arranques en frío y conexiones a la base que se multiplican por instancia (hace falta un pooler). Los trabajos largos van a colas o workers.",
+      "difficulty": "advanced",
+      "tags": ["despliegue"],
+      "lessonId": "nextjs.production"
+    },
+    {
+      "id": "next.metadata",
+      "front": "¿Cómo se define el SEO de una página en el App Router?",
+      "back": "Exportando `metadata` (estático) o `generateMetadata` (a partir de params o datos) desde la página o el layout. Next.js genera los `<title>`, `<meta>` y Open Graph y los combina con los de los layouts padres.",
+      "difficulty": "basic",
+      "tags": ["seo"],
+      "lessonId": "nextjs.production"
+    }
+  ]
+}

@@ -1,0 +1,119 @@
+{
+  "id": "algorithms",
+  "title": "Algoritmos y estructuras de datos",
+  "description": "Complejidad, estructuras y patrones que se repiten en el live coding.",
+  "cards": [
+    {
+      "id": "algo.big-o",
+      "front": "Ordená de mejor a peor: O(n log n), O(1), O(n²), O(log n), O(n), O(2ⁿ).",
+      "back": "O(1) < O(log n) < O(n) < O(n log n) < O(n²) < O(2ⁿ). Con n = 10⁶: log n ≈ 20, n log n ≈ 2·10⁷ (rápido), n² = 10¹² (inviable).",
+      "difficulty": "basic",
+      "tags": ["complejidad"]
+    },
+    {
+      "id": "algo.constraints-hint",
+      "front": "¿Qué complejidad sugiere cada tamaño de entrada en un problema de entrevista?",
+      "back": "n ≤ 20: backtracking/O(2ⁿ). n ≤ 10³: O(n²) aceptable. n ≤ 10⁵–10⁶: O(n log n) u O(n). n enorme o consultas repetidas: O(log n) u O(1) por consulta (precalcular, hashing, búsqueda binaria).",
+      "difficulty": "intermediate",
+      "tags": ["complejidad", "estrategia"]
+    },
+    {
+      "id": "algo.hashmap",
+      "front": "¿Cuál es el costo de buscar en un hash map y cuál es su peor caso?",
+      "back": "O(1) promedio para insertar, buscar y borrar. Peor caso O(n) si muchas claves colisionan. Es la herramienta número uno para pasar de O(n²) a O(n): contar frecuencias, recordar lo visto, agrupar.",
+      "difficulty": "basic",
+      "tags": ["estructuras"]
+    },
+    {
+      "id": "algo.array-vs-linked",
+      "front": "Array vs lista enlazada: acceso, inserción y localidad.",
+      "back": "Array: acceso por índice O(1), insertar en el medio O(n), memoria contigua (amigable con la caché). Lista enlazada: acceso O(n), insertar o borrar con el nodo a mano O(1), sin localidad. En la práctica los arrays dinámicos suelen ganar.",
+      "difficulty": "basic",
+      "tags": ["estructuras"]
+    },
+    {
+      "id": "algo.heap",
+      "front": "¿Para qué sirve un heap y cuánto cuestan sus operaciones?",
+      "back": "Para obtener rápido el mínimo o máximo: ver el tope O(1), insertar y extraer O(log n), construirlo desde un array O(n). Patrón típico: top-K elementos con un min-heap de tamaño K en O(n log K).",
+      "difficulty": "intermediate",
+      "tags": ["estructuras", "top-k"]
+    },
+    {
+      "id": "algo.two-pointers",
+      "front": "¿Cuándo aplica el patrón de dos punteros?",
+      "back": "Sobre arrays ordenados o cuando se recorre desde ambos extremos: pares que suman un objetivo, eliminar duplicados in place, palíndromos, contenedor con más agua. Suele bajar O(n²) a O(n) con O(1) de memoria extra.",
+      "difficulty": "basic",
+      "tags": ["patrones"]
+    },
+    {
+      "id": "algo.sliding-window",
+      "front": "¿Cuándo aplica una ventana deslizante?",
+      "back": "Para subarrays o substrings contiguos que cumplen una condición (la más larga sin repetidos, la suma máxima de tamaño k). Se expande el borde derecho y se contrae el izquierdo mientras la ventana es inválida: cada elemento entra y sale una vez, O(n).",
+      "difficulty": "intermediate",
+      "tags": ["patrones"]
+    },
+    {
+      "id": "algo.binary-search",
+      "front": "Además de buscar en un array ordenado, ¿dónde se usa búsqueda binaria?",
+      "back": "En cualquier espacio de respuestas monótono: la primera posición que cumple una condición, la capacidad mínima para enviar paquetes en D días, la raíz cuadrada entera. Clave: definir bien el invariante y los bordes (`lo < hi` vs `lo <= hi`).",
+      "difficulty": "intermediate",
+      "tags": ["patrones", "búsqueda"]
+    },
+    {
+      "id": "algo.bfs-dfs",
+      "front": "BFS vs DFS: ¿cuándo cada uno?",
+      "back": "BFS (cola): camino más corto en grafos sin pesos, recorrido por niveles. DFS (recursión o pila): explorar todo, componentes conexas, detección de ciclos, backtracking. Ambos O(V + E) marcando los visitados.",
+      "difficulty": "intermediate",
+      "tags": ["grafos"]
+    },
+    {
+      "id": "algo.topological-sort",
+      "front": "¿Qué resuelve el orden topológico y cómo se calcula?",
+      "back": "Ordena tareas con dependencias en un grafo dirigido acíclico (por ejemplo, materias con correlativas). Algoritmo de Kahn: encolar los nodos con grado de entrada 0 e ir quitándolos; si quedan nodos sin procesar, hay un ciclo.",
+      "difficulty": "advanced",
+      "tags": ["grafos"]
+    },
+    {
+      "id": "algo.dijkstra",
+      "front": "¿Cuándo usar Dijkstra y cuándo no sirve?",
+      "back": "Camino más corto desde un origen en grafos con pesos no negativos, con un min-heap: O((V + E) log V). Con pesos negativos no sirve (Bellman-Ford). Sin pesos alcanza con BFS.",
+      "difficulty": "advanced",
+      "tags": ["grafos"]
+    },
+    {
+      "id": "algo.dp",
+      "front": "¿Cómo reconocer un problema de programación dinámica?",
+      "back": "Pide un óptimo o una cantidad de formas, y la solución se arma con soluciones de subproblemas que se repiten (subestructura óptima + solapamiento). Pasos: definir el estado, la transición y los casos base; memoizar (top-down) o tabular (bottom-up).",
+      "difficulty": "advanced",
+      "tags": ["programación dinámica"]
+    },
+    {
+      "id": "algo.sorting",
+      "front": "¿Cuál es el costo de ordenar y qué es un orden estable?",
+      "back": "Ordenar por comparación es Ω(n log n); `Array.prototype.sort` de JS es estable desde ES2019 (TimSort en V8). Estable: los elementos iguales conservan su orden relativo, importante al ordenar por varios criterios. Ojo: sin comparador, `sort` ordena como strings.",
+      "difficulty": "basic",
+      "tags": ["ordenamiento"]
+    },
+    {
+      "id": "algo.recursion-stack",
+      "front": "¿Qué costo oculto tiene la recursión?",
+      "back": "Memoria O(profundidad) en la pila de llamadas y riesgo de stack overflow con entradas grandes (por ejemplo, DFS sobre una lista de 10⁵ nodos). JavaScript no garantiza optimización de tail calls; se puede pasar a una pila explícita.",
+      "difficulty": "intermediate",
+      "tags": ["recursión"]
+    },
+    {
+      "id": "algo.prefix-sum",
+      "front": "¿Para qué sirven las sumas prefijas?",
+      "back": "Para responder la suma de cualquier rango en O(1) tras O(n) de preprocesamiento: `sum(i..j) = prefix[j + 1] - prefix[i]`. Combinadas con un hash map resuelven \"cantidad de subarrays que suman k\" en O(n).",
+      "difficulty": "intermediate",
+      "tags": ["patrones"]
+    },
+    {
+      "id": "algo.interview-approach",
+      "front": "¿Cómo encarar un problema de live coding?",
+      "back": "1) Repetir el problema y preguntar por entradas y bordes. 2) Ejemplos a mano. 3) Proponer la solución ingenua con su complejidad. 4) Optimizar explicando la idea. 5) Codificar en voz alta. 6) Probar con los ejemplos y los bordes. 7) Analizar tiempo y memoria.",
+      "difficulty": "basic",
+      "tags": ["entrevista", "estrategia"]
+    }
+  ]
+}

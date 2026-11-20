@@ -7,6 +7,7 @@ export const INTERVIEW_MODES = [
   "live-coding",
   "system-design",
   "ai-engineering",
+  "behavioral",
   "mock",
   "review",
 ] as const;
@@ -57,6 +58,14 @@ export const MODE_INFO: Readonly<Record<InterviewMode, ModeInfo>> = {
     minMinutes: 10,
     maxMinutes: 40,
   },
+  behavioral: {
+    title: "Entrevista de comportamiento",
+    description:
+      "Preguntas de experiencia y cultura para responder con el método STAR, con criterios y una respuesta modelo.",
+    defaultMinutes: 15,
+    minMinutes: 10,
+    maxMinutes: 30,
+  },
   mock: {
     title: "Mock Interview completa",
     description: "Una sesión de 45 a 60 minutos con las secciones que elijas, una detrás de otra.",
@@ -96,6 +105,7 @@ export interface SessionPlan {
 }
 
 export interface MockSections {
+  readonly behavioral: boolean;
   readonly quick: boolean;
   readonly deepDive: boolean;
   readonly ai: boolean;
@@ -105,6 +115,7 @@ export interface MockSections {
 
 /** Duración de cada sección de la mock interview (minutos). */
 export const MOCK_SECTION_MINUTES: Readonly<Record<keyof MockSections, number>> = {
+  behavioral: 10,
   quick: 8,
   deepDive: 15,
   ai: 10,
@@ -113,6 +124,7 @@ export const MOCK_SECTION_MINUTES: Readonly<Record<keyof MockSections, number>> 
 };
 
 export const MOCK_SECTION_LABELS: Readonly<Record<keyof MockSections, string>> = {
+  behavioral: "Comportamiento",
   quick: "Preguntas rápidas",
   deepDive: "Deep dive técnico",
   ai: "AI Engineering",
@@ -181,13 +193,12 @@ export function buildSession(
   const info = MODE_INFO[mode];
   const minutes = clamp(Math.round(options.minutes), info.minMinutes, info.maxMinutes);
   const inAreas = (q: QuestionData) => !options.areas?.length || options.areas.includes(q.area);
-  const quick = sources.questions.filter(
-    (q) => q.format === "quick" && q.area !== "ai-engineering" && inAreas(q),
-  );
-  const deep = sources.questions.filter(
-    (q) => q.format === "deep-dive" && q.area !== "ai-engineering" && inAreas(q),
-  );
+  // Las preguntas de AI Engineering y de comportamiento tienen su propio modo y su propia sección en la mock.
+  const technical = (q: QuestionData) => q.area !== "ai-engineering" && q.area !== "behavioral";
+  const quick = sources.questions.filter((q) => q.format === "quick" && technical(q) && inAreas(q));
+  const deep = sources.questions.filter((q) => q.format === "deep-dive" && technical(q) && inAreas(q));
   const ai = sources.questions.filter((q) => q.area === "ai-engineering");
+  const behavioral = sources.questions.filter((q) => q.area === "behavioral");
   let steps: SessionStep[] = [];
   let plannedMinutes = minutes;
 
@@ -200,6 +211,9 @@ export function buildSession(
       break;
     case "ai-engineering":
       steps = questionSteps(ai, Math.max(2, Math.round(minutes / 5)), "AI Engineering", random);
+      break;
+    case "behavioral":
+      steps = questionSteps(behavioral, Math.max(2, Math.round(minutes / 5)), "Comportamiento", random);
       break;
     case "review": {
       const weak = sources.weakQuestionIds
@@ -232,6 +246,7 @@ export function buildSession(
       break;
     case "mock": {
       const sections = options.sections ?? {
+        behavioral: false,
         quick: true,
         deepDive: true,
         ai: true,
@@ -239,6 +254,10 @@ export function buildSession(
         liveCoding: false,
       };
       plannedMinutes = 0;
+      if (sections.behavioral) {
+        steps.push(...questionSteps(behavioral, 2, MOCK_SECTION_LABELS.behavioral, random));
+        plannedMinutes += MOCK_SECTION_MINUTES.behavioral;
+      }
       if (sections.quick) {
         steps.push(...questionSteps(quick, 5, MOCK_SECTION_LABELS.quick, random));
         plannedMinutes += MOCK_SECTION_MINUTES.quick;

@@ -1,0 +1,25 @@
+## Enfoque
+
+Agrupar es un trabajo para un **hash map**; lo importante es la **clave**: tiene que ser idéntica para todos los
+anagramas y distinta para el resto.
+
+- **Letras ordenadas**: `[...word].sort().join("")` → `"eat"`, `"tea"` y `"ate"` dan `"aet"`. Simple y suele alcanzar.
+  Cuesta O(k log k) por palabra.
+- **Conteo de letras**: un array de 26 frecuencias convertido a string (`"1,0,0,…"`). O(k) por palabra. Es la solución
+  de referencia.
+
+Un `Map` mantiene el **orden de inserción** de las claves, así que los grupos salen en el orden de su primera palabra
+sin trabajo extra, y cada grupo conserva el orden original porque se agrega con `push`.
+
+## Complejidad
+
+Con n palabras de largo máximo k:
+
+- Conteo: O(n·k) de tiempo.
+- Ordenando letras: O(n·k log k).
+- Memoria: O(n·k).
+
+## Unicode
+
+Con acentos o caracteres fuera de `a–z`, el array de 26 posiciones no sirve: uso un `Map` de frecuencias o la clave
+ordenada, y normalizo antes (`word.normalize("NFC").toLowerCase()`).

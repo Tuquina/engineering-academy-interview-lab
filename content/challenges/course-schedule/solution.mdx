@@ -1,0 +1,29 @@
+## Enfoque: orden topológico (Kahn)
+
+Modelo las materias como un **grafo dirigido**: por cada correlativa `[a, b]` agrego la arista `b → a` ("`b` habilita
+`a`"). Un orden válido es un **orden topológico**, que existe sólo si el grafo no tiene ciclos.
+
+1. Calculo el **grado de entrada** de cada materia (cuántas correlativas le faltan).
+2. Encolo las que tienen grado 0: se pueden cursar ya.
+3. Al sacar una de la cola la agrego al orden y resto 1 al grado de las que dependen de ella; las que llegan a 0 se
+   encolan.
+4. Si el orden final tiene menos de `n` materias, las restantes forman parte de un **ciclo**: devuelvo `null`.
+
+Las correlativas repetidas no son un problema: suman 2 al grado y restan 2.
+
+## Complejidad
+
+- Tiempo: O(V + E), con V materias y E correlativas.
+- Memoria: O(V + E) por la lista de adyacencia.
+
+## Alternativa: DFS con tres colores
+
+Blanco (no visitado), gris (en la pila de recursión) y negro (terminado). Encontrar un nodo **gris** desde otro gris es
+una arista hacia atrás: hay un ciclo. El orden topológico es el inverso del orden de finalización. Con muchas
+materias, conviene la versión iterativa para no desbordar la pila.
+
+## En sistemas reales
+
+El mismo problema aparece al ordenar tareas de un build, aplicar migraciones con dependencias, ejecutar pasos de un
+pipeline o resolver dependencias de paquetes. La **mínima cantidad de cuatrimestres** se obtiene procesando la cola
+por niveles (BFS por capas).

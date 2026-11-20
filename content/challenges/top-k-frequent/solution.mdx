@@ -1,0 +1,30 @@
+## Enfoque
+
+1. **Contar** frecuencias con un `Map`: O(n).
+2. **Seleccionar** los k mayores. Tres opciones:
+
+| Opción                              | Complejidad                       | Comentario                                              |
+| ----------------------------------- | --------------------------------- | ------------------------------------------------------- |
+| Ordenar las entradas por frecuencia | O(m log m), m = valores distintos | La más simple de escribir                               |
+| Min-heap de tamaño k                | O(m log k)                        | La mejor cuando k es chico o los datos llegan en stream |
+| Bucket sort por frecuencia          | O(n)                              | La frecuencia está acotada por n                        |
+
+La solución de referencia usa **cubetas**: `buckets[f]` guarda los valores que aparecen f veces. Recorro de la mayor
+frecuencia a la menor hasta juntar k valores. Para respetar el desempate ordeno cada cubeta (en el peor caso, una
+cubeta con muchos valores, eso agrega un O(m log m) acotado).
+
+## Complejidad
+
+- Tiempo: O(n) para contar y recorrer cubetas (más el orden de las cubetas para el desempate).
+- Memoria: O(n).
+
+## Con un heap
+
+Mantengo un min-heap ordenado por (frecuencia, valor). Inserto cada entrada y, si el heap supera k, saco el mínimo.
+Al final quedan los k mayores. JavaScript no trae heap: en una entrevista conviene saber implementarlo con un array y
+`siftUp`/`siftDown`.
+
+## Stream o datos enormes
+
+Con un stream, el heap de tamaño k se mantiene en forma incremental. Si el conteo no entra en memoria, se reparte por
+hash entre máquinas (map-reduce) o se usan estructuras aproximadas como Count-Min Sketch.

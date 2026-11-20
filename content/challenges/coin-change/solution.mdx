@@ -1,0 +1,29 @@
+## Por qué no greedy
+
+Tomar siempre la moneda más grande funciona con sistemas como el del peso o el dólar (llamados **canónicos**), pero no
+en general: con `[1, 3, 4]` y monto 6 el greedy elige 4 + 1 + 1 (3 monedas) y el óptimo es 3 + 3 (2 monedas). Con
+`[3, 5]` y monto 6, el greedy toma 5 y concluye que es imposible.
+
+## Enfoque: programación dinámica bottom-up
+
+1. **Estado**: `dp[a]` = mínima cantidad de monedas para sumar exactamente `a`.
+2. **Caso base**: `dp[0] = 0`; el resto empieza en `Infinity` (inalcanzable).
+3. **Transición**: para cada moneda `c ≤ a`, `dp[a] = min(dp[a], dp[a - c] + 1)`: la última moneda usada es `c` y el
+   resto es el subproblema `a - c`.
+4. **Respuesta**: `dp[amount]`, o -1 si sigue siendo `Infinity`.
+
+Lleno la tabla de menor a mayor, así cada subproblema ya está resuelto cuando lo necesito.
+
+## Complejidad
+
+- Tiempo: O(amount × cantidad de monedas).
+- Memoria: O(amount).
+
+## Variantes
+
+- **Cantidad de combinaciones** (sin importar el orden): `ways[a] += ways[a - c]`, iterando las monedas en el bucle
+  externo para no contar permutaciones.
+- **Reconstruir las monedas**: guardar en otro array qué moneda dio el mínimo en cada monto y retroceder desde
+  `amount`.
+- **Top-down**: la misma recurrencia con recursión y memoización; con montos grandes, cuidado con la profundidad de la
+  pila.

@@ -6,6 +6,7 @@ import {
   MessagesSquare,
   Network,
   RotateCcw,
+  UserRound,
   Zap,
   type LucideIcon,
 } from "lucide-react";
@@ -24,6 +25,7 @@ const MODE_ICONS: Record<InterviewMode, LucideIcon> = {
   "live-coding": Code2,
   "system-design": Network,
   "ai-engineering": Bot,
+  behavioral: UserRound,
   mock: MessagesSquare,
   review: RotateCcw,
 };

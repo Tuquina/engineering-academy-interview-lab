@@ -1,0 +1,48 @@
+---
+id: challenge.longest-unique-substring
+kind: code
+title: "Subcadena más larga sin caracteres repetidos"
+summary: "El ejercicio de referencia de la ventana deslizante: expandir, contraer y no recorrer dos veces."
+difficulty: intermediate
+durationMinutes: 25
+technologies: ["algoritmos", "typescript"]
+topics: ["strings", "ventana deslizante", "hash map"]
+skills: ["dos punteros", "análisis de complejidad"]
+interviewType: live-coding
+order: 22
+constraints:
+  - "0 ≤ s.length ≤ 10⁵; puede contener letras, dígitos, símbolos y espacios."
+  - "Objetivo: O(n) de tiempo."
+acceptanceCriteria:
+  - "Devuelve la longitud de la subcadena contigua más larga sin caracteres repetidos."
+  - "El string vacío devuelve 0."
+  - "Resuelve 10⁵ caracteres dentro del tiempo límite."
+hints:
+  - "Probar todas las subcadenas es O(n²) u O(n³). ¿Podés mantener una ventana `[left, right]` siempre válida?"
+  - "Al agregar `s[right]`, si ya está dentro de la ventana, movés `left` justo después de su aparición anterior."
+  - "Guardá en un `Map` la última posición de cada carácter. Ojo: sólo importa si esa posición está dentro de la ventana (≥ left)."
+followUpQuestions:
+  - "¿Cómo devolverías la subcadena además de la longitud?"
+  - "¿Y si se permitieran como máximo k caracteres distintos?"
+  - "¿Qué cambia si el alfabeto es sólo ASCII? ¿Podés usar un array en lugar de un Map?"
+relatedLessons: []
+---
+
+## Enunciado
+
+Dado un string `s`, devolvé la **longitud** de la subcadena **contigua** más larga que no repite ningún carácter.
+
+```ts
+export function lengthOfLongestSubstring(s: string): number;
+```
+
+## Ejemplos
+
+| `s`          | Resultado | Subcadena |
+| ------------ | --------- | --------- |
+| `"abcabcbb"` | `3`       | `"abc"`   |
+| `"bbbbb"`    | `1`       | `"b"`     |
+| `"pwwkew"`   | `3`       | `"wke"`   |
+| `""`         | `0`       |           |
+
+`"pwke"` no cuenta: es una subsecuencia, no una subcadena contigua.

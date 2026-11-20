@@ -1,0 +1,136 @@
+{
+  "id": "postgresql",
+  "title": "PostgreSQL y SQL",
+  "description": "Consultas, índices, transacciones, concurrencia y operación.",
+  "courseId": "postgresql",
+  "cards": [
+    {
+      "id": "pg.sql-logical-order",
+      "front": "¿En qué orden lógico se evalúa un `SELECT`?",
+      "back": "`FROM`/`JOIN` → `WHERE` → `GROUP BY` → `HAVING` → `SELECT` (y funciones de ventana) → `DISTINCT` → `ORDER BY` → `LIMIT`/`OFFSET`. Por eso `WHERE` no puede usar un alias del `SELECT` ni una agregación (para eso está `HAVING`).",
+      "difficulty": "basic",
+      "tags": ["sql"],
+      "lessonId": "postgresql.queries"
+    },
+    {
+      "id": "pg.left-join-where",
+      "front": "¿Por qué un `LEFT JOIN` se comporta como `INNER JOIN` al filtrar la tabla derecha en el `WHERE`?",
+      "back": "Las filas sin coincidencia tienen `NULL` en las columnas de la derecha y la condición del `WHERE` las descarta. Si el filtro es parte de la relación, va en la cláusula `ON`.",
+      "difficulty": "intermediate",
+      "tags": ["joins"],
+      "lessonId": "postgresql.queries"
+    },
+    {
+      "id": "pg.window-vs-group",
+      "front": "Función de ventana vs `GROUP BY`.",
+      "back": "`GROUP BY` colapsa las filas en una por grupo. Una función de ventana (`OVER (PARTITION BY … ORDER BY …)`) calcula sobre un conjunto de filas relacionadas pero conserva cada fila: rankings, totales acumulados, diferencias con la fila anterior (`lag`).",
+      "difficulty": "intermediate",
+      "tags": ["window functions"],
+      "lessonId": "postgresql.queries"
+    },
+    {
+      "id": "pg.null-semantics",
+      "front": "¿Qué devuelve `NULL = NULL` en SQL y cómo se compara correctamente?",
+      "back": "`NULL` (desconocido), no `true`. Se usa `IS NULL` / `IS NOT NULL`, o `IS DISTINCT FROM` para comparar valores que pueden ser nulos. Ojo también con `NOT IN` y subconsultas que devuelven `NULL`: no devuelve filas.",
+      "difficulty": "intermediate",
+      "tags": ["sql", "null"],
+      "lessonId": "postgresql.queries"
+    },
+    {
+      "id": "pg.btree-default",
+      "front": "¿Qué tipo de índice crea PostgreSQL por defecto y para qué operaciones sirve?",
+      "back": "B-tree. Sirve para igualdad, rangos (`<`, `>`, `BETWEEN`), `ORDER BY` y prefijos de `LIKE 'abc%'`. Para búsqueda de texto completo, arrays o JSONB se usa GIN; para datos geométricos o rangos, GiST; para tablas enormes ordenadas físicamente, BRIN.",
+      "difficulty": "basic",
+      "tags": ["índices"],
+      "lessonId": "postgresql.indexes"
+    },
+    {
+      "id": "pg.explain-analyze",
+      "front": "`EXPLAIN` vs `EXPLAIN ANALYZE`.",
+      "back": "`EXPLAIN` muestra el plan estimado sin ejecutar. `EXPLAIN ANALYZE` ejecuta la consulta y muestra tiempos y filas reales; comparar filas estimadas con reales detecta estadísticas desactualizadas. Con `INSERT`/`UPDATE` envolverlo en una transacción con `ROLLBACK`.",
+      "difficulty": "intermediate",
+      "tags": ["performance"],
+      "lessonId": "postgresql.indexes"
+    },
+    {
+      "id": "pg.index-not-used",
+      "front": "Tres razones por las que PostgreSQL no usa un índice que existe.",
+      "back": "1) La consulta devuelve gran parte de la tabla y un Seq Scan es más barato. 2) La columna está envuelta en una función o un cast (`lower(email)` sin índice de expresión). 3) El índice compuesto no empieza por la columna filtrada. También influyen estadísticas viejas (`ANALYZE`).",
+      "difficulty": "advanced",
+      "tags": ["índices", "performance"],
+      "lessonId": "postgresql.indexes"
+    },
+    {
+      "id": "pg.covering-partial",
+      "front": "¿Qué es un índice parcial y uno con `INCLUDE`?",
+      "back": "Parcial: indexa sólo las filas que cumplen un `WHERE` (por ejemplo, `WHERE status = 'pending'`), más chico y rápido. `INCLUDE` agrega columnas no clave al índice para permitir un Index Only Scan sin ir a la tabla.",
+      "difficulty": "advanced",
+      "tags": ["índices"],
+      "lessonId": "postgresql.indexes"
+    },
+    {
+      "id": "pg.acid",
+      "front": "¿Qué significa ACID?",
+      "back": "Atomicidad (todo o nada), Consistencia (se respetan las restricciones), Aislamiento (las transacciones concurrentes no se ven a medias, según el nivel) y Durabilidad (lo confirmado sobrevive a una caída, gracias al WAL).",
+      "difficulty": "basic",
+      "tags": ["transacciones"],
+      "lessonId": "postgresql.transactions"
+    },
+    {
+      "id": "pg.isolation-levels",
+      "front": "Niveles de aislamiento en PostgreSQL y qué evita cada uno.",
+      "back": "Read Committed (por defecto): cada sentencia ve lo confirmado al empezar; permite lecturas no repetibles y lost updates. Repeatable Read: una instantánea para toda la transacción. Serializable: además detecta anomalías de escritura y aborta con error de serialización (hay que reintentar).",
+      "difficulty": "advanced",
+      "tags": ["transacciones", "concurrencia"],
+      "lessonId": "postgresql.transactions"
+    },
+    {
+      "id": "pg.lost-update",
+      "front": "Dos requests leen un saldo y lo actualizan restando. ¿Cómo evitar el lost update?",
+      "back": "Actualizar en forma atómica (`UPDATE … SET balance = balance - $1 WHERE id = $2 AND balance >= $1`), bloquear la fila con `SELECT … FOR UPDATE` o usar control optimista con una columna `version` y reintentar si no se actualizó ninguna fila.",
+      "difficulty": "advanced",
+      "tags": ["concurrencia"],
+      "lessonId": "postgresql.transactions"
+    },
+    {
+      "id": "pg.skip-locked",
+      "front": "¿Para qué sirve `FOR UPDATE SKIP LOCKED`?",
+      "back": "Para usar una tabla como cola de trabajos: cada worker toma filas pendientes y las bloquea, salteando las que otro worker ya tomó, sin esperar ni procesarlas dos veces.",
+      "difficulty": "advanced",
+      "tags": ["concurrencia", "colas"],
+      "lessonId": "postgresql.transactions"
+    },
+    {
+      "id": "pg.mvcc-vacuum",
+      "front": "¿Qué es MVCC y por qué existe `VACUUM`?",
+      "back": "Multi-Version Concurrency Control: un `UPDATE` crea una nueva versión de la fila y la anterior queda para las transacciones que todavía la ven, así los lectores no bloquean a los escritores. `VACUUM` (y autovacuum) recupera el espacio de las versiones muertas y evita el wraparound de IDs de transacción.",
+      "difficulty": "advanced",
+      "tags": ["internals", "operación"],
+      "lessonId": "postgresql.operations"
+    },
+    {
+      "id": "pg.normalization",
+      "front": "¿Cuándo tiene sentido desnormalizar?",
+      "back": "Cuando una lectura frecuente y medida es demasiado cara con JOINs y se acepta el costo de mantener la copia (triggers, proyecciones o jobs). Se empieza normalizado (3FN) y se desnormaliza con evidencia, documentando quién mantiene el dato derivado.",
+      "difficulty": "intermediate",
+      "tags": ["modelado"],
+      "lessonId": "postgresql.modeling"
+    },
+    {
+      "id": "pg.safe-migrations",
+      "front": "¿Cómo agregar una columna `NOT NULL` a una tabla grande sin cortar el servicio?",
+      "back": "Expand/contract: agregar la columna nullable (o con un default constante, que en PG 11+ es instantáneo), desplegar código que la escriba, completar datos en lotes, y recién después agregar `NOT NULL` (idealmente vía `CHECK … NOT VALID` + `VALIDATE`). Índices con `CREATE INDEX CONCURRENTLY`.",
+      "difficulty": "advanced",
+      "tags": ["migraciones"],
+      "lessonId": "postgresql.modeling"
+    },
+    {
+      "id": "pg.connection-pooling",
+      "front": "¿Por qué hace falta un pooler (PgBouncer) con muchas instancias de la app?",
+      "back": "Cada conexión de PostgreSQL es un proceso con memoria propia; cientos de conexiones degradan la base. Un pooler en modo transacción reparte pocas conexiones reales entre muchos clientes. Ese modo no admite estado de sesión (prepared statements con nombre, `SET`, advisory locks de sesión).",
+      "difficulty": "intermediate",
+      "tags": ["operación"],
+      "lessonId": "postgresql.operations"
+    }
+  ]
+}

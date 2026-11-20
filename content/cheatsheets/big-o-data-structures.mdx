@@ -1,0 +1,69 @@
+---
+title: "Big-O y estructuras de datos"
+description: "Complejidad de las operaciones más usadas en JavaScript/TypeScript y cómo elegir estructura."
+order: 8
+tags: ["algoritmos", "complejidad", "estructuras de datos"]
+relatedLessons: []
+---
+
+## Escala de complejidades (n = 10⁶)
+
+| Complejidad | Operaciones aprox. | Ejemplo                         |
+| ----------- | ------------------ | ------------------------------- |
+| O(1)        | 1                  | Acceso por índice, `Map.get`    |
+| O(log n)    | 20                 | Búsqueda binaria, heap push/pop |
+| O(n)        | 10⁶                | Recorrer un array               |
+| O(n log n)  | 2·10⁷              | Ordenar                         |
+| O(n²)       | 10¹²               | Dos bucles anidados (inviable)  |
+| O(2ⁿ)       | —                  | Todos los subconjuntos (n ≤ 20) |
+
+Regla práctica: ~10⁸ operaciones simples por segundo.
+
+## Estructuras en JavaScript
+
+| Estructura         | Acceso    | Buscar     | Insertar                      | Borrar                   | Notas                                    |
+| ------------------ | --------- | ---------- | ----------------------------- | ------------------------ | ---------------------------------------- |
+| Array              | O(1)      | O(n)       | `push` O(1)\*, `unshift` O(n) | `pop` O(1), `shift` O(n) | `shift` en una cola es O(n)              |
+| `Map` / `Set`      | —         | O(1) prom. | O(1) prom.                    | O(1) prom.               | Mantienen orden de inserción             |
+| Objeto `{}`        | —         | O(1) prom. | O(1) prom.                    | O(1) prom.               | Claves sólo string/symbol; preferir Map  |
+| Pila (array)       | tope O(1) | —          | `push` O(1)                   | `pop` O(1)               |                                          |
+| Cola (dos índices) | O(1)      | —          | O(1)                          | O(1)                     | Evitar `shift` con colas grandes         |
+| Heap binario       | min O(1)  | O(n)       | O(log n)                      | O(log n)                 | No viene incluido: hay que implementarlo |
+| Árbol balanceado   | —         | O(log n)   | O(log n)                      | O(log n)                 | Datos ordenados con rangos               |
+| Trie               | —         | O(largo)   | O(largo)                      | O(largo)                 | Prefijos, autocompletado                 |
+| Union-Find         | —         | ~O(1)      | ~O(1)                         | —                        | Conectividad, componentes                |
+
+\* amortizado.
+
+## Métodos de arrays y su costo
+
+| Método                                         | Costo                                                  |
+| ---------------------------------------------- | ------------------------------------------------------ |
+| `includes`, `indexOf`, `find`, `filter`, `map` | O(n)                                                   |
+| `slice`, `concat`, spread `[...a]`             | O(n) (copia)                                           |
+| `splice` en el medio                           | O(n)                                                   |
+| `sort`                                         | O(n log n), estable; sin comparador ordena como string |
+
+```ts
+[10, 9, 1].sort(); // [1, 10, 9]  ← como strings
+[10, 9, 1].sort((a, b) => a - b); // [1, 9, 10]
+```
+
+## Elegir estructura según la pregunta
+
+| La pregunta pide…                       | Estructura                        |
+| --------------------------------------- | --------------------------------- |
+| ¿Ya vi este valor? / contar frecuencias | `Set` / `Map`                     |
+| El mínimo o máximo una y otra vez       | Heap                              |
+| Último en entrar, primero en salir      | Pila                              |
+| Procesar por niveles / camino más corto | Cola + BFS                        |
+| Rangos ordenados                        | Array ordenado + búsqueda binaria |
+| Prefijos de palabras                    | Trie                              |
+| ¿Están conectados? (unir grupos)        | Union-Find                        |
+| Acceso O(1) + orden de uso (LRU)        | `Map` (o hash map + lista doble)  |
+
+## Complejidad espacial
+
+- La recursión usa O(profundidad) de pila.
+- Copiar arrays dentro de un bucle convierte O(n) en O(n²) de tiempo y memoria.
+- Un `Set` de todos los elementos es O(n) de memoria extra: decirlo en la entrevista.

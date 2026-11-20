@@ -1,0 +1,28 @@
+## Enfoque
+
+Aunque el array esté rotado, en cada paso de la búsqueda binaria **al menos una de las dos mitades está ordenada**:
+
+- Si `nums[lo] <= nums[mid]`, la mitad izquierda `[lo, mid]` está ordenada.
+- Si no, la ordenada es la derecha `[mid, hi]`.
+
+Sobre la mitad ordenada sí puedo decidir con certeza si `target` cae dentro de su rango; si cae, busco ahí, y si no,
+descarto esa mitad y sigo en la otra. Cada iteración descarta la mitad del espacio: **O(log n)**.
+
+Detalles de bordes:
+
+- `low <= value` (con `=`) cubre el caso en que `lo === mid` (dos elementos).
+- En la mitad izquierda el rango es `low <= target < value`; en la derecha, `value < target <= high`. `value` ya se
+  comparó por igualdad.
+- `lo + ((hi - lo) >> 1)` evita desbordes en lenguajes con enteros acotados; en JavaScript es una costumbre sana.
+
+## Complejidad
+
+- Tiempo: O(log n).
+- Memoria: O(1).
+
+## Variantes
+
+- **Encontrar el mínimo** (índice de rotación): comparar `nums[mid]` con `nums[hi]`; si es mayor, el mínimo está a la
+  derecha.
+- **Con duplicados**, `nums[lo] === nums[mid] === nums[hi]` no permite decidir qué mitad está ordenada: se avanza `lo`
+  y se retrocede `hi` de a uno, y el peor caso pasa a ser O(n).

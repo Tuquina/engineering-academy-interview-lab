@@ -1,0 +1,129 @@
+---
+title: "SQL y PostgreSQL"
+description: "Joins, agregaciones, window functions, índices, EXPLAIN, aislamiento y bloqueos."
+order: 6
+tags: ["sql", "postgresql", "índices", "transacciones"]
+relatedLessons:
+  ["postgresql.queries", "postgresql.indexes", "postgresql.transactions", "postgresql.operations"]
+---
+
+## Orden lógico de evaluación
+
+`FROM`/`JOIN` → `WHERE` → `GROUP BY` → `HAVING` → `SELECT` → `DISTINCT` → `ORDER BY` → `LIMIT`
+
+## Joins
+
+| Join         | Devuelve                                                                |
+| ------------ | ----------------------------------------------------------------------- |
+| `INNER JOIN` | Sólo filas con coincidencia en ambas tablas                             |
+| `LEFT JOIN`  | Todas las de la izquierda; `NULL` donde no hay coincidencia             |
+| `FULL JOIN`  | Todas de ambos lados                                                    |
+| `CROSS JOIN` | Producto cartesiano                                                     |
+| `LATERAL`    | Subconsulta que puede usar columnas de la fila actual (top-N por grupo) |
+
+```sql
+-- Clientes sin pedidos (anti-join)
+SELECT c.* FROM customers c
+WHERE NOT EXISTS (SELECT 1 FROM orders o WHERE o.customer_id = c.id);
+```
+
+## Agregaciones y ventanas
+
+```sql
+-- Total por cliente, sólo los que superan 1000
+SELECT customer_id, SUM(amount) AS total
+FROM orders GROUP BY customer_id HAVING SUM(amount) > 1000;
+
+-- Top 3 pedidos por cliente
+SELECT * FROM (
+  SELECT o.*, ROW_NUMBER() OVER (PARTITION BY customer_id ORDER BY amount DESC) AS rn
+  FROM orders o
+) t WHERE rn <= 3;
+
+-- Total acumulado y diferencia con el día anterior
+SELECT day, revenue,
+       SUM(revenue) OVER (ORDER BY day) AS running_total,
+       revenue - LAG(revenue) OVER (ORDER BY day) AS delta
+FROM daily_revenue;
+```
+
+| Función        | Empates                    |
+| -------------- | -------------------------- |
+| `ROW_NUMBER()` | Numera 1, 2, 3 sin repetir |
+| `RANK()`       | 1, 1, 3 (salta)            |
+| `DENSE_RANK()` | 1, 1, 2 (no salta)         |
+
+## CTEs y upsert
+
+```sql
+WITH recent AS (
+  SELECT * FROM orders WHERE created_at > now() - interval '30 days'
+)
+SELECT customer_id, count(*) FROM recent GROUP BY customer_id;
+
+INSERT INTO payments (idempotency_key, amount) VALUES ($1, $2)
+ON CONFLICT (idempotency_key) DO NOTHING
+RETURNING id;
+```
+
+## Índices
+
+| Tipo   | Sirve para                                                    |
+| ------ | ------------------------------------------------------------- |
+| B-tree | Igualdad, rangos, `ORDER BY`, `LIKE 'abc%'` (por defecto)     |
+| GIN    | JSONB, arrays, búsqueda de texto completo                     |
+| GiST   | Datos geométricos, rangos, búsquedas por cercanía             |
+| BRIN   | Tablas enormes con orden físico natural (fechas de inserción) |
+| Hash   | Sólo igualdad                                                 |
+
+- Índice compuesto `(a, b)`: sirve para filtrar por `a` o por `a` y `b`, no sólo por `b`.
+- Primero las columnas de igualdad, después las de rango u orden.
+- Índice parcial: `CREATE INDEX … WHERE status = 'pending'`.
+- Índice de expresión: `CREATE INDEX ON users (lower(email))`.
+- En producción: `CREATE INDEX CONCURRENTLY` (no bloquea escrituras).
+- Cada índice acelera lecturas y **encarece escrituras**.
+
+## Leer un plan
+
+```sql
+EXPLAIN (ANALYZE, BUFFERS) SELECT …;
+```
+
+| Nodo             | Señal                                                               |
+| ---------------- | ------------------------------------------------------------------- |
+| Seq Scan         | Lee toda la tabla; malo si devuelve pocas filas de una tabla grande |
+| Index Scan       | Usa el índice y va a la tabla                                       |
+| Index Only Scan  | Todo sale del índice (ideal)                                        |
+| Bitmap Heap Scan | Muchas filas dispersas vía índice                                   |
+| Nested Loop      | Bueno con pocas filas externas; terrible con muchas                 |
+| Hash Join        | Bueno para joins grandes sin orden                                  |
+
+Comparar `rows` estimadas con `actual rows`: una gran diferencia indica estadísticas viejas (`ANALYZE`).
+
+## Transacciones y concurrencia
+
+| Nivel                        | Lectura sucia | No repetible | Fantasmas  | Anomalías de serialización |
+| ---------------------------- | ------------- | ------------ | ---------- | -------------------------- |
+| Read Committed (por defecto) | No            | Sí           | Sí         | Sí                         |
+| Repeatable Read              | No            | No           | No (en PG) | Sí                         |
+| Serializable                 | No            | No           | No         | No (aborta: reintentar)    |
+
+```sql
+-- Bloqueo pesimista de una fila
+SELECT * FROM accounts WHERE id = $1 FOR UPDATE;
+
+-- Cola de trabajos con varios workers
+SELECT id FROM jobs WHERE status = 'pending'
+ORDER BY created_at LIMIT 10 FOR UPDATE SKIP LOCKED;
+
+-- Optimista: version
+UPDATE docs SET body = $1, version = version + 1
+WHERE id = $2 AND version = $3; -- 0 filas = conflicto
+```
+
+## Operación
+
+- **MVCC**: un `UPDATE` crea una nueva versión de la fila; `VACUUM` limpia las viejas.
+- **Pooler** (PgBouncer) en modo transacción cuando hay muchas instancias de la app.
+- **Migraciones seguras**: expand/contract, columnas nullable primero, backfill en lotes.
+- `pg_stat_statements`: las consultas que más tiempo total consumen.

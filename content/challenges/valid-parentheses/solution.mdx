@@ -1,0 +1,21 @@
+## Enfoque
+
+El último paréntesis que se abrió es el **primero que debe cerrarse**: eso es una **pila** (LIFO).
+
+1. Si el carácter es una apertura, lo apilo.
+2. Si es un cierre, desapilo y verifico que sea la apertura del mismo tipo. Si la pila estaba vacía (`pop` devuelve
+   `undefined`) o el tipo no coincide, es inválido.
+3. Al final, la pila debe estar vacía: si quedan aperturas, faltan cierres.
+
+Un mapa de cierre → apertura evita una cadena de `if`.
+
+## Complejidad
+
+- Tiempo: O(n).
+- Memoria: O(n) en el peor caso (todo aperturas).
+
+## Por qué contar no alcanza
+
+Contar aperturas y cierres detecta `"(("`, pero no `"([)]"` (mismas cantidades, orden incorrecto) ni `")("` (el
+contador vuelve a cero pero hubo un cierre sin apertura). Con **un solo tipo** de paréntesis sí alcanza un contador que
+nunca debe bajar de cero: O(1) de memoria.

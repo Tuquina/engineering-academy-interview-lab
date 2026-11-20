@@ -1,0 +1,98 @@
+---
+title: "Testing, CI/CD y Docker"
+description: "Pirámide de tests, dobles de prueba, pipeline de CI, Dockerfile para Node.js y estrategias de despliegue."
+order: 14
+tags: ["testing", "ci/cd", "docker", "devops"]
+relatedLessons: ["nodejs.observability-testing", "typescript.design-errors-testing", "react.quality"]
+---
+
+## Pirámide de tests
+
+| Nivel       | Qué prueba                             | Velocidad    | Cantidad |
+| ----------- | -------------------------------------- | ------------ | -------- |
+| Unitarios   | Funciones y reglas de dominio aisladas | ms           | Muchos   |
+| Integración | Módulo + base real, HTTP, colas        | s            | Varios   |
+| End-to-end  | Flujos críticos desde la interfaz      | decenas de s | Pocos    |
+
+Un buen test: rápido, determinista, independiente del orden, con un solo motivo para fallar y un nombre que describe el comportamiento.
+
+## Dobles de prueba
+
+| Doble | Qué es                                                      |
+| ----- | ----------------------------------------------------------- |
+| Dummy | Se pasa para completar la firma, no se usa                  |
+| Stub  | Devuelve respuestas fijas                                   |
+| Fake  | Implementación simple que funciona (repositorio en memoria) |
+| Spy   | Registra cómo fue llamado                                   |
+| Mock  | Tiene expectativas sobre cómo debe ser llamado              |
+
+Preferir fakes de los puertos propios a mockear librerías de terceros. No mockear lo que no es tuyo: envolverlo en un adaptador.
+
+## Patrón Arrange–Act–Assert
+
+```ts
+test("rechaza un pago mayor al saldo", async () => {
+  // Arrange
+  const accounts = new InMemoryAccounts([{ id: "a1", balance: 100 }]);
+  const pay = new PayUseCase(accounts);
+  // Act
+  const result = await pay.execute({ accountId: "a1", amount: 150 });
+  // Assert
+  expect(result).toEqual({ ok: false, error: "insufficient_funds" });
+});
+```
+
+## Pipeline de CI típico
+
+1. Instalar dependencias con lockfile (`pnpm install --frozen-lockfile`).
+2. Formato y lint.
+3. Typecheck.
+4. Tests unitarios y de integración (base efímera en un contenedor).
+5. Build.
+6. E2E contra el build.
+7. Publicar artefacto/imagen y desplegar (preview en PRs, producción en `main`).
+
+Proteger `main`: PR obligatorio y checks en verde antes de mergear.
+
+## Dockerfile para Node.js (multi-stage)
+
+```dockerfile
+FROM node:24-alpine AS deps
+WORKDIR /app
+COPY package.json pnpm-lock.yaml ./
+RUN corepack enable && pnpm install --frozen-lockfile
+
+FROM deps AS build
+COPY . .
+RUN pnpm build && pnpm prune --prod
+
+FROM node:24-alpine
+WORKDIR /app
+ENV NODE_ENV=production
+COPY --from=build /app/node_modules ./node_modules
+COPY --from=build /app/dist ./dist
+USER node
+EXPOSE 3000
+CMD ["node", "dist/server.js"]
+```
+
+- Copiar primero los manifiestos para aprovechar la caché de capas.
+- `.dockerignore` con `node_modules`, `.git`, secretos.
+- Ejecutar como usuario no root; una sola responsabilidad por contenedor.
+- Configuración por variables de entorno; secretos desde el orquestador, nunca en la imagen.
+
+## Estrategias de despliegue
+
+| Estrategia    | Cómo                                              | Ventaja                     |
+| ------------- | ------------------------------------------------- | --------------------------- |
+| Rolling       | Reemplaza instancias de a poco                    | Sin infraestructura extra   |
+| Blue/green    | Dos entornos; se cambia el tráfico de golpe       | Rollback instantáneo        |
+| Canary        | Un % del tráfico a la versión nueva y se mide     | Limita el impacto de un bug |
+| Feature flags | El código se despliega apagado y se activa aparte | Separa deploy de release    |
+
+## Observabilidad
+
+- **Logs** estructurados (JSON) con correlation ID.
+- **Métricas**: RED (Rate, Errors, Duration) para servicios; USE (Utilization, Saturation, Errors) para recursos.
+- **Traces** distribuidos (OpenTelemetry) para seguir una request entre servicios.
+- Alertar por síntomas que ve el usuario (SLO), no por cada causa posible.

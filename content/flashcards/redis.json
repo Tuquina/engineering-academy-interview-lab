@@ -1,0 +1,88 @@
+{
+  "id": "redis",
+  "title": "Redis",
+  "description": "Estructuras de datos, caching, coordinación y límites.",
+  "courseId": "redis",
+  "cards": [
+    {
+      "id": "redis.single-thread",
+      "front": "¿Por qué Redis es tan rápido si ejecuta los comandos en un solo hilo?",
+      "back": "Los datos están en memoria, las estructuras son simples y cada comando es corto; un solo hilo evita locks y cada comando es atómico. Por eso un comando O(N) sobre una clave enorme (`KEYS *`, `SMEMBERS` gigante) bloquea a todos los clientes.",
+      "difficulty": "basic",
+      "tags": ["internals"],
+      "lessonId": "redis.introduction"
+    },
+    {
+      "id": "redis.data-types",
+      "front": "¿Qué estructura de Redis usarías para un ranking, una cola, un conjunto único y un objeto?",
+      "back": "Ranking: Sorted Set (`ZADD`, `ZRANGE … REV`). Cola simple: List (`LPUSH`/`BRPOP`) o Stream si necesitás grupos de consumidores y acks. Conjunto único: Set. Objeto con campos: Hash.",
+      "difficulty": "basic",
+      "tags": ["estructuras"],
+      "lessonId": "redis.data-types"
+    },
+    {
+      "id": "redis.ttl",
+      "front": "¿Por qué toda clave de caché debería tener TTL?",
+      "back": "Limita cuánto tiempo puede servirse un dato viejo si falla la invalidación y evita que la memoria crezca sin control. Agregar jitter al TTL evita que muchas claves expiren a la vez.",
+      "difficulty": "basic",
+      "tags": ["caching"],
+      "lessonId": "redis.patterns"
+    },
+    {
+      "id": "redis.eviction",
+      "front": "¿Qué pasa cuando Redis llega a `maxmemory`?",
+      "back": "Depende de `maxmemory-policy`: `noeviction` rechaza escrituras con error; `allkeys-lru`/`allkeys-lfu` desalojan cualquier clave (típico para caché); `volatile-*` sólo claves con TTL. Para datos que no se pueden perder, `noeviction` y monitorear memoria.",
+      "difficulty": "intermediate",
+      "tags": ["operación"],
+      "lessonId": "redis.tradeoffs"
+    },
+    {
+      "id": "redis.set-nx",
+      "front": "¿Cómo se implementa un lock simple con Redis?",
+      "back": "`SET lock:recurso <token-único> NX PX 30000`: sólo lo toma si no existe y expira solo. Para liberarlo, un script Lua que borra la clave sólo si el valor coincide con tu token. Si la operación protegida es crítica, sumar un fencing token en el recurso.",
+      "difficulty": "advanced",
+      "tags": ["coordinación", "locks"],
+      "lessonId": "redis.patterns"
+    },
+    {
+      "id": "redis.rate-limit",
+      "front": "¿Cómo se implementa un rate limiter de ventana fija con Redis?",
+      "back": "`INCR` sobre una clave por cliente y ventana (`rl:{cliente}:{minuto}`) y `EXPIRE` en el primer incremento (o en un script Lua/`MULTI`); si el valor supera el límite se rechaza. Sliding window con Sorted Sets o token bucket con Lua suavizan los picos en el borde de la ventana.",
+      "difficulty": "intermediate",
+      "tags": ["rate limiting"],
+      "lessonId": "redis.patterns"
+    },
+    {
+      "id": "redis.persistence",
+      "front": "RDB vs AOF.",
+      "back": "RDB: snapshots periódicos; restaura rápido pero se pierden los cambios desde el último snapshot. AOF: registra cada escritura (con `fsync` cada segundo por defecto); pierde como mucho ~1 s pero el archivo es mayor. Se pueden combinar.",
+      "difficulty": "intermediate",
+      "tags": ["persistencia"],
+      "lessonId": "redis.tradeoffs"
+    },
+    {
+      "id": "redis.pubsub-vs-streams",
+      "front": "Pub/Sub vs Streams en Redis.",
+      "back": "Pub/Sub es fire-and-forget: si el suscriptor no está conectado, pierde el mensaje. Streams persisten los mensajes, permiten grupos de consumidores, acks (`XACK`) y reprocesar pendientes (`XAUTOCLAIM`).",
+      "difficulty": "intermediate",
+      "tags": ["mensajería"],
+      "lessonId": "redis.tradeoffs"
+    },
+    {
+      "id": "redis.pipeline-vs-multi",
+      "front": "Pipeline vs `MULTI`/`EXEC`.",
+      "back": "Pipeline envía varios comandos sin esperar cada respuesta (ahorra round trips) pero no es atómico. `MULTI`/`EXEC` encola comandos y los ejecuta juntos sin intercalar otros clientes, sin rollback si uno falla. Para lógica condicional atómica se usa un script Lua.",
+      "difficulty": "advanced",
+      "tags": ["atomicidad"],
+      "lessonId": "redis.data-types"
+    },
+    {
+      "id": "redis.hot-key",
+      "front": "¿Qué es una hot key y cómo se mitiga?",
+      "back": "Una clave que recibe una fracción enorme del tráfico y satura un solo nodo del cluster. Mitigaciones: caché local en la app con TTL corto, replicar la clave con sufijos y repartir lecturas, o réplicas de lectura.",
+      "difficulty": "advanced",
+      "tags": ["escalabilidad"],
+      "lessonId": "redis.tradeoffs"
+    }
+  ]
+}

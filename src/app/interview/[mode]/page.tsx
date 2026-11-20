@@ -76,6 +76,7 @@ export default async function InterviewModePage({ params }: ModePageProps) {
             id: c.id,
             slug: c.slug,
             title: c.title,
+            track: c.technologies.includes("algoritmos") ? ("algorithms" as const) : ("practical" as const),
             starter: c.files.starter,
             tests: c.files.tests,
             hiddenTests: c.files.hiddenTests,

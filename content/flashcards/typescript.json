@@ -67,6 +67,62 @@
       "difficulty": "intermediate",
       "tags": ["asincronía", "cancelación"],
       "lessonId": "typescript.promises-task-completablefuture"
+    },
+    {
+      "id": "ts.generics-constraints",
+      "front": "¿Para qué sirve `<T extends …>` en una función genérica?",
+      "back": "Restringe qué tipos acepta `T` para poder usar sus propiedades sin perder el tipo concreto. Ejemplo: `function byId<T extends { id: string }>(items: T[], id: string): T | undefined` devuelve el tipo exacto del elemento, no `{ id: string }`.",
+      "difficulty": "intermediate",
+      "tags": ["generics"],
+      "lessonId": "typescript.generics"
+    },
+    {
+      "id": "ts.utility-types",
+      "front": "¿Qué hacen `Partial`, `Pick`, `Omit` y `Record`?",
+      "back": "`Partial<T>`: todas las propiedades opcionales. `Pick<T, K>`: sólo las claves K. `Omit<T, K>`: todas menos K. `Record<K, V>`: objeto con claves K y valores V. Están construidos con mapped types.",
+      "difficulty": "basic",
+      "tags": ["transformaciones"],
+      "lessonId": "typescript.type-transformations"
+    },
+    {
+      "id": "ts.discriminated-union",
+      "front": "¿Qué es una unión discriminada y qué permite?",
+      "back": "Una unión de objetos con una propiedad literal común (`kind`, `status`). Al chequearla, TypeScript hace narrowing al miembro correcto; con un `switch` y un caso `default` que asigna a `never`, el compilador avisa si falta manejar un caso.",
+      "difficulty": "intermediate",
+      "tags": ["uniones", "narrowing"],
+      "lessonId": "typescript.unions-narrowing"
+    },
+    {
+      "id": "ts.interface-vs-type",
+      "front": "`interface` vs `type`: ¿cuándo cada uno?",
+      "back": "Ambos describen la forma de objetos. `interface` admite declaration merging y `extends`, buena para contratos públicos y objetos. `type` además expresa uniones, tuplas, mapped y conditional types. En un equipo, lo importante es ser consistente.",
+      "difficulty": "basic",
+      "tags": ["objetos"],
+      "lessonId": "typescript.objects-interfaces-inference"
+    },
+    {
+      "id": "ts.satisfies",
+      "front": "¿Qué hace el operador `satisfies`?",
+      "back": "Verifica que un valor cumpla un tipo sin cambiar el tipo inferido. `const routes = { home: \"/\" } satisfies Record<string, string>` valida la forma y conserva las claves literales para autocompletado, a diferencia de anotar `: Record<string, string>`.",
+      "difficulty": "intermediate",
+      "tags": ["inferencia"],
+      "lessonId": "typescript.objects-interfaces-inference"
+    },
+    {
+      "id": "ts.result-type",
+      "front": "¿Por qué modelar errores esperables con un tipo `Result` en lugar de excepciones?",
+      "back": "Un `Result<T, E>` (`{ ok: true, value } | { ok: false, error }`) hace visible en la firma que la operación puede fallar y obliga a manejarlo. Las excepciones quedan para lo inesperado (bugs, infraestructura caída).",
+      "difficulty": "intermediate",
+      "tags": ["errores", "diseño"],
+      "lessonId": "typescript.design-errors-testing"
+    },
+    {
+      "id": "ts.strict",
+      "front": "¿Qué activa `\"strict\": true` en tsconfig y cuál es la opción más importante?",
+      "back": "Un conjunto de chequeos: `strictNullChecks` (la más importante: `null` y `undefined` dejan de ser asignables a cualquier tipo), `noImplicitAny`, `strictFunctionTypes`, entre otros. `noUncheckedIndexedAccess` no está incluida y vale la pena sumarla.",
+      "difficulty": "basic",
+      "tags": ["configuración"],
+      "lessonId": "typescript.introduction"
     }
   ]
 }

@@ -1,0 +1,29 @@
+## Enfoque
+
+La grilla es un **grafo implícito**: cada celda de tierra es un nodo y está conectada con sus vecinas de tierra
+(arriba, abajo, izquierda, derecha). Una isla es una **componente conexa**.
+
+1. Recorro todas las celdas.
+2. Cuando encuentro tierra **no visitada**, sumo una isla y recorro toda su componente marcándola como visitada.
+3. Las celdas ya visitadas no vuelven a iniciar un recorrido.
+
+Uso **BFS con una cola** y marco cada celda **al encolarla**, no al sacarla, para no encolarla dos veces. La cola es un
+array con un índice de cabeza: `queue.shift()` es O(n) y convertiría el recorrido en O(n²).
+
+Para no modificar la entrada, los visitados van en un `Uint8Array` aparte (una variante común es "hundir" la isla
+escribiendo `"0"` en la grilla, pero muta la entrada).
+
+## Por qué no DFS recursivo
+
+Una isla de 300×300 son 90.000 celdas; un DFS recursivo puede llegar a esa profundidad y desbordar la pila. BFS, o un
+DFS con pila explícita, usa memoria del heap.
+
+## Complejidad
+
+- Tiempo: O(filas × columnas): cada celda se visita una vez.
+- Memoria: O(filas × columnas) por los visitados y la cola.
+
+## Variantes
+
+- **Isla más grande**: contar las celdas de cada recorrido y quedarse con el máximo.
+- **Islas que aparecen de a una**: Union-Find, uniendo cada celda nueva con sus vecinas en ~O(1) amortizado.

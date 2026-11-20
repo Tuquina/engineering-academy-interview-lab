@@ -1,0 +1,76 @@
+---
+title: "System Design: método, números y bloques"
+description: "El paso a paso de la entrevista, estimaciones rápidas, números de latencia y los componentes con sus compromisos."
+order: 11
+tags: ["system design", "escalabilidad", "estimaciones"]
+relatedLessons:
+  [
+    "system-design.introduction",
+    "system-design.scalability",
+    "system-design.consistency",
+    "system-design.messaging-resilience",
+  ]
+---
+
+## Método (45–60 minutos)
+
+| Fase                 | Tiempo  | Qué producir                                                                             |
+| -------------------- | ------- | ---------------------------------------------------------------------------------------- |
+| Requerimientos       | 5 min   | Funcionales (qué hace) y no funcionales (escala, latencia, consistencia, disponibilidad) |
+| Estimaciones         | 3–5 min | Usuarios, QPS de lectura y escritura, almacenamiento, ancho de banda                     |
+| API                  | 5 min   | Endpoints o eventos principales                                                          |
+| Modelo de datos      | 5 min   | Entidades, claves, qué base y por qué                                                    |
+| Diseño de alto nivel | 10 min  | Diagrama: clientes, balanceador, servicios, bases, caché, colas                          |
+| Profundizar          | 15 min  | Cuellos de botella, particionado, caché, consistencia                                    |
+| Fallas y operación   | 5 min   | Qué pasa si cae X, monitoreo, despliegue                                                 |
+
+## Estimaciones rápidas
+
+- 1 día ≈ 86.400 s ≈ **10⁵ s**. 1 mes ≈ 2,5·10⁶ s.
+- QPS promedio = requests por día / 10⁵. Pico ≈ 2–3 × promedio.
+- 1 M usuarios × 1 KB = 1 GB. 1 B filas × 1 KB = 1 TB.
+- Relación lectura/escritura típica de redes sociales: 100:1.
+
+| Disponibilidad | Caída permitida por año | Por mes     |
+| -------------- | ----------------------- | ----------- |
+| 99 %           | 3,65 días               | 7,3 horas   |
+| 99,9 %         | 8,8 horas               | 43 minutos  |
+| 99,99 %        | 53 minutos              | 4,3 minutos |
+
+## Números de latencia (orden de magnitud)
+
+| Operación                         | Tiempo      |
+| --------------------------------- | ----------- |
+| Referencia a caché L1             | ~1 ns       |
+| Referencia a memoria principal    | ~100 ns     |
+| Leer 1 MB secuencial de memoria   | ~10–250 µs  |
+| Lectura aleatoria de SSD          | ~100 µs     |
+| Round trip en el mismo datacenter | ~0,5 ms     |
+| Leer 1 MB secuencial de SSD       | ~1 ms       |
+| Seek de disco rotacional          | ~10 ms      |
+| Round trip entre continentes      | ~100–150 ms |
+
+## Bloques y compromisos
+
+| Bloque                              | Para qué                                            | Compromiso / riesgo                            |
+| ----------------------------------- | --------------------------------------------------- | ---------------------------------------------- |
+| Load balancer (L4/L7)               | Repartir tráfico, health checks, TLS                | Debe ser redundante; sesiones afuera de la app |
+| CDN                                 | Estáticos y respuestas cacheables cerca del usuario | Invalidación y versionado                      |
+| Caché (Redis)                       | Lecturas rápidas, menos carga en la base            | Datos viejos, stampede, memoria                |
+| Base relacional                     | Transacciones, consultas flexibles                  | Escalar escrituras requiere particionar        |
+| Base clave-valor / documental       | Escala horizontal, esquema flexible                 | Consultas y transacciones limitadas            |
+| Réplicas de lectura                 | Escalar lecturas                                    | Lag de replicación                             |
+| Sharding                            | Escalar escrituras y almacenamiento                 | Consultas entre shards, rebalanceo             |
+| Cola (SQS, RabbitMQ)                | Desacoplar y absorber picos                         | Entrega al menos una vez: idempotencia         |
+| Log (Kafka)                         | Varios consumidores, replay, orden por partición    | Operación compleja                             |
+| Object storage (S3)                 | Archivos grandes, backups                           | Latencia mayor; servir vía CDN                 |
+| Búsqueda (Elasticsearch/OpenSearch) | Texto completo, filtros facetados                   | Copia eventual de la fuente de verdad          |
+| Rate limiter                        | Proteger de abuso y picos                           | Estado compartido entre instancias             |
+
+## Preguntas de profundización frecuentes
+
+- ¿Qué pasa si se cae la base primaria? (failover, RPO/RTO)
+- ¿Cómo evitás procesar dos veces un mensaje? (idempotencia, deduplicación)
+- ¿Cómo escalás las escrituras? (particionado, colas, batching)
+- ¿Dónde está la consistencia fuerte y dónde alcanza la eventual?
+- ¿Qué métricas mirarías? (latencia p50/p95/p99, tasa de errores, saturación, lag de colas)

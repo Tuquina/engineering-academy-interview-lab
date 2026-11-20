@@ -1,0 +1,45 @@
+## Enfoque
+
+La caché necesita dos operaciones en O(1) a la vez:
+
+- **Buscar por clave** → hash map.
+- **Saber cuál es la menos usada y mover cualquier clave al frente** → lista **doblemente enlazada** ordenada por uso.
+
+El mapa guarda clave → nodo de la lista. Así:
+
+- `get`: busco el nodo en el mapa, lo desengancho de su lugar y lo pongo al frente. O(1).
+- `put` de una clave existente: actualizo el valor y la muevo al frente.
+- `put` de una clave nueva: creo el nodo al frente; si se superó la capacidad, saco el de la **cola** (el menos
+  reciente) de la lista y del mapa.
+
+La lista doble permite desenganchar un nodo en O(1) porque conoce a su anterior y a su siguiente.
+
+## Atajo en JavaScript
+
+Un `Map` itera en orden de inserción: `delete` + `set` manda una clave al final, y `map.keys().next().value` es la más
+vieja. Es una solución válida y corta; en una entrevista conviene mencionarla **y** saber implementar la versión con
+lista, que es la que se espera discutir.
+
+```ts
+get(key) {
+  if (!this.map.has(key)) return undefined;
+  const value = this.map.get(key)!;
+  this.map.delete(key);
+  this.map.set(key, value);
+  return value;
+}
+```
+
+Ojo con `if (!value)`: un valor `0` o `""` es válido; hay que chequear existencia con `has` o con el nodo.
+
+## Complejidad
+
+- `get` y `put`: O(1) promedio.
+- Memoria: O(capacidad).
+
+## En producción
+
+- **LFU** desaloja por frecuencia de uso: mapas de frecuencia → lista, con O(1) usando una frecuencia mínima.
+- Redis no implementa LRU exacto: muestrea algunas claves y desaloja la más vieja de la muestra, para ahorrar memoria.
+- Con varias instancias, una caché en memoria por proceso no es compartida: cada instancia tiene su propia LRU, o se
+  usa una caché distribuida.

@@ -1,0 +1,52 @@
+---
+id: challenge.valid-parentheses
+kind: code
+title: "Paréntesis balanceados"
+summary: "Validar que cada apertura tenga su cierre correcto y en orden: el caso de uso típico de una pila."
+difficulty: basic
+durationMinutes: 15
+technologies: ["algoritmos", "typescript"]
+topics: ["pilas", "strings"]
+skills: ["estructuras de datos", "casos límite"]
+interviewType: live-coding
+order: 21
+constraints:
+  - "La entrada sólo contiene los caracteres `()[]{}`."
+  - "0 ≤ s.length ≤ 10⁵."
+acceptanceCriteria:
+  - "Devuelve `true` sólo si cada apertura se cierra con el mismo tipo y en el orden correcto."
+  - "El string vacío es válido."
+  - "Un cierre sin apertura previa o aperturas sin cerrar son inválidos."
+hints:
+  - "El último paréntesis abierto es el primero que debe cerrarse. ¿Qué estructura es LIFO?"
+  - "Al ver un cierre, comparalo con el tope de la pila; si no coincide o la pila está vacía, es inválido."
+  - "Al terminar de recorrer, la pila tiene que quedar vacía."
+followUpQuestions:
+  - "¿Cómo lo resolverías si sólo hubiera un tipo de paréntesis, con O(1) de memoria?"
+  - "¿Cómo devolverías la mínima cantidad de caracteres a agregar para balancearlo?"
+  - "¿Dónde aparece este patrón en la práctica (parsers, editores, validación de HTML)?"
+relatedLessons: []
+---
+
+## Enunciado
+
+Dado un string `s` con los caracteres `(`, `)`, `[`, `]`, `{` y `}`, determiná si es **válido**:
+
+1. Cada apertura se cierra con el **mismo tipo**.
+2. Las aperturas se cierran en el **orden correcto**.
+3. Cada cierre corresponde a una apertura previa.
+
+```ts
+export function isValid(s: string): boolean;
+```
+
+## Ejemplos
+
+| `s`        | Resultado |
+| ---------- | --------- |
+| `"()[]{}"` | `true`    |
+| `"([{}])"` | `true`    |
+| `"(]"`     | `false`   |
+| `"([)]"`   | `false`   |
+| `"(("`     | `false`   |
+| `""`       | `true`    |

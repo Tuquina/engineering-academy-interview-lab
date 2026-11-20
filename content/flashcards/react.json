@@ -1,0 +1,128 @@
+{
+  "id": "react",
+  "title": "React",
+  "description": "Modelo de renderizado, hooks, estado, efectos y performance.",
+  "courseId": "react",
+  "cards": [
+    {
+      "id": "react.render-vs-commit",
+      "front": "¿Qué diferencia hay entre la fase de render y la fase de commit en React?",
+      "back": "Render: React llama a los componentes para calcular el nuevo árbol (debe ser puro, puede repetirse o descartarse). Commit: aplica los cambios mínimos al DOM y después corre los efectos. Un re-render no implica tocar el DOM si el resultado no cambió.",
+      "difficulty": "intermediate",
+      "tags": ["renderizado"],
+      "lessonId": "react.rendering-reconciliation"
+    },
+    {
+      "id": "react.rerender-causes",
+      "front": "¿Qué dispara el re-render de un componente?",
+      "back": "Un cambio de su propio estado (`useState`/`useReducer`), el re-render de su padre (aunque las props sean iguales) o un cambio en un contexto que consume. Cambiar una variable común o un `ref` no re-renderiza.",
+      "difficulty": "basic",
+      "tags": ["renderizado"],
+      "lessonId": "react.rendering-reconciliation"
+    },
+    {
+      "id": "react.keys",
+      "front": "¿Por qué no conviene usar el índice del array como `key` en una lista que se reordena?",
+      "back": "La `key` identifica el elemento entre renders. Con el índice, al insertar o reordenar, React asocia el estado y el DOM al elemento equivocado (inputs con el valor de otra fila). Hay que usar un ID estable del dato.",
+      "difficulty": "basic",
+      "tags": ["listas", "reconciliación"],
+      "lessonId": "react.rendering-reconciliation"
+    },
+    {
+      "id": "react.state-snapshot",
+      "front": "Si hacés `setCount(count + 1)` tres veces seguidas en un handler, ¿cuánto suma?",
+      "back": "Uno: `count` es una instantánea del render actual. Para encadenar actualizaciones se usa la forma funcional `setCount(c => c + 1)`, que recibe el valor pendiente.",
+      "difficulty": "intermediate",
+      "tags": ["estado"],
+      "lessonId": "react.state-effects"
+    },
+    {
+      "id": "react.batching",
+      "front": "¿Qué es el batching automático de React 18+?",
+      "back": "React agrupa varias actualizaciones de estado ocurridas en el mismo tick (handlers, promesas, timeouts) en un único re-render. `flushSync` lo fuerza a aplicar una actualización en forma síncrona cuando hace falta.",
+      "difficulty": "intermediate",
+      "tags": ["estado", "performance"],
+      "lessonId": "react.state-effects"
+    },
+    {
+      "id": "react.effect-purpose",
+      "front": "¿Para qué sirve `useEffect` y para qué NO?",
+      "back": "Para sincronizar el componente con un sistema externo (suscripciones, conexiones, APIs del DOM, timers). No para derivar datos del estado o las props (se calculan durante el render) ni para reaccionar a eventos del usuario (va en el handler).",
+      "difficulty": "intermediate",
+      "tags": ["efectos"],
+      "lessonId": "react.state-effects"
+    },
+    {
+      "id": "react.effect-cleanup",
+      "front": "¿Cuándo se ejecuta la función de limpieza de un efecto?",
+      "back": "Antes de volver a ejecutar el efecto (porque cambió una dependencia) y al desmontar el componente. En desarrollo con Strict Mode React monta, limpia y vuelve a montar una vez para detectar limpiezas faltantes.",
+      "difficulty": "intermediate",
+      "tags": ["efectos"],
+      "lessonId": "react.state-effects"
+    },
+    {
+      "id": "react.stale-closure",
+      "front": "¿Qué es un stale closure en un efecto o un callback?",
+      "back": "Una función que capturó valores de un render anterior y los sigue usando (por ejemplo, un `setInterval` que siempre ve `count = 0`). Se evita declarando bien las dependencias, usando la forma funcional del setter o guardando el último valor en un `ref`.",
+      "difficulty": "advanced",
+      "tags": ["efectos", "closures"],
+      "lessonId": "react.memo-refs-context"
+    },
+    {
+      "id": "react.memo",
+      "front": "`React.memo`, `useMemo` y `useCallback`: ¿qué evita cada uno?",
+      "back": "`memo` evita re-renderizar un componente si sus props son iguales (comparación superficial). `useMemo` cachea un valor calculado entre renders. `useCallback` cachea la identidad de una función. Sólo sirven si algo depende de esa identidad o el cálculo es caro; medir antes de usarlos.",
+      "difficulty": "intermediate",
+      "tags": ["performance"],
+      "lessonId": "react.memo-refs-context"
+    },
+    {
+      "id": "react.context-rerender",
+      "front": "¿Qué problema de performance tiene un Context con un objeto que cambia seguido?",
+      "back": "Todo consumidor re-renderiza cuando cambia el valor (comparado por referencia). Mitigaciones: separar contextos por frecuencia de cambio, memorizar el valor, mover el estado más abajo o usar un store externo con selectores (`useSyncExternalStore`).",
+      "difficulty": "advanced",
+      "tags": ["context", "performance"],
+      "lessonId": "react.memo-refs-context"
+    },
+    {
+      "id": "react.ref",
+      "front": "¿Cuándo usar `useRef` en lugar de `useState`?",
+      "back": "Para valores que deben persistir entre renders pero cuyo cambio no debe re-renderizar: referencias al DOM, IDs de timers, el último valor de algo. No leer ni escribir `ref.current` durante el render.",
+      "difficulty": "basic",
+      "tags": ["refs"],
+      "lessonId": "react.memo-refs-context"
+    },
+    {
+      "id": "react.controlled",
+      "front": "Input controlado vs no controlado.",
+      "back": "Controlado: el valor vive en el estado de React (`value` + `onChange`); permite validar y transformar en cada tecla. No controlado: el valor vive en el DOM y se lee con un `ref` o `FormData` al enviar; menos renders, ideal para formularios simples.",
+      "difficulty": "basic",
+      "tags": ["formularios"],
+      "lessonId": "react.data-forms"
+    },
+    {
+      "id": "react.lifting-state",
+      "front": "¿Qué significa \"levantar el estado\" y cuándo se hace?",
+      "back": "Mover el estado al ancestro común más cercano de los componentes que lo necesitan y pasarlo por props. Se hace cuando dos hermanos deben mostrar o modificar el mismo dato; evita duplicar estado que se desincroniza.",
+      "difficulty": "basic",
+      "tags": ["estado", "composición"],
+      "lessonId": "react.composition"
+    },
+    {
+      "id": "react.server-state",
+      "front": "¿Por qué separar el estado del servidor del estado de la interfaz?",
+      "back": "El estado del servidor es una copia remota que puede quedar vieja: necesita caché, revalidación, deduplicación y manejo de errores (TanStack Query, SWR o Server Components). El estado de UI (modal abierto, tab activa) es local y síncrono. Mezclarlos lleva a efectos frágiles.",
+      "difficulty": "intermediate",
+      "tags": ["datos", "estado"],
+      "lessonId": "react.data-forms"
+    },
+    {
+      "id": "react.testing-library",
+      "front": "¿Qué principio guía Testing Library para testear componentes?",
+      "back": "Testear como lo usa una persona: buscar por rol y texto accesible (`getByRole`), interactuar con `user-event` y verificar lo que se ve. Evitar testear detalles de implementación como el estado interno o nombres de clases.",
+      "difficulty": "basic",
+      "tags": ["testing"],
+      "lessonId": "react.quality"
+    }
+  ]
+}

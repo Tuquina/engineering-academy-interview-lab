@@ -1,0 +1,23 @@
+## Enfoque
+
+Si los intervalos están **ordenados por inicio**, cada uno sólo puede solaparse con el último intervalo ya fusionado:
+
+1. Copio y ordeno por inicio (no muto la entrada).
+2. Recorro: si el inicio actual es ≤ al fin del último del resultado, se solapan y extiendo el fin con
+   `Math.max(fin del último, fin actual)`.
+3. Si no, agrego el intervalo como uno nuevo.
+
+El `Math.max` cubre el caso de un intervalo **contenido** en otro (`[1, 10]` y `[2, 3]`): sin él, el fin se acortaría a 3.
+
+## Complejidad
+
+- Tiempo: O(n log n) por el ordenamiento; el recorrido es O(n).
+- Memoria: O(n) para la copia y el resultado.
+
+## Problemas relacionados
+
+- **Insertar un intervalo** en una lista ya fusionada: tres tramos (antes, solapados, después) en O(n).
+- **Mínimo de salas de reunión**: ordenar inicios y fines por separado (o un min-heap de fines) y contar cuántas
+  reuniones están abiertas a la vez.
+- **En SQL**, dos rangos se superponen si `a.start < b.end AND b.start < a.end`; PostgreSQL además tiene tipos de rango
+  y exclusion constraints para impedir reservas superpuestas.

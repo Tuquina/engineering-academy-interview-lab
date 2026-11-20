@@ -1,0 +1,109 @@
+---
+title: "Patrones de algoritmos para entrevistas"
+description: "Cómo reconocer cada patrón (dos punteros, ventana, BFS, DP…) y su plantilla en TypeScript."
+order: 9
+tags: ["algoritmos", "live coding", "patrones"]
+relatedLessons: []
+---
+
+## Cómo encarar el problema
+
+1. Repetir el enunciado y preguntar: tamaño de la entrada, duplicados, negativos, vacío, ¿ordenado?
+2. Resolver un ejemplo a mano.
+3. Decir la solución ingenua y su complejidad.
+4. Buscar el patrón (tabla de abajo) y optimizar.
+5. Codificar explicando; probar con el ejemplo y los bordes; analizar tiempo y memoria.
+
+## Reconocer el patrón
+
+| Si el problema dice…                                          | Pensá en              |
+| ------------------------------------------------------------- | --------------------- |
+| "par que suma X", array ordenado, palíndromo                  | Dos punteros          |
+| "subarray/substring contiguo más largo/corto que cumple…"     | Ventana deslizante    |
+| "¿existe…?", "contar ocurrencias", "agrupar"                  | Hash map / set        |
+| "suma de un rango", "subarrays que suman k"                   | Sumas prefijas        |
+| array ordenado, "mínimo valor que cumple", respuesta monótona | Búsqueda binaria      |
+| "k más grandes/frecuentes", "mediana en un stream"            | Heap                  |
+| paréntesis, "próximo mayor", deshacer                         | Pila (monótona)       |
+| intervalos, reuniones, solapamientos                          | Ordenar + recorrer    |
+| grilla, islas, camino más corto sin pesos                     | BFS / DFS             |
+| dependencias, orden de tareas                                 | Orden topológico      |
+| "todas las combinaciones/permutaciones"                       | Backtracking          |
+| "cantidad de formas", "mínimo costo", decisiones encadenadas  | Programación dinámica |
+
+## Plantillas
+
+```ts
+// Dos punteros (array ordenado)
+let lo = 0,
+  hi = nums.length - 1;
+while (lo < hi) {
+  const sum = nums[lo]! + nums[hi]!;
+  if (sum === target) return [lo, hi];
+  if (sum < target) lo++;
+  else hi--;
+}
+
+// Ventana deslizante
+const seen = new Map<string, number>();
+let left = 0,
+  best = 0;
+for (let right = 0; right < s.length; right++) {
+  const ch = s[right]!;
+  if (seen.has(ch) && seen.get(ch)! >= left) left = seen.get(ch)! + 1;
+  seen.set(ch, right);
+  best = Math.max(best, right - left + 1);
+}
+
+// Búsqueda binaria: primer índice que cumple ok(i)
+let lo2 = 0,
+  hi2 = n; // ok(n) se asume verdadero
+while (lo2 < hi2) {
+  const mid = (lo2 + hi2) >> 1;
+  if (ok(mid)) hi2 = mid;
+  else lo2 = mid + 1;
+}
+
+// BFS en grilla
+const queue: [number, number][] = [[sr, sc]];
+const visited = new Set([`${sr},${sc}`]);
+for (let head = 0; head < queue.length; head++) {
+  const [r, c] = queue[head]!;
+  for (const [dr, dc] of [
+    [1, 0],
+    [-1, 0],
+    [0, 1],
+    [0, -1],
+  ] as const) {
+    const key = `${r + dr},${c + dc}`;
+    if (inside(r + dr, c + dc) && !visited.has(key)) {
+      visited.add(key);
+      queue.push([r + dr, c + dc]);
+    }
+  }
+}
+
+// Backtracking
+function backtrack(path: number[], start: number) {
+  result.push([...path]);
+  for (let i = start; i < nums.length; i++) {
+    path.push(nums[i]!);
+    backtrack(path, i + 1);
+    path.pop();
+  }
+}
+
+// DP bottom-up (monedas: mínima cantidad)
+const dp = new Array(amount + 1).fill(Infinity);
+dp[0] = 0;
+for (let a = 1; a <= amount; a++)
+  for (const coin of coins) if (coin <= a) dp[a] = Math.min(dp[a], dp[a - coin] + 1);
+```
+
+## Bordes que siempre hay que probar
+
+- Entrada vacía, un solo elemento, todos iguales.
+- Números negativos, ceros, desbordes (`Number.MAX_SAFE_INTEGER`).
+- Duplicados y orden estable.
+- Strings con mayúsculas, espacios o caracteres Unicode.
+- Grafos con ciclos o desconectados.

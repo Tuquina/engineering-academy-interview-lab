@@ -49,7 +49,11 @@ type Phase =
   | { kind: "running"; plan: SessionPlan; startedAt: number }
   | { kind: "summary"; record: SessionRecord };
 
+const RANDOM_ALGORITHMS = "random:algorithms";
+const RANDOM_PRACTICAL = "random:practical";
+
 const DEFAULT_SECTIONS: MockSections = {
+  behavioral: true,
   quick: true,
   deepDive: true,
   ai: true,
@@ -82,14 +86,22 @@ export function InterviewSession(props: InterviewSessionProps) {
 
   const start = () => {
     try {
+      // "Al azar" puede acotarse a un tipo de problema de live coding.
+      const pool =
+        challengeId === RANDOM_ALGORITHMS
+          ? props.codeChallenges.filter((c) => c.track === "algorithms")
+          : challengeId === RANDOM_PRACTICAL
+            ? props.codeChallenges.filter((c) => c.track === "practical")
+            : props.codeChallenges;
+      const chosen = challengeId.startsWith("random:") ? undefined : challengeId || undefined;
       const plan = buildSession(
         mode,
-        { minutes, areas, challengeId: challengeId || undefined, sections },
+        { minutes, areas, challengeId: chosen, sections },
         {
           questions: props.questions,
           weakQuestionIds: weakIds,
           systemDesignChallengeIds: props.systemDesign.map((c) => c.data.id),
-          codeChallengeIds: props.codeChallenges.map((c) => c.id),
+          codeChallengeIds: pool.map((c) => c.id),
         },
         Math.random,
         crypto.randomUUID(),
@@ -280,7 +292,7 @@ export function InterviewSession(props: InterviewSessionProps) {
         <fieldset>
           <legend className="text-foreground mb-2 text-sm font-medium">Áreas (ninguna = todas)</legend>
           <div className="flex flex-wrap gap-1.5">
-            {INTERVIEW_AREAS.filter((a) => a !== "ai-engineering").map((area) => {
+            {INTERVIEW_AREAS.filter((a) => a !== "ai-engineering" && a !== "behavioral").map((area) => {
               const active = areas.includes(area);
               return (
                 <button
@@ -303,7 +315,7 @@ export function InterviewSession(props: InterviewSessionProps) {
         </fieldset>
       )}
 
-      {(mode === "system-design" || mode === "live-coding") && (
+      {mode === "system-design" && (
         <label className="text-muted flex max-w-md flex-col gap-1 text-sm">
           Problema
           <select
@@ -312,13 +324,39 @@ export function InterviewSession(props: InterviewSessionProps) {
             className="border-border bg-background text-foreground rounded-md border px-2 py-1.5 text-sm"
           >
             <option value="">Al azar</option>
-            {(mode === "system-design"
-              ? props.systemDesign.map((c) => ({ id: c.data.id, title: c.data.title }))
-              : props.codeChallenges.map((c) => ({ id: c.id, title: c.title }))
-            ).map((c) => (
-              <option key={c.id} value={c.id}>
-                {c.title}
+            {props.systemDesign.map((c) => (
+              <option key={c.data.id} value={c.data.id}>
+                {c.data.title}
               </option>
+            ))}
+          </select>
+        </label>
+      )}
+
+      {mode === "live-coding" && (
+        <label className="text-muted flex max-w-md flex-col gap-1 text-sm">
+          Problema
+          <select
+            value={challengeId}
+            onChange={(e) => setChallengeId(e.target.value)}
+            className="border-border bg-background text-foreground rounded-md border px-2 py-1.5 text-sm"
+          >
+            <option value="">Al azar (cualquiera)</option>
+            <option value={RANDOM_ALGORITHMS}>Al azar: algoritmos (estilo LeetCode)</option>
+            <option value={RANDOM_PRACTICAL}>Al azar: problemas prácticos de backend</option>
+            {(["algorithms", "practical"] as const).map((track) => (
+              <optgroup
+                key={track}
+                label={track === "algorithms" ? "Algoritmos y estructuras de datos" : "Problemas prácticos"}
+              >
+                {props.codeChallenges
+                  .filter((c) => c.track === track)
+                  .map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.title}
+                    </option>
+                  ))}
+              </optgroup>
             ))}
           </select>
         </label>

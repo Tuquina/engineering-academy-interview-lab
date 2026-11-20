@@ -1,0 +1,79 @@
+---
+title: "Patrones de diseño y principios"
+description: "SOLID, los patrones GoF más preguntados y los patrones de arquitectura, con cuándo usarlos y cuándo no."
+order: 10
+tags: ["patrones", "solid", "arquitectura"]
+relatedLessons:
+  [
+    "software-architecture.principles",
+    "software-architecture.design-patterns",
+    "software-architecture.architecture-styles",
+    "software-architecture.distributed-patterns",
+  ]
+---
+
+## SOLID
+
+| Principio             | Idea                                     | Señal de que se viola                            |
+| --------------------- | ---------------------------------------- | ------------------------------------------------ |
+| Single Responsibility | Una razón para cambiar                   | Una clase toca HTTP, reglas y SQL                |
+| Open/Closed           | Extender sin modificar                   | Un `switch` por tipo que crece en cada feature   |
+| Liskov Substitution   | Un subtipo cumple el contrato de su base | `throw new Error("no soportado")` en un override |
+| Interface Segregation | Interfaces chicas por cliente            | Implementaciones con métodos vacíos              |
+| Dependency Inversion  | La política no depende del detalle       | El dominio importa el driver de la base          |
+
+Otros: **DRY** (sin duplicar conocimiento, no sólo código), **KISS**, **YAGNI**, composición sobre herencia, ley de Demeter.
+
+## Creacionales
+
+| Patrón           | Úsalo cuando…                                    | Cuidado con…                                              |
+| ---------------- | ------------------------------------------------ | --------------------------------------------------------- |
+| Factory Method   | La creación depende de datos o configuración     | Fábricas para objetos triviales                           |
+| Abstract Factory | Hay familias de objetos que deben combinarse     | Sobreingeniería con una sola familia                      |
+| Builder          | Objetos con muchos parámetros opcionales o pasos | En TS, un objeto de opciones suele alcanzar               |
+| Singleton        | Un recurso único compartido (pool de conexiones) | Estado global oculto, tests difíciles: preferir inyección |
+
+## Estructurales
+
+| Patrón    | Qué hace                                        | Ejemplo                                                |
+| --------- | ----------------------------------------------- | ------------------------------------------------------ |
+| Adapter   | Traduce una interfaz a la que espera el cliente | Envolver un SDK de pagos en tu puerto `PaymentGateway` |
+| Facade    | Interfaz simple sobre un subsistema complejo    | `checkout()` que coordina stock, pago y envío          |
+| Decorator | Agrega comportamiento manteniendo la interfaz   | Repositorio con caché o logging alrededor              |
+| Proxy     | Controla el acceso al objeto real               | Lazy loading, control de permisos, caché remota        |
+| Composite | Trata igual a una hoja y a un grupo             | Árbol de menús, permisos anidados                      |
+
+## De comportamiento
+
+| Patrón                  | Qué hace                                          | Ejemplo                                  |
+| ----------------------- | ------------------------------------------------- | ---------------------------------------- |
+| Strategy                | Algoritmos intercambiables detrás de una interfaz | Cálculo de envío por proveedor           |
+| State                   | El comportamiento cambia con el estado interno    | Pedido: creado → pagado → enviado        |
+| Observer / Pub-Sub      | Notificar a interesados sin acoplarse a ellos     | Eventos de dominio, `EventEmitter`       |
+| Command                 | Encapsular una acción como objeto                 | Colas de trabajos, deshacer/rehacer      |
+| Chain of Responsibility | Pasar la request por una cadena de manejadores    | Middlewares HTTP                         |
+| Template Method         | Esqueleto fijo con pasos variables                | Importadores CSV/JSON con el mismo flujo |
+| Iterator                | Recorrer sin exponer la estructura                | Generadores, `for…of`, paginación        |
+
+## Patrones de arquitectura y distribuidos
+
+| Patrón                   | Resuelve                                                      |
+| ------------------------ | ------------------------------------------------------------- |
+| Capas / Hexagonal        | Separar dominio de infraestructura; testear sin base ni HTTP  |
+| Repository               | Persistencia detrás de una interfaz orientada al dominio      |
+| Unit of Work             | Confirmar varios cambios en una sola transacción              |
+| CQRS                     | Modelos separados para escribir y para leer                   |
+| Event Sourcing           | El estado se reconstruye a partir de eventos inmutables       |
+| Transactional Outbox     | Guardar el dato y el evento en la misma transacción           |
+| Saga                     | Transacciones largas entre servicios con compensaciones       |
+| Circuit Breaker          | Dejar de llamar a una dependencia que está fallando           |
+| Retry + backoff + jitter | Reintentar fallas transitorias sin sincronizar a los clientes |
+| Bulkhead                 | Aislar recursos para que una falla no consuma todo            |
+| API Gateway / BFF        | Punto de entrada único / backend específico por cliente       |
+| Strangler Fig            | Migrar un sistema legado de a poco                            |
+
+## Cómo responder "¿qué patrón usarías?"
+
+1. Describir el problema concreto (qué cambia, qué se repite, qué falla).
+2. Nombrar el patrón y cómo se vería en el código.
+3. Decir el costo (más indirección, más clases) y la alternativa más simple.

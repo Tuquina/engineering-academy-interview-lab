@@ -67,6 +67,62 @@
       "difficulty": "basic",
       "tags": ["observabilidad"],
       "lessonId": null
+    },
+    {
+      "id": "node.streams-pipeline",
+      "front": "¿Por qué usar `stream.pipeline` en lugar de encadenar `.pipe()`?",
+      "back": "`pipeline` propaga errores de cualquier etapa, destruye todos los streams si algo falla (sin fugas de descriptores) y tiene una versión con promesas en `node:stream/promises`. Con `.pipe()` un error intermedio no se propaga solo.",
+      "difficulty": "intermediate",
+      "tags": ["streams"],
+      "lessonId": "nodejs.streams-events"
+    },
+    {
+      "id": "node.worker-threads",
+      "front": "`worker_threads` vs `cluster`.",
+      "back": "`worker_threads`: hilos dentro del mismo proceso para trabajo CPU-bound, con memoria compartible (`SharedArrayBuffer`). `cluster` (o varias réplicas): varios procesos que comparten el puerto para escalar el manejo de requests en varios núcleos.",
+      "difficulty": "intermediate",
+      "tags": ["concurrencia"],
+      "lessonId": "nodejs.workers-memory"
+    },
+    {
+      "id": "node.memory-leak",
+      "front": "Causas típicas de memory leaks en Node.js.",
+      "back": "Cachés en memoria sin límite, listeners que nunca se quitan, closures que retienen objetos grandes, timers que no se limpian y Maps usados como registro global. Se diagnostican comparando heap snapshots en el tiempo.",
+      "difficulty": "advanced",
+      "tags": ["memoria"],
+      "lessonId": "nodejs.workers-memory"
+    },
+    {
+      "id": "node.graceful-shutdown",
+      "front": "¿Qué es un graceful shutdown en un servidor Node.js?",
+      "back": "Al recibir `SIGTERM`: dejar de aceptar conexiones (`server.close()`), terminar las requests en curso, cerrar pools de base y consumidores de colas, y salir antes de un timeout. Evita cortar operaciones a mitad en cada despliegue.",
+      "difficulty": "intermediate",
+      "tags": ["producción"],
+      "lessonId": "nodejs.performance-scaling"
+    },
+    {
+      "id": "node.jwt-vs-session",
+      "front": "Sesiones con cookie vs JWT: compromisos.",
+      "back": "Sesión en servidor: revocación inmediata y token opaco, pero requiere almacenamiento compartido. JWT: autocontenido y sin consulta por request, pero no se revoca antes de expirar sin una lista negra. Para apps web, cookie `HttpOnly` + `Secure` + `SameSite` en ambos casos.",
+      "difficulty": "intermediate",
+      "tags": ["seguridad", "auth"],
+      "lessonId": "nodejs.auth-security"
+    },
+    {
+      "id": "node.password-hashing",
+      "front": "¿Cómo se guardan las contraseñas?",
+      "back": "Con una función de hashing lenta y con sal: Argon2id, scrypt o bcrypt. Nunca en texto plano ni con SHA-256 solo (demasiado rápido para fuerza bruta). Comparar en tiempo constante y limitar intentos de login.",
+      "difficulty": "basic",
+      "tags": ["seguridad"],
+      "lessonId": "nodejs.auth-security"
+    },
+    {
+      "id": "node.http-status",
+      "front": "400, 401, 403, 404, 409, 422 y 429: ¿qué significa cada uno?",
+      "back": "400: request mal formada. 401: no autenticado. 403: autenticado pero sin permiso. 404: no existe. 409: conflicto con el estado actual (duplicado, versión vieja). 422: bien formada pero inválida semánticamente. 429: demasiadas requests (con `Retry-After`).",
+      "difficulty": "basic",
+      "tags": ["http", "apis"],
+      "lessonId": "nodejs.http-apis"
     }
   ]
 }

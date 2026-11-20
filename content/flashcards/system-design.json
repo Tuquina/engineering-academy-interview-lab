@@ -1,0 +1,128 @@
+{
+  "id": "system-design",
+  "title": "System Design",
+  "description": "Escalabilidad, consistencia, caching, mensajería y estimaciones.",
+  "courseId": "system-design",
+  "cards": [
+    {
+      "id": "sd.framework",
+      "front": "¿Qué pasos sigue una entrevista de system design bien llevada?",
+      "back": "1) Aclarar requerimientos funcionales y no funcionales. 2) Estimar escala (QPS, almacenamiento). 3) Definir la API. 4) Modelo de datos. 5) Diseño de alto nivel. 6) Profundizar en los cuellos de botella. 7) Discutir compromisos, fallas y monitoreo.",
+      "difficulty": "basic",
+      "tags": ["entrevista"],
+      "lessonId": "system-design.introduction"
+    },
+    {
+      "id": "sd.qps-estimate",
+      "front": "10 millones de usuarios activos diarios hacen 20 requests por día. ¿Cuántas requests por segundo son?",
+      "back": "200 M / 86.400 s ≈ 2.300 QPS promedio. Para el pico se suele multiplicar por 2–3 (≈ 5–7 mil QPS). Redondear (1 día ≈ 10⁵ s) alcanza para decidir arquitectura.",
+      "difficulty": "basic",
+      "tags": ["estimaciones"],
+      "lessonId": "system-design.introduction"
+    },
+    {
+      "id": "sd.latency-numbers",
+      "front": "Órdenes de magnitud: memoria, SSD, red en el mismo datacenter y entre continentes.",
+      "back": "Leer de memoria: ~100 ns. Lectura aleatoria de SSD: ~100 µs. Round trip en el mismo datacenter: ~0,5 ms. Round trip entre continentes: ~100–150 ms. Conclusión: evitar llamadas de red en serie y acercar los datos al usuario.",
+      "difficulty": "intermediate",
+      "tags": ["estimaciones", "latencia"],
+      "lessonId": "system-design.scalability"
+    },
+    {
+      "id": "sd.vertical-horizontal",
+      "front": "Escalado vertical vs horizontal.",
+      "back": "Vertical: una máquina más grande; simple pero con techo y punto único de falla. Horizontal: más instancias detrás de un balanceador; requiere servicios sin estado (sesiones y archivos afuera) y datos particionados o replicados.",
+      "difficulty": "basic",
+      "tags": ["escalabilidad"],
+      "lessonId": "system-design.scalability"
+    },
+    {
+      "id": "sd.cap",
+      "front": "¿Qué dice el teorema CAP y cómo se aplica en la práctica?",
+      "back": "Ante una partición de red, un sistema distribuido debe elegir entre consistencia (rechazar o esperar) y disponibilidad (responder con datos posiblemente viejos). Sin partición, la decisión real es latencia vs consistencia (PACELC). Se elige por operación: pagos CP, feeds AP.",
+      "difficulty": "intermediate",
+      "tags": ["consistencia"],
+      "lessonId": "system-design.consistency"
+    },
+    {
+      "id": "sd.replication-lag",
+      "front": "¿Qué problema trae leer de una réplica justo después de escribir?",
+      "back": "Por el lag de replicación el usuario puede no ver su propio cambio. Soluciones: read-your-writes (leer del primario los datos recién modificados por ese usuario por unos segundos), leer del primario en flujos críticos o esperar a que la réplica alcance cierta posición.",
+      "difficulty": "intermediate",
+      "tags": ["replicación"],
+      "lessonId": "system-design.consistency"
+    },
+    {
+      "id": "sd.sharding-key",
+      "front": "¿Qué hace buena a una clave de sharding?",
+      "back": "Reparte carga y datos en forma pareja (alta cardinalidad, sin hot spots) y hace que las consultas frecuentes toquen un solo shard. `tenant_id` o `user_id` suelen funcionar; una fecha concentra todas las escrituras en el shard actual.",
+      "difficulty": "advanced",
+      "tags": ["particionado"],
+      "lessonId": "system-design.scalability"
+    },
+    {
+      "id": "sd.consistent-hashing",
+      "front": "¿Qué resuelve el consistent hashing?",
+      "back": "Con `hash(key) % N`, cambiar N reubica casi todas las claves. Con un anillo de hashing (y nodos virtuales), agregar o quitar un nodo mueve sólo ~1/N de las claves. Se usa en cachés distribuidas y bases particionadas.",
+      "difficulty": "advanced",
+      "tags": ["particionado", "caching"],
+      "lessonId": "system-design.scalability"
+    },
+    {
+      "id": "sd.cache-invalidation",
+      "front": "Cache-aside, write-through y write-behind.",
+      "back": "Cache-aside: la app lee de la caché y, si falta, de la base y la carga; al escribir invalida. Write-through: se escribe en caché y base en la misma operación. Write-behind: se escribe en caché y se persiste luego en forma asíncrona (rápido pero puede perder datos).",
+      "difficulty": "intermediate",
+      "tags": ["caching"],
+      "lessonId": "system-design.scalability"
+    },
+    {
+      "id": "sd.delivery-semantics",
+      "front": "At-most-once, at-least-once y exactly-once.",
+      "back": "At-most-once: puede perder mensajes, nunca duplica. At-least-once: nunca pierde pero puede duplicar (lo más común). Exactly-once de punta a punta en la práctica es at-least-once + consumidores idempotentes (deduplicación por ID).",
+      "difficulty": "intermediate",
+      "tags": ["mensajería"],
+      "lessonId": "system-design.messaging-resilience"
+    },
+    {
+      "id": "sd.queue-vs-log",
+      "front": "Cola de mensajes (SQS, RabbitMQ) vs log de eventos (Kafka).",
+      "back": "Cola: cada mensaje lo procesa un consumidor y se borra al confirmarlo; ideal para repartir trabajo. Log: los eventos se retienen, cada grupo de consumidores lleva su offset y puede releer; ideal para varios consumidores independientes, replay y orden por partición.",
+      "difficulty": "intermediate",
+      "tags": ["mensajería"],
+      "lessonId": "system-design.messaging-resilience"
+    },
+    {
+      "id": "sd.dlq",
+      "front": "¿Para qué sirve una dead-letter queue?",
+      "back": "Para apartar los mensajes que fallan después de N reintentos, así no bloquean la cola ni se reintentan para siempre. Hay que monitorearla, alertar y tener una forma de reprocesar después de corregir la causa.",
+      "difficulty": "basic",
+      "tags": ["mensajería", "resiliencia"],
+      "lessonId": "system-design.messaging-resilience"
+    },
+    {
+      "id": "sd.sla-slo",
+      "front": "SLI, SLO y SLA.",
+      "back": "SLI: la métrica medida (por ejemplo, % de requests exitosas en < 300 ms). SLO: el objetivo interno para ese SLI (99,9 % en 30 días). SLA: el compromiso contractual con consecuencias, normalmente más laxo que el SLO. 99,9 % mensual son ~43 minutos de error budget.",
+      "difficulty": "intermediate",
+      "tags": ["confiabilidad"],
+      "lessonId": "system-design.messaging-resilience"
+    },
+    {
+      "id": "sd.multi-tenant-isolation",
+      "front": "Tres modelos de aislamiento multi-tenant.",
+      "back": "1) Base compartida con columna `tenant_id` (barato, requiere filtrar siempre; RLS ayuda). 2) Un schema por tenant. 3) Una base por tenant (mayor aislamiento y costo). Se pueden mezclar: tenants grandes aislados, el resto compartido.",
+      "difficulty": "intermediate",
+      "tags": ["multi-tenant"],
+      "lessonId": "system-design.multi-tenant"
+    },
+    {
+      "id": "sd.cdn",
+      "front": "¿Qué gana un sistema al poner una CDN adelante?",
+      "back": "Sirve contenido estático (y respuestas cacheables) desde nodos cercanos al usuario: menos latencia, menos carga en el origen y absorción de picos. Hay que definir bien `Cache-Control` y cómo se invalida o versiona el contenido.",
+      "difficulty": "basic",
+      "tags": ["caching", "latencia"],
+      "lessonId": "system-design.scalability"
+    }
+  ]
+}

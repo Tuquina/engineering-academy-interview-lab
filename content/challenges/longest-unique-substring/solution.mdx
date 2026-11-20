@@ -1,0 +1,23 @@
+## Enfoque: ventana deslizante
+
+Mantengo una ventana `[left, right]` que **siempre** cumple la condición (sin repetidos):
+
+1. Avanzo `right` y agrego `s[right]`.
+2. Si ese carácter ya aparece **dentro** de la ventana, muevo `left` justo después de su aparición anterior.
+3. Actualizo el máximo con el tamaño de la ventana.
+
+Un `Map` guarda la última posición de cada carácter, así salto `left` directamente en lugar de avanzarlo de a uno.
+
+El detalle que más falla en entrevistas: la última posición puede estar **fuera** de la ventana. En `"abba"`, al llegar
+a la segunda `a` la ventana ya empieza en la segunda `b`; si moviera `left` a la posición de la primera `a` + 1,
+retrocedería. Por eso la condición `previous >= left`.
+
+## Complejidad
+
+- Tiempo: O(n): cada carácter entra una vez a la ventana y `left` sólo avanza.
+- Memoria: O(min(n, tamaño del alfabeto)).
+
+## Variante: a lo sumo k caracteres distintos
+
+Misma ventana, pero con un mapa de frecuencias: mientras haya más de k claves, avanzo `left` decrementando su
+frecuencia y borrando las que llegan a cero.

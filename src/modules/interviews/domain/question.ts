@@ -13,6 +13,9 @@ export const INTERVIEW_AREAS = [
   "system-design",
   "databases",
   "ai-engineering",
+  "algorithms",
+  "devops-security",
+  "behavioral",
 ] as const;
 
 export type InterviewArea = (typeof INTERVIEW_AREAS)[number];
@@ -26,6 +29,9 @@ export const AREA_LABELS: Readonly<Record<InterviewArea, string>> = {
   "system-design": "System Design",
   databases: "Bases de datos",
   "ai-engineering": "AI Engineering",
+  algorithms: "Algoritmos",
+  "devops-security": "Calidad, DevOps y seguridad",
+  behavioral: "Comportamiento",
 };
 
 /** `quick`: respuesta corta (1–3 min). `deep-dive`: razonamiento y seguimiento técnico. */

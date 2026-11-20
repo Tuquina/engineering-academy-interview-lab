@@ -1,0 +1,47 @@
+---
+id: challenge.coin-change
+kind: code
+title: "Mínima cantidad de monedas"
+summary: "Programación dinámica clásica: por qué el algoritmo greedy falla y cómo definir el estado."
+difficulty: intermediate
+durationMinutes: 30
+technologies: ["algoritmos", "typescript"]
+topics: ["programación dinámica"]
+skills: ["definir estado y transición", "análisis de complejidad"]
+interviewType: live-coding
+order: 31
+constraints:
+  - "1 ≤ coins.length ≤ 12; cada moneda es un entero positivo y hay cantidad ilimitada de cada una."
+  - "0 ≤ amount ≤ 10⁴."
+acceptanceCriteria:
+  - "Devuelve la mínima cantidad de monedas que suman exactamente `amount`."
+  - "Devuelve -1 si no se puede formar el monto."
+  - "Para `amount = 0` devuelve 0."
+hints:
+  - "Probá el greedy (tomar siempre la moneda más grande) con monedas [1, 3, 4] y monto 6. ¿Da el óptimo?"
+  - "Definí `dp[a]` = mínima cantidad de monedas para sumar exactamente `a`. ¿Cuánto vale `dp[0]`?"
+  - "`dp[a] = min(dp[a - c] + 1)` para cada moneda `c ≤ a`. Usá `Infinity` para los montos inalcanzables."
+followUpQuestions:
+  - "¿Cómo contarías la cantidad de combinaciones distintas que suman el monto?"
+  - "¿Para qué sistemas de monedas el greedy sí es óptimo?"
+  - "¿Cómo reconstruirías qué monedas usar, no sólo cuántas?"
+relatedLessons: []
+---
+
+## Enunciado
+
+Dadas las denominaciones `coins` (cantidad ilimitada de cada una) y un monto `amount`, devolvé la **mínima cantidad de
+monedas** que suman exactamente `amount`, o `-1` si no es posible.
+
+```ts
+export function coinChange(coins: readonly number[], amount: number): number;
+```
+
+## Ejemplos
+
+| `coins`     | `amount` | Resultado | Por qué                        |
+| ----------- | -------- | --------- | ------------------------------ |
+| `[1, 2, 5]` | `11`     | `3`       | 5 + 5 + 1                      |
+| `[2]`       | `3`      | `-1`      | imposible                      |
+| `[1]`       | `0`      | `0`       | ninguna moneda                 |
+| `[1, 3, 4]` | `6`      | `2`       | 3 + 3 (el greedy da 4 + 1 + 1) |
