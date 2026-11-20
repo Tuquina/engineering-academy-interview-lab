@@ -5,6 +5,7 @@ import {
   Background,
   BaseEdge,
   Controls,
+  EdgeLabelRenderer,
   getBezierPath,
   Handle,
   MarkerType,
@@ -28,10 +29,20 @@ import {
 } from "../domain/diagram";
 import { NODE_KIND_VISUALS } from "./diagram-visuals";
 
-const CELL_W = 260;
-const CELL_H = 120;
+/**
+ * Grilla lógica → píxeles. El espacio horizontal entre bloques (CELL_W - NODE_W) tiene que alojar las etiquetas de
+ * las conexiones sin que los bloques las tapen; por eso las etiquetas tienen un ancho máximo y se parten en líneas.
+ */
+const CELL_W = 330;
+const CELL_H = 140;
 const NODE_W = 180;
 const BOUNDARY_PAD = 28;
+const LABEL_MAX_W = CELL_W - NODE_W - 24;
+/**
+ * Zoom mínimo al ajustar el diagrama al contenedor: por debajo de este valor el texto deja de leerse. Si el diagrama
+ * no entra, se muestra a este tamaño y se recorre arrastrando o con los controles.
+ */
+const MIN_READABLE_ZOOM = 0.8;
 
 type Side = "top" | "right" | "bottom" | "left";
 const SIDES: Record<Side, Position> = {
@@ -106,6 +117,8 @@ interface FlowData extends Record<string, unknown> {
   duration: number;
   /** Retraso de inicio: dentro de un paso, las conexiones se animan en el orden en que aparecen. */
   delay: number;
+  /** Atenuada porque el paso actual resalta otras conexiones. */
+  dimmed: boolean;
 }
 
 /**
@@ -123,8 +136,6 @@ function FlowEdge({
   markerEnd,
   style,
   label,
-  labelStyle,
-  labelBgStyle,
   data,
 }: EdgeProps<Edge<FlowData>>) {
   const [path, labelX, labelY] = getBezierPath({
@@ -135,20 +146,25 @@ function FlowEdge({
     sourcePosition,
     targetPosition,
   });
+  // Las etiquetas horizontales tienen el ancho del espacio entre bloques; las verticales, un poco más.
+  const horizontal = Math.abs(targetX - sourceX) >= Math.abs(targetY - sourceY);
   return (
     <>
-      <BaseEdge
-        id={id}
-        path={path}
-        markerEnd={markerEnd}
-        style={style}
-        label={label}
-        labelX={labelX}
-        labelY={labelY}
-        labelStyle={labelStyle}
-        labelShowBg
-        labelBgStyle={labelBgStyle}
-      />
+      <BaseEdge id={id} path={path} markerEnd={markerEnd} style={style} />
+      {label && (
+        <EdgeLabelRenderer>
+          <div
+            className="border-border bg-surface text-foreground nodrag nopan pointer-events-none absolute rounded border px-1.5 py-0.5 text-center text-[11px] leading-tight shadow-sm"
+            style={{
+              transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)`,
+              maxWidth: horizontal ? LABEL_MAX_W : LABEL_MAX_W + 40,
+              opacity: data?.dimmed ? 0.3 : 1,
+            }}
+          >
+            {label}
+          </div>
+        </EdgeLabelRenderer>
+      )}
       {data?.flowing && (
         <circle r={4.5} fill={data.color} stroke="var(--surface)" strokeWidth={1.5} aria-hidden>
           <animateMotion
@@ -306,6 +322,7 @@ export function InteractiveDiagram({ diagram }: { diagram: ArchitectureDiagram }
             color: style.stroke,
             duration: edge.kind === "async" ? 2.6 : 1.6,
             delay: order > 0 ? order * 0.7 : 0,
+            dimmed,
           },
           animated: style.animated && !dimmed,
           markerEnd: { type: MarkerType.ArrowClosed, color: style.stroke },
@@ -315,8 +332,6 @@ export function InteractiveDiagram({ diagram }: { diagram: ArchitectureDiagram }
             strokeWidth: emphasized ? 3 : 1.6,
             opacity: dimmed ? 0.25 : 1,
           },
-          labelStyle: { fill: "var(--foreground)", fontSize: 11 },
-          labelBgStyle: { fill: "var(--surface)" },
         };
       }),
     [diagram.edges, byId, highlight, step, animate],
@@ -344,7 +359,7 @@ export function InteractiveDiagram({ diagram }: { diagram: ArchitectureDiagram }
         ref={containerRef}
         className={cn(
           "border-border bg-background relative overflow-hidden rounded-lg border",
-          fullscreen ? "h-screen" : "h-[26rem]",
+          fullscreen ? "h-screen" : "h-[30rem] lg:h-[36rem]",
         )}
       >
         <ReactFlow
@@ -354,7 +369,7 @@ export function InteractiveDiagram({ diagram }: { diagram: ArchitectureDiagram }
           edgeTypes={edgeTypes}
           colorMode={theme}
           fitView
-          fitViewOptions={{ padding: 0.15 }}
+          fitViewOptions={{ padding: 0.08, minZoom: MIN_READABLE_ZOOM, maxZoom: 1.15 }}
           minZoom={0.3}
           maxZoom={2}
           nodesDraggable={false}
@@ -417,7 +432,10 @@ export function InteractiveDiagram({ diagram }: { diagram: ArchitectureDiagram }
               {DIAGRAM_EDGE_LABELS[kind]}
             </span>
           ))}
-        <span>Hacé clic en un elemento para ver su responsabilidad.</span>
+        <span>
+          Hacé clic en un elemento para ver su responsabilidad. Si el diagrama no entra en la pantalla,
+          arrastralo o usá los controles de zoom.
+        </span>
       </figcaption>
 
       {diagram.steps.length > 0 && (
