@@ -1,0 +1,44 @@
+{
+  "id": "full-stack-typescript",
+  "slug": "full-stack-typescript",
+  "title": "Full Stack Engineer con TypeScript",
+  "description": "El stack más pedido en búsquedas full stack: TypeScript de punta a punta con React, Next.js, Node.js y PostgreSQL, más System Design.",
+  "audience": "Desarrolladores que buscan un puesto full stack generalista en productos web.",
+  "order": 1,
+  "stages": [
+    {
+      "id": "fs.typescript",
+      "title": "TypeScript",
+      "description": "Un lenguaje para el frontend y el backend.",
+      "goals": ["Compartir tipos y validación entre cliente y servidor"],
+      "items": [{ "kind": "course", "courseId": "typescript" }]
+    },
+    {
+      "id": "fs.frontend",
+      "title": "React y Next.js",
+      "description": "Interfaces, estado, datos y el App Router.",
+      "goals": ["Construir pantallas rápidas con datos del servidor"],
+      "items": [
+        { "kind": "course", "courseId": "react" },
+        { "kind": "course", "courseId": "nextjs" }
+      ]
+    },
+    {
+      "id": "fs.backend",
+      "title": "Node.js y PostgreSQL",
+      "description": "APIs, autenticación, base de datos relacional y concurrencia.",
+      "goals": ["Diseñar APIs seguras sobre una base bien modelada"],
+      "items": [
+        { "kind": "course", "courseId": "nodejs" },
+        { "kind": "course", "courseId": "postgresql" }
+      ]
+    },
+    {
+      "id": "fs.design",
+      "title": "System Design",
+      "description": "Escalabilidad, consistencia, mensajería y la entrevista de diseño.",
+      "goals": ["Resolver un caso de System Design de punta a punta"],
+      "items": [{ "kind": "course", "courseId": "system-design" }]
+    }
+  ]
+}

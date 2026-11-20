@@ -1,0 +1,56 @@
+{
+  "id": "backend-nodejs",
+  "slug": "backend-nodejs",
+  "title": "Backend Engineer con Node.js",
+  "description": "Para búsquedas de backend con TypeScript y Node.js: APIs robustas, bases de datos, caching, arquitectura y System Design.",
+  "audience": "Desarrolladores que quieren conseguir un puesto de backend en Node.js, vengan de otro lenguaje (C#, Java, Python, PHP) o del frontend.",
+  "order": 2,
+  "stages": [
+    {
+      "id": "be.typescript",
+      "title": "TypeScript para el backend",
+      "description": "El lenguaje y su sistema de tipos, con foco en validar datos externos y modelar errores.",
+      "goals": [
+        "Escribir TypeScript estricto y validar en los bordes del sistema",
+        "Dominar promesas, async/await y cancelación"
+      ],
+      "items": [{ "kind": "course", "courseId": "typescript" }]
+    },
+    {
+      "id": "be.node",
+      "title": "Node.js en producción",
+      "description": "Event loop, streams, APIs HTTP, autenticación, webhooks, observabilidad y escalado.",
+      "goals": [
+        "Explicar el event loop y evitar bloquearlo",
+        "Diseñar endpoints seguros, idempotentes y observables"
+      ],
+      "items": [{ "kind": "course", "courseId": "nodejs" }]
+    },
+    {
+      "id": "be.data",
+      "title": "Datos: PostgreSQL y Redis",
+      "description": "Modelado, consultas, índices, transacciones y concurrencia; caching y coordinación con Redis.",
+      "goals": [
+        "Leer planes de ejecución y elegir índices",
+        "Evitar condiciones de carrera con transacciones y bloqueos"
+      ],
+      "items": [
+        { "kind": "course", "courseId": "postgresql" },
+        { "kind": "course", "courseId": "redis" }
+      ]
+    },
+    {
+      "id": "be.architecture",
+      "title": "Arquitectura y System Design",
+      "description": "Principios, patrones, arquitectura hexagonal, sistemas distribuidos y la entrevista de System Design.",
+      "goals": [
+        "Justificar decisiones de arquitectura con sus compromisos",
+        "Resolver una entrevista de System Design por fases"
+      ],
+      "items": [
+        { "kind": "course", "courseId": "software-architecture" },
+        { "kind": "course", "courseId": "system-design" }
+      ]
+    }
+  ]
+}

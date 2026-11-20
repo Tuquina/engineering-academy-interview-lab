@@ -21,6 +21,7 @@ import { ProgressIndicator } from "@/shared/ui/progress-indicator";
 import { findNextLesson, recentLessons, summarizeProgress } from "../domain/progress";
 import { useLearnerSnapshot, type LearnerData } from "./learner-data";
 import { useProgressState } from "./progress-context";
+import { WelcomePanel } from "./welcome-panel";
 
 function Metric({
   icon: Icon,
@@ -65,6 +66,7 @@ export function DashboardOverview({ data }: { data: LearnerData }) {
 
   return (
     <div className="flex flex-col gap-6">
+      <WelcomePanel data={data} />
       <Card className="from-accent/8 border-accent/30 flex flex-col gap-5 bg-gradient-to-br to-transparent p-6">
         <div>
           <p className="text-accent text-xs font-semibold tracking-wide uppercase">

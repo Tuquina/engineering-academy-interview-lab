@@ -1,0 +1,48 @@
+{
+  "id": "frontend-react",
+  "slug": "frontend-react",
+  "title": "Frontend Engineer con React y Next.js",
+  "description": "Para búsquedas de frontend: TypeScript, el modelo de React, performance, Next.js App Router y las preguntas de arquitectura que aparecen en entrevistas.",
+  "audience": "Desarrolladores que apuntan a un puesto de frontend o full stack con foco en la interfaz.",
+  "order": 3,
+  "stages": [
+    {
+      "id": "fe.typescript",
+      "title": "TypeScript y JavaScript moderno",
+      "description": "La base del ecosistema: tipos, uniones discriminadas, generics y asincronía.",
+      "goals": ["Tipar componentes y datos con precisión", "Entender promesas y el event loop del navegador"],
+      "items": [{ "kind": "course", "courseId": "typescript" }]
+    },
+    {
+      "id": "fe.react",
+      "title": "React a fondo",
+      "description": "Renderizado y reconciliación, estado y efectos, memoización, composición, formularios y testing.",
+      "goals": [
+        "Explicar por qué un componente se re-renderiza y cómo evitarlo",
+        "Usar efectos sólo para sincronizar con sistemas externos"
+      ],
+      "items": [{ "kind": "course", "courseId": "react" }]
+    },
+    {
+      "id": "fe.nextjs",
+      "title": "Next.js App Router",
+      "description": "Server y Client Components, routing, datos, mutaciones, caché y despliegue.",
+      "goals": [
+        "Decidir qué va en el servidor y qué en el cliente",
+        "Explicar renderizado estático, dinámico y revalidación"
+      ],
+      "items": [{ "kind": "course", "courseId": "nextjs" }]
+    },
+    {
+      "id": "fe.architecture",
+      "title": "Arquitectura para entrevistas",
+      "description": "Principios y patrones de diseño que se preguntan también en entrevistas de frontend.",
+      "goals": ["Aplicar SOLID y patrones con criterio"],
+      "items": [
+        { "kind": "lesson", "lessonId": "software-architecture.principles" },
+        { "kind": "lesson", "lessonId": "software-architecture.design-patterns" },
+        { "kind": "lesson", "lessonId": "system-design.introduction" }
+      ]
+    }
+  ]
+}

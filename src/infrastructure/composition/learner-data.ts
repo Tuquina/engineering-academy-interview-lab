@@ -5,7 +5,7 @@ import { getCatalog } from "./learning";
 import { buildLessonIndex } from "./lesson-index";
 
 /** Ruta activa por defecto mientras el usuario no elija otra. */
-export const DEFAULT_PATH_ID = "full-stack-ai-platform-engineer";
+export const DEFAULT_PATH_ID = "full-stack-typescript";
 
 /**
  * Datos de catálogo serializables que necesitan el dashboard y las estadísticas para combinarse, en el cliente,
@@ -23,6 +23,7 @@ export async function getLearnerData(): Promise<LearnerData> {
     paths: catalog.paths.map((path) => ({
       id: path.id,
       title: path.title,
+      description: path.description,
       href: `/paths/${path.slug}`,
       lessonIds: catalog.resolvePathLessons(path).map((l) => l.id),
     })),

@@ -22,6 +22,19 @@ test.describe("flujo de aprendizaje (modo invitado)", () => {
     );
   });
 
+  test("la bienvenida pide elegir una ruta por puesto y la guarda como activa", async ({ page }) => {
+    await page.goto("/");
+    const welcome = page.getByRole("region", { name: /Preparate para tu próxima búsqueda laboral/ });
+    await expect(welcome).toBeVisible();
+    await welcome.getByRole("button", { name: /Backend Engineer con Node\.js/ }).click();
+    await expect(welcome).toBeHidden();
+    await expect(page.getByRole("link", { name: "Backend Engineer con Node.js" })).toBeVisible();
+    await page.reload();
+    await expect(
+      page.getByRole("region", { name: /Preparate para tu próxima búsqueda laboral/ }),
+    ).toBeHidden();
+  });
+
   test("entrar en la ruta, completar la lección y ver el progreso reflejado", async ({ page }) => {
     await page.goto("/paths/full-stack-ai-platform-engineer");
     await page

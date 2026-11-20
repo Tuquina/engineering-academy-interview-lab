@@ -1,0 +1,59 @@
+{
+  "id": "interview-sprint",
+  "slug": "interview-sprint",
+  "title": "Repaso intensivo para entrevistas",
+  "description": "Para quien ya tiene entrevistas agendadas: las lecciones que más se preguntan, para combinar con el Interview Arena, los problemas de algoritmos y los casos de System Design.",
+  "audience": "Desarrolladores con experiencia que necesitan repasar lo esencial en una o dos semanas.",
+  "order": 5,
+  "stages": [
+    {
+      "id": "is.fundamentals",
+      "title": "Fundamentos que siempre aparecen",
+      "description": "Tipos, asincronía y event loop: las preguntas rápidas más frecuentes.",
+      "goals": ["Responder con seguridad las preguntas rápidas de lenguaje y runtime"],
+      "items": [
+        { "kind": "lesson", "lessonId": "typescript.runtime-vs-type-system" },
+        { "kind": "lesson", "lessonId": "typescript.unions-narrowing" },
+        { "kind": "lesson", "lessonId": "typescript.async-control" },
+        { "kind": "lesson", "lessonId": "nodejs.event-loop" }
+      ]
+    },
+    {
+      "id": "is.web",
+      "title": "Web y APIs",
+      "description": "React, APIs HTTP, autenticación e idempotencia.",
+      "goals": ["Explicar renderizado de React y diseño de APIs confiables"],
+      "items": [
+        { "kind": "lesson", "lessonId": "react.rendering-reconciliation" },
+        { "kind": "lesson", "lessonId": "react.state-effects" },
+        { "kind": "lesson", "lessonId": "nodejs.http-apis" },
+        { "kind": "lesson", "lessonId": "nodejs.auth-security" },
+        { "kind": "lesson", "lessonId": "nodejs.webhooks-idempotency" }
+      ]
+    },
+    {
+      "id": "is.data",
+      "title": "Bases de datos",
+      "description": "Índices y transacciones: el núcleo de las preguntas de datos.",
+      "goals": ["Justificar índices y evitar condiciones de carrera"],
+      "items": [
+        { "kind": "lesson", "lessonId": "postgresql.indexes" },
+        { "kind": "lesson", "lessonId": "postgresql.transactions" },
+        { "kind": "lesson", "lessonId": "redis.patterns" }
+      ]
+    },
+    {
+      "id": "is.design",
+      "title": "Arquitectura y System Design",
+      "description": "Principios, patrones y el método de la entrevista de diseño. Después, practicá los casos clásicos del System Design Studio.",
+      "goals": ["Llevar una entrevista de System Design por fases"],
+      "items": [
+        { "kind": "lesson", "lessonId": "software-architecture.principles" },
+        { "kind": "lesson", "lessonId": "software-architecture.design-patterns" },
+        { "kind": "lesson", "lessonId": "system-design.introduction" },
+        { "kind": "lesson", "lessonId": "system-design.scalability" },
+        { "kind": "lesson", "lessonId": "system-design.messaging-resilience" }
+      ]
+    }
+  ]
+}

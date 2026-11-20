@@ -14,7 +14,13 @@ import { useProgressState } from "./progress-context";
 /** Datos de catálogo serializables que prepara el servidor. */
 export interface LearnerData {
   readonly defaultPathId: string;
-  readonly paths: ReadonlyArray<{ id: string; title: string; href: string; lessonIds: readonly string[] }>;
+  readonly paths: ReadonlyArray<{
+    id: string;
+    title: string;
+    description: string;
+    href: string;
+    lessonIds: readonly string[];
+  }>;
   readonly courses: ReadonlyArray<{ id: string; title: string; href: string; lessonIds: readonly string[] }>;
   readonly lessons: LessonIndex;
   readonly prerequisites: Readonly<Record<string, readonly string[]>>;

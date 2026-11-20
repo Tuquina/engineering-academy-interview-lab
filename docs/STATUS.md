@@ -480,6 +480,10 @@ Pendiente o limitado:
 La plataforma pasa a ser una academia genérica para prepararse para buscar trabajo (sin empresa objetivo).
 
 - [x] Ping diario a la base (Vercel Cron → `/api/cron/keep-alive`) para que Supabase Free no pause el proyecto.
+- [x] 5 rutas por puesto: Full Stack con TypeScript (sugerida por defecto), Backend con Node.js, Frontend con
+      React y Next.js, Full Stack en productos con IA y Repaso intensivo para entrevistas.
+- [x] Bienvenida en el dashboard para quien no eligió ruta: explica la academia y pide elegir el puesto; la elección
+      queda como ruta activa. El AI Study Mentor ya no asume un perfil de origen.
 - [x] 165 flashcards en 12 mazos (todos los cursos + algoritmos y comportamiento) y 16 cheatsheets.
 - [x] Interview Arena: 77 preguntas en 11 áreas (nuevas: algoritmos; calidad, DevOps y seguridad;
       comportamiento), modo "Entrevista de comportamiento" y sección opcional en la mock.
