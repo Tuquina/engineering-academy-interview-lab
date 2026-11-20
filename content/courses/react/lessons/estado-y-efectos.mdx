@@ -60,25 +60,25 @@ summary:
 quien empieza:
 
 ```tsx
-function DebtSummary({ customerId }: { customerId: string }) {
-  const [debts, setDebts] = useState<Debt[]>([]);
-  const [total, setTotal] = useState(0);
+function SensorSummary({ deviceId }: { deviceId: string }) {
+  const [readings, setReadings] = useState<Reading[]>([]);
+  const [alertCount, setAlertCount] = useState(0);
 
   useEffect(() => {
-    fetch(`/api/customers/${customerId}/debts`)
+    fetch(`/api/devices/${deviceId}/readings`)
       .then((r) => r.json())
-      .then(setDebts);
-  }, []); // ❌ falta customerId: al cambiar de cliente se muestran las deudas del anterior
+      .then(setReadings);
+  }, []); // ❌ falta deviceId: al cambiar de dispositivo se muestran las lecturas del anterior
 
   useEffect(() => {
-    setTotal(debts.reduce((sum, d) => sum + d.balanceCents, 0)); // ❌ estado derivado con un efecto
-  }, [debts]);
+    setAlertCount(readings.filter((r) => r.celsius > 30).length); // ❌ estado derivado con un efecto
+  }, [readings]);
 
-  return <p>Total: {total}</p>;
+  return <p>Lecturas sobre 30 °C: {alertCount}</p>;
 }
 ```
 
-Tiene tres errores: dependencias incompletas, una race condition al cambiar rápido de cliente y un efecto
+Tiene tres errores: dependencias incompletas, una race condition al cambiar rápido de dispositivo y un efecto
 innecesario. Esta lección explica cómo usar estos hooks correctamente.
 
 ## useState en profundidad
@@ -89,20 +89,20 @@ React decide si re-renderizar comparando **referencias** (`Object.is`). Si mutá
 el mismo objeto, React ve la misma referencia y puede no actualizar.
 
 ```tsx
-const [debt, setDebt] = useState<Debt>(initial);
-const [promises, setPromises] = useState<PaymentPromise[]>([]);
+const [device, setDevice] = useState<Device>(initial);
+const [alerts, setAlerts] = useState<SensorAlert[]>([]);
 
 // ❌ Mutación
-debt.status = "paid";
-setDebt(debt);
-promises.push(newPromise);
-setPromises(promises);
+device.status = "offline";
+setDevice(device);
+alerts.push(newAlert);
+setAlerts(alerts);
 
 // ✅ Objetos y arrays nuevos
-setDebt({ ...debt, status: "paid" });
-setPromises([...promises, newPromise]); // agregar
-setPromises(promises.filter((p) => p.id !== id)); // quitar
-setPromises(promises.map((p) => (p.id === id ? { ...p, status: "kept" } : p))); // modificar uno
+setDevice({ ...device, status: "offline" });
+setAlerts([...alerts, newAlert]); // agregar
+setAlerts(alerts.filter((a) => a.id !== id)); // quitar
+setAlerts(alerts.map((a) => (a.id === id ? { ...a, status: "acknowledged" } : a))); // modificar uno
 ```
 
 ### Actualizaciones funcionales e inicialización perezosa
@@ -121,38 +121,39 @@ Cuando el estado tiene varias partes relacionadas o reglas de transición, un **
 función pura `(estado, acción) → nuevo estado`:
 
 ```tsx
-type CallState =
+// Actualización de firmware de un dispositivo IoT, en pasos
+type UpdateState =
   | { status: "idle" }
-  | { status: "dialing"; startedAt: number }
-  | { status: "in_call"; startedAt: number; notes: string }
-  | { status: "ended"; durationMs: number; outcome: "promise" | "no_answer" | "refused" };
+  | { status: "downloading"; startedAt: number }
+  | { status: "installing"; startedAt: number; percent: number }
+  | { status: "finished"; durationMs: number; outcome: "updated" | "failed" | "rolled_back" };
 
-type CallAction =
-  | { type: "dial"; now: number }
-  | { type: "connected" }
-  | { type: "note"; text: string }
-  | { type: "hang_up"; now: number; outcome: "promise" | "no_answer" | "refused" };
+type UpdateAction =
+  | { type: "start"; now: number }
+  | { type: "downloaded" }
+  | { type: "progress"; percent: number }
+  | { type: "finish"; now: number; outcome: "updated" | "failed" | "rolled_back" };
 
-function callReducer(state: CallState, action: CallAction): CallState {
+function updateReducer(state: UpdateState, action: UpdateAction): UpdateState {
   switch (action.type) {
-    case "dial":
-      return state.status === "idle" ? { status: "dialing", startedAt: action.now } : state;
-    case "connected":
-      return state.status === "dialing"
-        ? { status: "in_call", startedAt: state.startedAt, notes: "" }
+    case "start":
+      return state.status === "idle" ? { status: "downloading", startedAt: action.now } : state;
+    case "downloaded":
+      return state.status === "downloading"
+        ? { status: "installing", startedAt: state.startedAt, percent: 0 }
         : state;
-    case "note":
-      return state.status === "in_call" ? { ...state, notes: action.text } : state;
-    case "hang_up":
-      return state.status === "dialing" || state.status === "in_call"
-        ? { status: "ended", durationMs: action.now - state.startedAt, outcome: action.outcome }
+    case "progress":
+      return state.status === "installing" ? { ...state, percent: action.percent } : state;
+    case "finish":
+      return state.status === "downloading" || state.status === "installing"
+        ? { status: "finished", durationMs: action.now - state.startedAt, outcome: action.outcome }
         : state;
   }
 }
 
-function CallPanel() {
-  const [state, dispatch] = useReducer(callReducer, { status: "idle" });
-  return <button onClick={() => dispatch({ type: "dial", now: Date.now() })}>Llamar</button>;
+function FirmwareUpdatePanel() {
+  const [state, dispatch] = useReducer(updateReducer, { status: "idle" });
+  return <button onClick={() => dispatch({ type: "start", now: Date.now() })}>Actualizar</button>;
 }
 ```
 
@@ -166,17 +167,17 @@ componente.
 suscripción, un timer, una API del navegador, un widget de terceros.
 
 ```tsx
-function LiveCampaignStatus({ campaignId }: { campaignId: string }) {
-  const [status, setStatus] = useState<CampaignStatus | null>(null);
+function LiveSensorReading({ sensorId }: { sensorId: string }) {
+  const [reading, setReading] = useState<Reading | null>(null);
 
   useEffect(() => {
-    const socket = new WebSocket(`wss://realtime.example.com/campaigns/${campaignId}`);
-    socket.addEventListener("message", (event) => setStatus(parseStatus(event.data)));
+    const socket = new WebSocket(`wss://realtime.example.com/sensors/${sensorId}`);
+    socket.addEventListener("message", (event) => setReading(parseReading(event.data)));
 
     return () => socket.close(); // limpieza: deshacer lo que hizo el efecto
-  }, [campaignId]); // volver a sincronizar cuando cambia campaignId
+  }, [sensorId]); // volver a sincronizar cuando cambia sensorId
 
-  return <StatusBadge status={status} />;
+  return <TemperatureGauge reading={reading} />;
 }
 ```
 
@@ -187,10 +188,10 @@ sequenceDiagram
   participant R as React
   participant E as Efecto
   participant S as Sistema externo
-  R->>R: commit (campaignId = A)
+  R->>R: commit (sensorId = A)
   R->>E: ejecutar efecto
   E->>S: conectar a A
-  R->>R: commit (campaignId = B)
+  R->>R: commit (sensorId = B)
   R->>E: limpieza del render anterior
   E->>S: desconectar de A
   R->>E: ejecutar efecto
@@ -206,11 +207,11 @@ El array de dependencias debe incluir **todo valor reactivo** (props, estado, va
 dentro del efecto. No es una forma de decidir "cuándo correr": describe **de qué depende la sincronización**. La
 regla de lint `react-hooks/exhaustive-deps` lo verifica; desactivarla casi siempre esconde un bug.
 
-| Array          | Cuándo se ejecuta                            |
-| -------------- | -------------------------------------------- |
-| Sin array      | Después de cada render (rara vez correcto)   |
-| `[]`           | Al montar (y limpia al desmontar)            |
-| `[campaignId]` | Al montar y cada vez que cambia `campaignId` |
+| Array        | Cuándo se ejecuta                          |
+| ------------ | ------------------------------------------ |
+| Sin array    | Después de cada render (rara vez correcto) |
+| `[]`         | Al montar (y limpia al desmontar)          |
+| `[sensorId]` | Al montar y cada vez que cambia `sensorId` |
 
 Si una dependencia cambia "demasiado" (un objeto o función creados en cada render), la solución es moverla dentro
 del efecto, derivarla de primitivos o estabilizarla, no quitarla del array.
@@ -220,18 +221,18 @@ del efecto, derivarla de primitivos o estabilizarla, no quitarla del array.
 ```tsx
 useEffect(() => {
   const controller = new AbortController();
-  fetch(`/api/customers/${customerId}/debts`, { signal: controller.signal })
+  fetch(`/api/devices/${deviceId}/readings`, { signal: controller.signal })
     .then((r) => r.json())
-    .then(setDebts)
+    .then(setReadings)
     .catch((error) => {
       if (error.name !== "AbortError") setError(error);
     });
-  return () => controller.abort(); // si customerId cambia, se cancela la request anterior
-}, [customerId]);
+  return () => controller.abort(); // si deviceId cambia, se cancela la request anterior
+}, [deviceId]);
 ```
 
-Sin la limpieza, si el usuario pasa del cliente A al B y la respuesta de A llega después, la pantalla de B muestra
-las deudas de A. Aun así, **cargar datos con efectos a mano** obliga a resolver caché, deduplicación, reintentos y
+Sin la limpieza, si el usuario pasa del dispositivo A al B y la respuesta de A llega después, la pantalla de B
+muestra las lecturas de A. Aun así, **cargar datos con efectos a mano** obliga a resolver caché, deduplicación, reintentos y
 estados de carga: en aplicaciones reales se usa una librería de server state o Server Components (lección de datos).
 
 ## No necesitás un efecto para...
@@ -249,12 +250,12 @@ estados de carga: en aplicaciones reales se usa una librería de server state o 
 // ❌ Efecto para reaccionar a un submit
 const [submitted, setSubmitted] = useState(false);
 useEffect(() => {
-  if (submitted) savePromise(form);
+  if (submitted) saveAlertRule(form);
 }, [submitted]);
 
 // ✅ El trabajo va en el handler de la acción
 async function handleSubmit() {
-  await savePromise(form);
+  await saveAlertRule(form);
 }
 ```
 
@@ -276,7 +277,7 @@ corregir.
 
 La diferencia mental importante: en Blazor o en frameworks con ciclo de vida se piensa en **momentos** ("al
 inicializar", "al cambiar parámetros"). En React se piensa en **sincronización**: "este componente debe estar
-conectado a la campaña X mientras se muestre". React decide cuándo conectar y desconectar.
+conectado al sensor X mientras se muestre". React decide cuándo conectar y desconectar.
 
 ## Errores frecuentes
 
@@ -292,17 +293,17 @@ conectado a la campaña X mientras se muestre". React decide cuándo conectar y 
 
 <KnowledgeCheck
   id="react.state-effects.q1"
-  question="Un efecto con dependencias `[]` carga los datos de `customerId`. ¿Qué pasa cuando el usuario navega a otro cliente sin desmontar el componente?"
+  question="Un efecto con dependencias `[]` carga las lecturas de `deviceId`. ¿Qué pasa cuando el usuario navega a otro dispositivo sin desmontar el componente?"
   options={[
     {
-      text: "El efecto se vuelve a ejecutar con el nuevo cliente.",
+      text: "El efecto se vuelve a ejecutar con el nuevo dispositivo.",
       explanation: "Con [] sólo se ejecuta al montar.",
     },
     {
-      text: "Se siguen mostrando los datos del cliente anterior, porque el efecto no depende de customerId.",
+      text: "Se siguen mostrando las lecturas del dispositivo anterior, porque el efecto no depende de deviceId.",
       correct: true,
       explanation:
-        "Correcto. customerId debe estar en las dependencias, y la limpieza debe cancelar la request anterior.",
+        "Correcto. deviceId debe estar en las dependencias, y la limpieza debe cancelar la request anterior.",
     },
     {
       text: "React lanza un error por la dependencia faltante.",
@@ -316,25 +317,25 @@ conectado a la campaña X mientras se muestre". React decide cuándo conectar y 
   question="¿Cuál de estos casos SÍ justifica un useEffect?"
   options={[
     {
-      text: "Calcular el total de deudas cuando cambia la lista.",
+      text: "Contar las lecturas sobre el umbral cuando cambia la lista.",
       explanation: "Es estado derivado: se calcula en el render.",
     },
     {
-      text: "Guardar una promesa de pago cuando el usuario envía el formulario.",
+      text: "Guardar una regla de alerta cuando el usuario envía el formulario.",
       explanation: "Es respuesta a una acción: va en el handler del submit.",
     },
     {
-      text: "Suscribirse a un WebSocket de la campaña mientras el panel está visible.",
+      text: "Suscribirse al WebSocket de un sensor mientras el panel está visible.",
       correct: true,
       explanation:
-        "Correcto. Es sincronización con un sistema externo, con limpieza al desmontar o cambiar de campaña.",
+        "Correcto. Es sincronización con un sistema externo, con limpieza al desmontar o cambiar de sensor.",
     },
   ]}
 />
 
 <KnowledgeCheck
   id="react.state-effects.q3"
-  question="¿Qué tiene de malo `promises.push(p); setPromises(promises)`?"
+  question="¿Qué tiene de malo `alerts.push(a); setAlerts(alerts)`?"
   options={[
     {
       text: "Nada, push es más eficiente.",
@@ -343,7 +344,7 @@ conectado a la campaña X mientras se muestre". React decide cuándo conectar y 
     {
       text: "Muta el array: el setter recibe la misma referencia y React puede no re-renderizar.",
       correct: true,
-      explanation: "Correcto. Se crea un array nuevo: setPromises([...promises, p]) o la forma funcional.",
+      explanation: "Correcto. Se crea un array nuevo: setAlerts([...alerts, a]) o la forma funcional.",
     },
     { text: "push no existe en arrays de estado.", explanation: "Existe; el problema es mutar el estado." },
   ]}

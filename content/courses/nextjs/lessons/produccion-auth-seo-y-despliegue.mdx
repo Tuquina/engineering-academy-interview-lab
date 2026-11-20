@@ -132,25 +132,25 @@ la **capa de acceso a datos** que usan todas las lecturas y escrituras.
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: { template: "%s · Cobranzas", default: "Cobranzas" },
-  description: "Gestión de cobranzas con agentes de IA.",
+  title: { template: "%s · Bitácora Dev", default: "Bitácora Dev" },
+  description: "Blog de una comunidad de desarrolladores: posts, videos y comentarios.",
 };
 
-// app/(public)/help/[slug]/page.tsx: metadata dinámica
+// app/(public)/blog/[slug]/page.tsx: metadata dinámica
 export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }): Promise<Metadata> {
-  const article = await getHelpArticle((await params).slug);
+  const post = await getPublishedPost((await params).slug);
   return {
-    title: article.title, // "Cómo registrar un pago · Cobranzas"
-    description: article.summary,
-    alternates: { canonical: `/help/${article.slug}` },
-    openGraph: { title: article.title, description: article.summary, type: "article" },
+    title: post.title, // "Primeros pasos con TypeScript · Bitácora Dev"
+    description: post.excerpt,
+    alternates: { canonical: `/blog/${post.slug}` },
+    openGraph: { title: post.title, description: post.excerpt, type: "article" },
   };
 }
 ```
 
 Next.js genera las etiquetas `<title>`, `<meta>` y Open Graph en el HTML del servidor. También existen convenciones
 de archivos para `sitemap.ts`, `robots.ts` e imágenes Open Graph generadas (`opengraph-image.tsx`). Las páginas
-privadas (paneles internos) se excluyen de la indexación.
+privadas (borradores, panel de moderación) se excluyen de la indexación.
 
 ## Imágenes y fuentes
 
@@ -158,8 +158,8 @@ privadas (paneles internos) se excluyen de la indexación.
 import Image from "next/image";
 
 <Image
-  src="/illustrations/payment-plan.png"
-  alt="Plan de pagos en tres cuotas"
+  src="/covers/typescript-first-steps.png"
+  alt="Portada del post: primeros pasos con TypeScript"
   width={640}
   height={360}
   priority
@@ -286,7 +286,7 @@ flowchart LR
 
 <KnowledgeCheck
   id="nextjs.production.q3"
-  question="La imagen principal de la página de pago aparece tarde y hace saltar el contenido. ¿Qué ajustes de next/image ayudan?"
+  question="La imagen de portada de un post aparece tarde y hace saltar el contenido. ¿Qué ajustes de next/image ayudan?"
   options={[
     {
       text: "Quitar width y height para que se adapte.",

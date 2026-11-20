@@ -60,7 +60,7 @@ summary:
 
 Con el modelo de render de React, cada vez que un componente se renderiza se recalculan sus valores, se crean
 funciones nuevas y se re-renderizan sus hijos. Casi siempre eso es barato. A veces no: una tabla de 2.000 filas que
-se re-renderiza en cada tecla del buscador, o un cálculo de scoring que tarda 80 ms. Y hay lógica (suscripciones,
+se re-renderiza en cada tecla del buscador, o un cálculo del riesgo de cancelación de suscripciones que tarda 80 ms. Y hay lógica (suscripciones,
 formularios, temporizadores) que se repite en muchos componentes.
 
 Esta lección cubre las herramientas para esos casos y, sobre todo, **cuándo no usarlas**.
@@ -69,7 +69,7 @@ Esta lección cubre las herramientas para esos casos y, sobre todo, **cuándo no
 
 ```tsx
 // useMemo: cachea el RESULTADO de un cálculo mientras no cambien las dependencias
-const ranked = useMemo(() => rankDebtsByRecoveryScore(debts, weights), [debts, weights]);
+const ranked = useMemo(() => rankAccountsByChurnRisk(accounts, weights), [accounts, weights]);
 
 // useCallback: cachea una FUNCIÓN (misma referencia entre renders)
 const handleSelect = useCallback((id: string) => {
@@ -77,8 +77,14 @@ const handleSelect = useCallback((id: string) => {
 }, []);
 
 // memo: saltea el render del componente si sus props son iguales (comparación superficial)
-const DebtRow = memo(function DebtRow({ debt, onSelect }: { debt: Debt; onSelect: (id: string) => void }) {
-  return <tr onClick={() => onSelect(debt.id)}>{/* ... */}</tr>;
+const InvoiceRow = memo(function InvoiceRow({
+  invoice,
+  onSelect,
+}: {
+  invoice: Invoice;
+  onSelect: (id: string) => void;
+}) {
+  return <tr onClick={() => onSelect(invoice.id)}>{/* ... */}</tr>;
 });
 ```
 
@@ -221,12 +227,18 @@ export function useDebouncedValue<T>(value: T, delayMs: number): T {
   return debounced;
 }
 
-function CustomerSearch() {
+function MemberSearch() {
   const [query, setQuery] = useState("");
   const debouncedQuery = useDebouncedValue(query, 300);
-  const results = useCustomerSearch(debouncedQuery); // otro custom hook, por ejemplo con TanStack Query
+  const results = useMemberSearch(debouncedQuery); // otro custom hook, por ejemplo con TanStack Query
 
-  return <input value={query} onChange={(e) => setQuery(e.target.value)} aria-label="Buscar cliente" />;
+  return (
+    <input
+      value={query}
+      onChange={(e) => setQuery(e.target.value)}
+      aria-label="Buscar miembro de la organización"
+    />
+  );
 }
 ```
 
@@ -260,7 +272,7 @@ Puntos clave:
 
 <KnowledgeCheck
   id="react.memo-refs-context.q1"
-  question="`DebtRow` está envuelto en `memo`, pero el padre le pasa `onSelect={(id) => select(id)}`. ¿Se saltean los renders de las filas cuando el padre se re-renderiza?"
+  question="`InvoiceRow` está envuelto en `memo`, pero el padre le pasa `onSelect={(id) => select(id)}`. ¿Se saltean los renders de las filas cuando el padre se re-renderiza?"
   options={[
     {
       text: "Sí, memo compara el contenido de la función.",

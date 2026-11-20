@@ -53,8 +53,8 @@ summary:
 
 ## ¿Qué problema resuelve?
 
-Pensá en la pantalla de gestión de una campaña: filtros arriba, una tabla de deudores, un panel lateral con el
-detalle del deudor seleccionado y un contador de seleccionados en el encabezado. ¿Dónde vive el "deudor
+Pensá en la bandeja de una mesa de soporte al cliente: filtros arriba, una tabla de tickets, un panel lateral con
+la conversación del ticket seleccionado y un contador de seleccionados en el encabezado. ¿Dónde vive el "ticket
 seleccionado"? ¿Y los filtros? Si cada componente guarda su propia copia, el encabezado dice 3 seleccionados
 mientras la tabla muestra 4.
 
@@ -74,11 +74,11 @@ El proceso recomendado por la documentación de React (_Thinking in React_):
   caption="El estado vive en el ancestro común de quienes lo necesitan; baja por props y los cambios suben por callbacks."
   chart={`
 flowchart TD
-  P["CampaignPage<br/>estado: filters, selectedIds"] -->|"filters, onChange"| F["FiltersBar"]
-  P -->|"debts filtradas, selectedIds, onToggle"| T["DebtTable"]
+  P["SupportInboxPage<br/>estado: filters, selectedIds"] -->|"filters, onChange"| F["FiltersBar"]
+  P -->|"tickets filtrados, selectedIds, onToggle"| T["TicketTable"]
   P -->|"selectedIds.size"| H["Header"]
-  P -->|"deudor seleccionado"| D["DetailPanel"]
-  T --> R["DebtRow"]
+  P -->|"ticket seleccionado"| D["DetailPanel"]
+  T --> R["TicketRow"]
 `}
 />
 
@@ -87,15 +87,15 @@ flowchart TD
 El paso 3 es el que más errores evita: **no guardes en estado lo que se puede calcular**.
 
 ```tsx
-// ❌ Estado duplicado: filteredDebts puede desincronizarse de debts o de filters
-const [debts, setDebts] = useState<Debt[]>([]);
+// ❌ Estado duplicado: filteredTickets puede desincronizarse de tickets o de filters
+const [tickets, setTickets] = useState<Ticket[]>([]);
 const [filters, setFilters] = useState<Filters>(initialFilters);
-const [filteredDebts, setFilteredDebts] = useState<Debt[]>([]);
-useEffect(() => setFilteredDebts(applyFilters(debts, filters)), [debts, filters]);
+const [filteredTickets, setFilteredTickets] = useState<Ticket[]>([]);
+useEffect(() => setFilteredTickets(applyFilters(tickets, filters)), [tickets, filters]);
 
 // ✅ Derivado durante el render: siempre consistente
 const [filters, setFilters] = useState<Filters>(initialFilters);
-const filteredDebts = applyFilters(debts, filters);
+const filteredTickets = applyFilters(tickets, filters);
 const selectedCount = selectedIds.size;
 ```
 
@@ -107,11 +107,11 @@ se memoiza con `useMemo`.
 Cuando dos componentes necesitan el mismo estado, se **levanta** al ancestro común más cercano:
 
 ```tsx
-export function CampaignPage({ debts }: { debts: Debt[] }) {
+export function SupportInboxPage({ tickets }: { tickets: Ticket[] }) {
   const [filters, setFilters] = useState<Filters>(initialFilters);
   const [selectedIds, setSelectedIds] = useState<ReadonlySet<string>>(new Set());
 
-  const visibleDebts = applyFilters(debts, filters);
+  const visibleTickets = applyFilters(tickets, filters);
 
   function toggle(id: string) {
     setSelectedIds((previous) => {
@@ -126,13 +126,13 @@ export function CampaignPage({ debts }: { debts: Debt[] }) {
     <>
       <Header selectedCount={selectedIds.size} />
       <FiltersBar value={filters} onChange={setFilters} />
-      <DebtTable debts={visibleDebts} selectedIds={selectedIds} onToggle={toggle} />
+      <TicketTable tickets={visibleTickets} selectedIds={selectedIds} onToggle={toggle} />
     </>
   );
 }
 ```
 
-`FiltersBar` y `DebtTable` son ahora **componentes controlados**: no tienen estado propio para esos datos; los
+`FiltersBar` y `TicketTable` son ahora **componentes controlados**: no tienen estado propio para esos datos; los
 reciben y avisan cambios. Eso los hace reutilizables y fáciles de testear.
 
 ¿Y si el estado se levanta demasiado? Cada cambio re-renderiza al ancestro y a todos sus hijos. La regla: el estado
@@ -166,8 +166,8 @@ function Panel({
 }
 
 // Especialización por configuración, no por herencia
-<Panel title="Promesas de pago" actions={<Button onClick={openNewPromise}>Nueva</Button>}>
-  <PromiseList debtId={debtId} />
+<Panel title="Respuestas" actions={<Button onClick={openNewReply}>Responder</Button>}>
+  <ReplyList ticketId={ticketId} />
 </Panel>;
 ```
 
@@ -186,7 +186,7 @@ function VirtualList<T>({ items, renderItem }: { items: T[]; renderItem: (item: 
   return <div>{visible.map(renderItem)}</div>;
 }
 
-<VirtualList items={debts} renderItem={(debt) => <DebtRow key={debt.id} debt={debt} />} />;
+<VirtualList items={tickets} renderItem={(ticket) => <TicketRow key={ticket.id} ticket={ticket} />} />;
 ```
 
 Muchos usos históricos de render props (compartir lógica con estado) hoy se resuelven mejor con **custom hooks**
@@ -196,16 +196,16 @@ Los **componentes compuestos** son un conjunto de componentes que cooperan y com
 contexto), con una API declarativa:
 
 ```tsx
-<Tabs defaultValue="debts">
+<Tabs defaultValue="tickets">
   <Tabs.List>
-    <Tabs.Trigger value="debts">Deudas</Tabs.Trigger>
+    <Tabs.Trigger value="tickets">Tickets</Tabs.Trigger>
     <Tabs.Trigger value="history">Historial</Tabs.Trigger>
   </Tabs.List>
-  <Tabs.Content value="debts">
-    <DebtTable />
+  <Tabs.Content value="tickets">
+    <TicketTable />
   </Tabs.Content>
   <Tabs.Content value="history">
-    <ContactHistory />
+    <CustomerHistory />
   </Tabs.Content>
 </Tabs>
 ```
@@ -267,7 +267,7 @@ opción.
 
 <KnowledgeCheck
   id="react.composition.q1"
-  question="El encabezado muestra cuántas deudas están seleccionadas en la tabla, que es un componente hermano. ¿Dónde debe vivir `selectedIds`?"
+  question="El encabezado muestra cuántos tickets están seleccionados en la tabla, que es un componente hermano. ¿Dónde debe vivir `selectedIds`?"
   options={[
     {
       text: "En la tabla, y el encabezado lo lee con una ref.",
@@ -287,10 +287,10 @@ opción.
 
 <KnowledgeCheck
   id="react.composition.q2"
-  question="Un componente guarda `const [total, setTotal] = useState(0)` y lo actualiza en un useEffect cada vez que cambia `debts`. ¿Qué mejorarías?"
+  question="Un componente guarda `const [openCount, setOpenCount] = useState(0)` y lo actualiza en un useEffect cada vez que cambia `tickets`. ¿Qué mejorarías?"
   options={[
     {
-      text: "Calcular `const total = sum(debts)` durante el render.",
+      text: "Calcular `const openCount = countOpen(tickets)` durante el render.",
       correct: true,
       explanation: "Correcto. Es estado derivado: calcularlo evita desincronizaciones y un render extra.",
     },

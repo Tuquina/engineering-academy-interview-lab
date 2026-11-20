@@ -79,10 +79,10 @@ interactiva era **imperativa**: escuchar un evento y modificar el DOM paso a pas
 ```js
 // Imperativo: hay que recordar actualizar cada lugar que depende del dato
 button.addEventListener("click", () => {
-  paidCount++;
-  counter.textContent = String(paidCount);
-  if (paidCount > 0) emptyMessage.remove();
-  list.appendChild(createRow(lastPayment));
+  postCount++;
+  counter.textContent = String(postCount);
+  if (postCount > 0) emptyMessage.remove();
+  list.appendChild(createRow(lastPost));
 });
 ```
 
@@ -91,11 +91,11 @@ los datos. **React es declarativo**: describís **cómo se ve la interfaz para u
 actualizar el DOM cuando el estado cambia.
 
 ```tsx
-function PaymentsPanel({ payments }: { payments: Payment[] }) {
+function Feed({ posts }: { posts: Post[] }) {
   return (
     <section>
-      <h2>Pagos recibidos: {payments.length}</h2>
-      {payments.length === 0 ? <p>Todavía no hay pagos.</p> : <PaymentList payments={payments} />}
+      <h2>Publicaciones: {posts.length}</h2>
+      {posts.length === 0 ? <p>Todavía no hay publicaciones.</p> : <PostList posts={posts} />}
     </section>
   );
 }
@@ -105,7 +105,7 @@ function PaymentsPanel({ payments }: { payments: Payment[] }) {
   caption="UI = f(estado): cuando el estado cambia, React vuelve a llamar al componente y aplica sólo las diferencias al DOM."
   chart={`
 flowchart LR
-  S["Estado<br/>payments"] --> C["Componente<br/>función"]
+  S["Estado<br/>posts"] --> C["Componente<br/>función"]
   C --> J["Descripción de la UI<br/>JSX"]
   J --> R["React compara<br/>con la anterior"]
   R --> D["DOM actualizado<br/>sólo lo que cambió"]
@@ -125,8 +125,8 @@ decide qué tocar en el DOM real. Eso se ve en detalle en la lección de renderi
 | **Next.js** | Una aplicación full stack: rutas, renderizado en servidor, backend en el mismo proyecto. |
 
 ```bash
-pnpm create vite collections-ui --template react-ts
-pnpm create next-app@latest collections-app
+pnpm create vite social-ui --template react-ts
+pnpm create next-app@latest social-app
 ```
 
 Esta plataforma está hecha con Next.js; el curso de Next.js viene después de éste.
@@ -137,11 +137,11 @@ Un **componente** es una función de JavaScript que devuelve la descripción de 
 **empieza con mayúscula** (así JSX lo distingue de una etiqueta HTML).
 
 ```tsx
-export function DebtCard() {
+export function PostCard() {
   return (
-    <article className="debt-card">
-      <h3>Deuda #1042</h3>
-      <p>Saldo: $ 15.000</p>
+    <article className="post-card">
+      <h3>Ana Pérez</h3>
+      <p>¡Terminé mi primer proyecto con React!</p>
     </article>
   );
 }
@@ -156,7 +156,7 @@ reglas que más sorprenden:
 | `className` en lugar de `class`        | `<p className="muted">`                                                       |
 | Atributos en camelCase                 | `onClick`, `tabIndex`, `aria-label` (los `aria-*` y `data-*` van con guiones) |
 | Todas las etiquetas se cierran         | `<img />`, `<input />`, `<br />`                                              |
-| `{}` inserta expresiones de JavaScript | `<p>{formatAmount(debt.balanceCents)}</p>`                                    |
+| `{}` inserta expresiones de JavaScript | `<p>{formatDate(post.publishedAt)}</p>`                                       |
 | `style` recibe un objeto               | `<div style={{ marginTop: 8 }}>`                                              |
 
 Dentro de `{}` va **cualquier expresión** (una variable, una llamada, un ternario), pero no sentencias como `if` o
@@ -173,31 +173,31 @@ Dentro de `{}` va **cualquier expresión** (una variable, una llamada, un ternar
 Las **props** son los datos que un componente recibe de su padre. En TypeScript se tipan como un objeto:
 
 ```tsx
-interface DebtCardProps {
+interface PostCardProps {
   id: string;
-  customerName: string;
-  balanceCents: number;
-  status: "pending" | "promised" | "paid";
+  authorName: string;
+  likes: number;
+  visibility: "public" | "followers" | "private";
 }
 
-export function DebtCard({ id, customerName, balanceCents, status }: DebtCardProps) {
+export function PostCard({ id, authorName, likes, visibility }: PostCardProps) {
   return (
     <article>
       <h3>
-        {customerName} · #{id}
+        {authorName} · #{id}
       </h3>
-      <p>Saldo: {formatAmount(balanceCents)}</p>
-      <StatusBadge status={status} />
+      <p>{likes} me gusta</p>
+      <VisibilityBadge visibility={visibility} />
     </article>
   );
 }
 
 // Uso: los atributos JSX son las props
-<DebtCard id="1042" customerName="Ana Pérez" balanceCents={1_500_000} status="pending" />;
+<PostCard id="1042" authorName="Ana Pérez" likes={128} visibility="public" />;
 ```
 
 - Las props son **de sólo lectura**: un componente nunca modifica las props que recibe.
-- Los strings van entre comillas; cualquier otro valor, entre llaves (`balanceCents={1500000}`).
+- Los strings van entre comillas; cualquier otro valor, entre llaves (`likes={128}`).
 - **`children`** es una prop especial: lo que va entre la etiqueta de apertura y la de cierre.
 
 ```tsx
@@ -210,8 +210,8 @@ function Card({ title, children }: { title: string; children: React.ReactNode })
   );
 }
 
-<Card title="Promesas de pago">
-  <PromiseList />
+<Card title="Comentarios">
+  <CommentList />
 </Card>;
 ```
 
@@ -223,12 +223,12 @@ interacción. Se declara con el hook `useState`:
 ```tsx
 import { useState } from "react";
 
-export function ReminderToggle() {
-  const [enabled, setEnabled] = useState(false); // valor inicial
+export function FollowButton() {
+  const [following, setFollowing] = useState(false); // valor inicial
 
   return (
-    <button type="button" aria-pressed={enabled} onClick={() => setEnabled(!enabled)}>
-      Recordatorios: {enabled ? "activados" : "desactivados"}
+    <button type="button" aria-pressed={following} onClick={() => setFollowing(!following)}>
+      {following ? "Siguiendo" : "Seguir"}
     </button>
   );
 }
@@ -253,19 +253,19 @@ que **vuelva a ejecutar el componente** (un nuevo _render_) con el valor nuevo. 
 Los eventos se manejan con props `on...` que reciben **una función**:
 
 ```tsx
-function PromiseForm({ onSubmit }: { onSubmit: (date: string) => void }) {
-  const [date, setDate] = useState("");
+function CommentForm({ onSubmit }: { onSubmit: (text: string) => void }) {
+  const [text, setText] = useState("");
 
   return (
     <form
       onSubmit={(event) => {
         event.preventDefault(); // evita la recarga de la página
-        onSubmit(date);
+        onSubmit(text);
       }}
     >
-      <label htmlFor="promised-for">Fecha de pago</label>
-      <input id="promised-for" type="date" value={date} onChange={(event) => setDate(event.target.value)} />
-      <button type="submit">Registrar promesa</button>
+      <label htmlFor="comment">Comentario</label>
+      <input id="comment" value={text} onChange={(event) => setText(event.target.value)} />
+      <button type="submit">Comentar</button>
     </form>
   );
 }
@@ -274,19 +274,19 @@ function PromiseForm({ onSubmit }: { onSubmit: (date: string) => void }) {
 Un error clásico: `onClick={handleClick()}` **llama** a la función durante el render; lo correcto es pasarla:
 `onClick={handleClick}` o `onClick={() => handleClick(id)}`.
 
-Observá también el patrón de **comunicación hacia arriba**: el formulario no sabe qué hacer con la fecha; recibe
+Observá también el patrón de **comunicación hacia arriba**: el formulario no sabe qué hacer con el texto; recibe
 una función `onSubmit` de su padre y la llama. **Los datos bajan por props; los cambios suben por callbacks.**
 
 ## Renderizado condicional
 
 ```tsx
-function DebtStatus({ debt }: { debt: Debt }) {
-  if (debt.status === "paid") return <p>Pagada ✓</p>; // retorno temprano
+function PostStatus({ post }: { post: Post }) {
+  if (post.status === "removed") return <p>Publicación eliminada</p>; // retorno temprano
 
   return (
     <div>
-      {debt.status === "promised" ? <p>Promesa para el {debt.promisedFor}</p> : <p>Pendiente</p>}
-      {debt.overdueDays > 30 && <OverdueWarning days={debt.overdueDays} />}
+      {post.status === "scheduled" ? <p>Se publica el {post.scheduledFor}</p> : <p>Publicada</p>}
+      {post.reports > 3 && <ModerationWarning reports={post.reports} />}
     </div>
   );
 }
@@ -302,12 +302,12 @@ function DebtStatus({ debt }: { debt: Debt }) {
 Para mostrar una colección se transforma el array en elementos con `map`. Cada elemento necesita una **key**:
 
 ```tsx
-function DebtList({ debts }: { debts: Debt[] }) {
+function PostList({ posts }: { posts: Post[] }) {
   return (
     <ul>
-      {debts.map((debt) => (
-        <li key={debt.id}>
-          <DebtCard {...debt} />
+      {posts.map((post) => (
+        <li key={post.id}>
+          <PostCard {...post} />
         </li>
       ))}
     </ul>
@@ -323,7 +323,7 @@ checkbox) queda asociado a la fila equivocada.
 ## Estructura de archivos y estilos
 
 No hay una estructura obligatoria. Una convención habitual: un componente por archivo, nombrado igual que el
-componente, agrupado **por funcionalidad** (`features/debts/debt-card.tsx`) más que por tipo. Para estilos, las
+componente, agrupado **por funcionalidad** (`features/feed/post-card.tsx`) más que por tipo. Para estilos, las
 opciones más comunes son CSS Modules, Tailwind CSS (la que usa esta plataforma) y librerías de componentes con
 estilos propios.
 
@@ -370,14 +370,14 @@ estilos propios.
 
 <KnowledgeCheck
   id="react.introduction.q2"
-  question="Una lista de deudas usa `key={index}`. El usuario escribe una nota en la fila 2 y después ordena la lista por saldo. ¿Qué puede pasar?"
+  question="Una lista de publicaciones usa `key={index}`. El usuario empieza a escribir un comentario en la fila 2 y después ordena la lista por cantidad de me gusta. ¿Qué puede pasar?"
   options={[
     {
       text: "Nada, el índice es una key válida.",
       explanation: "Es válida sintácticamente, pero no identifica al dato.",
     },
     {
-      text: "La nota queda en la posición 2, asociada ahora a otra deuda.",
+      text: "El comentario queda en la posición 2, asociado ahora a otra publicación.",
       correct: true,
       explanation:
         "Correcto. React asocia el estado a la key; con el índice, la key de la posición no cambia aunque cambie el dato.",

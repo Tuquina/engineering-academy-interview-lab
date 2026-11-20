@@ -63,8 +63,8 @@ summary:
 ## ¿Qué problema resuelve?
 
 Una interfaz puede "funcionar" y aun así ser lenta al escribir, imposible de usar con teclado o lector de
-pantalla, vulnerable a inyectar código desde un nombre de cliente y difícil de cambiar porque todo depende de todo.
-En una plataforma interna que usan operadores ocho horas por día, esas cuatro cosas importan tanto como las
+pantalla, vulnerable a inyectar código desde el nombre de un alumno y difícil de cambiar porque todo depende de todo. En
+un campus virtual que usan docentes y estudiantes todos los días, esas cuatro cosas importan tanto como las
 funcionalidades.
 
 ## Optimización de renders
@@ -86,15 +86,15 @@ El orden recomendado, de lo más barato a lo más complejo:
 ```tsx
 import { useDeferredValue, useState } from "react";
 
-function CustomerSearch({ customers }: { customers: Customer[] }) {
+function StudentSearch({ students }: { students: Student[] }) {
   const [query, setQuery] = useState("");
   const deferredQuery = useDeferredValue(query); // el filtrado usa una versión "atrasada" del texto
 
   return (
     <>
-      <input value={query} onChange={(e) => setQuery(e.target.value)} aria-label="Buscar cliente" />
+      <input value={query} onChange={(e) => setQuery(e.target.value)} aria-label="Buscar alumno" />
       {/* El input responde en cada tecla; la lista se recalcula cuando hay tiempo */}
-      <CustomerTable customers={customers} query={deferredQuery} />
+      <StudentTable students={students} query={deferredQuery} />
     </>
   );
 }
@@ -124,24 +124,24 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
-describe("PromiseForm", () => {
-  it("envía la fecha y el monto ingresados", async () => {
+describe("EnrollmentForm", () => {
+  it("envía el correo y la comisión ingresados", async () => {
     const user = userEvent.setup();
     const onSubmit = vi.fn();
-    render(<PromiseForm onSubmit={onSubmit} />);
+    render(<EnrollmentForm onSubmit={onSubmit} />);
 
-    await user.type(screen.getByLabelText("Fecha"), "2026-12-01");
-    await user.type(screen.getByLabelText("Monto"), "15000");
-    await user.click(screen.getByRole("button", { name: "Registrar" }));
+    await user.type(screen.getByLabelText("Correo del alumno"), "ana@example.com");
+    await user.type(screen.getByLabelText("Comisión"), "2");
+    await user.click(screen.getByRole("button", { name: "Inscribir" }));
 
-    expect(onSubmit).toHaveBeenCalledWith({ promisedFor: "2026-12-01", amount: 15000 });
+    expect(onSubmit).toHaveBeenCalledWith({ studentEmail: "ana@example.com", section: 2 });
   });
 
-  it("muestra un error si el monto es inválido", async () => {
+  it("muestra un error si faltan datos", async () => {
     const user = userEvent.setup();
-    render(<PromiseForm onSubmit={vi.fn()} />);
-    await user.click(screen.getByRole("button", { name: "Registrar" }));
-    expect(await screen.findByRole("alert")).toHaveTextContent("Revisá la fecha y el monto");
+    render(<EnrollmentForm onSubmit={vi.fn()} />);
+    await user.click(screen.getByRole("button", { name: "Inscribir" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Revisá el correo y la comisión");
   });
 });
 ```
@@ -171,12 +171,12 @@ estándar de referencia es **WCAG 2.2**. Lo esencial para un desarrollador:
 
 ```tsx
 // ❌ No accesible: no es focusable, no responde a teclado, no se anuncia como botón
-<div className="btn" onClick={markAsPaid}>
+<div className="btn" onClick={markAsGraded}>
   <CheckIcon />
 </div>
 
 // ✅ Accesible
-<button type="button" onClick={markAsPaid} aria-label="Marcar como pagada">
+<button type="button" onClick={markAsGraded} aria-label="Marcar entrega como corregida">
   <CheckIcon aria-hidden />
 </button>
 ```
@@ -218,12 +218,12 @@ cientos de archivos cada uno):
 src/
   shared/ui/              Button, Dialog, Table: genéricos, sin lógica de negocio
   features/
-    debts/
-      components/         DebtTable, DebtRow
-      hooks/              useCustomerDebts, useRegisterPromise
+    enrollments/
+      components/         EnrollmentTable, EnrollmentRow
+      hooks/              useStudentEnrollments, useEnrollStudent
       api.ts              llamadas al backend tipadas
       schemas.ts          esquemas Zod compartidos con el formulario
-    campaigns/
+    grades/
   app/                    rutas y composición de pantallas
 ```
 
@@ -260,7 +260,7 @@ Esta plataforma sigue esa idea con `src/shared/ui` y `src/modules/<módulo>/pres
       explanation: "Las clases son un detalle de implementación y no reflejan cómo lo encuentra un usuario.",
     },
     {
-      text: "Buscarlo con `getByRole('button', { name: 'Registrar' })`.",
+      text: "Buscarlo con `getByRole('button', { name: 'Inscribir' })`.",
       correct: true,
       explanation:
         "Correcto. El test se parece al uso real y además verifica que el botón tiene nombre accesible.",
@@ -274,7 +274,7 @@ Esta plataforma sigue esa idea con `src/shared/ui` y `src/modules/<módulo>/pres
 
 <KnowledgeCheck
   id="react.quality.q2"
-  question="Mostrás el nombre de un cliente con `<p>{customer.name}</p>` y el nombre contiene una etiqueta script. ¿Qué pasa?"
+  question="Mostrás el nombre de un alumno con `<p>{student.name}</p>` y el nombre contiene una etiqueta script. ¿Qué pasa?"
   options={[
     { text: "Se ejecuta el script.", explanation: "React escapa el texto insertado con llaves." },
     {

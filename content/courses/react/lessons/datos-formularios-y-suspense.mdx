@@ -61,8 +61,8 @@ summary:
 ## ¿Qué problema resuelve?
 
 En la lección de efectos vimos que cargar datos con `useEffect` a mano obliga a resolver race conditions. Y eso es
-sólo el principio: si dos componentes necesitan el mismo cliente, ¿se piden dos veces? Si el usuario registra una
-promesa de pago, ¿cómo se actualiza la lista? ¿Qué pasa si la red falla? ¿Cuándo se considera viejo un dato?
+sólo el principio: si dos componentes necesitan el mismo huésped, ¿se piden dos veces? Si el usuario confirma una
+reserva, ¿cómo se actualiza la lista? ¿Qué pasa si la red falla? ¿Cuándo se considera viejo un dato?
 
 La respuesta moderna es reconocer que **los datos del servidor son un tipo de estado distinto** y usar herramientas
 diseñadas para él.
@@ -75,7 +75,7 @@ diseñadas para él.
 | Puede quedar desactualizado sin que lo sepas           | Siempre está al día                        |
 | Se comparte entre pantallas y usuarios                 | Local a una pantalla o sesión              |
 | Necesita caché, revalidación, reintentos, invalidación | Necesita sólo guardarse y actualizarse     |
-| Ejemplos: deudas, clientes, campañas                   | Ejemplos: modal abierto, pestaña, borrador |
+| Ejemplos: reservas, habitaciones, tarifas              | Ejemplos: modal abierto, pestaña, borrador |
 
 <MermaidDiagram
   caption="Cada tipo de estado con su herramienta: el server state se cachea y revalida; el client state es local."
@@ -106,27 +106,27 @@ modelo es este:
 ```tsx
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
-function useCustomerDebts(customerId: string) {
+function useGuestBookings(guestId: string) {
   return useQuery({
-    queryKey: ["customers", customerId, "debts"], // identidad del dato en la caché
-    queryFn: ({ signal }) => api.getCustomerDebts(customerId, { signal }), // cancelable
+    queryKey: ["guests", guestId, "bookings"], // identidad del dato en la caché
+    queryFn: ({ signal }) => api.getGuestBookings(guestId, { signal }), // cancelable
     staleTime: 30_000, // durante 30 s se considera fresco y no se vuelve a pedir
   });
 }
 
-function useRegisterPromise(customerId: string) {
+function useCreateBooking(guestId: string) {
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: api.registerPaymentPromise,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["customers", customerId] }), // refresca lo afectado
+    mutationFn: api.createBooking,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["guests", guestId] }), // refresca lo afectado
   });
 }
 
-function DebtsPanel({ customerId }: { customerId: string }) {
-  const { data, isPending, isError, refetch } = useCustomerDebts(customerId);
+function BookingsPanel({ guestId }: { guestId: string }) {
+  const { data, isPending, isError, refetch } = useGuestBookings(guestId);
   if (isPending) return <Skeleton />;
   if (isError) return <ErrorState onRetry={refetch} />;
-  return <DebtList debts={data} />;
+  return <BookingList bookings={data} />;
 }
 ```
 
@@ -139,22 +139,22 @@ cambiar de key (sin race conditions) e **invalidación** tras mutaciones.
 ### No controlados: el DOM guarda el valor
 
 ```tsx
-function PromiseForm({ onSubmit }: { onSubmit: (input: PromiseInput) => void }) {
+function BookingForm({ onSubmit }: { onSubmit: (input: BookingInput) => void }) {
   return (
     <form
       onSubmit={(event) => {
         event.preventDefault();
         const data = new FormData(event.currentTarget);
-        onSubmit({ promisedFor: String(data.get("promisedFor")), amount: Number(data.get("amount")) });
+        onSubmit({ checkIn: String(data.get("checkIn")), nights: Number(data.get("nights")) });
       }}
     >
       <label>
-        Fecha <input name="promisedFor" type="date" required />
+        Llegada <input name="checkIn" type="date" required />
       </label>
       <label>
-        Monto <input name="amount" type="number" min="1" required />
+        Noches <input name="nights" type="number" min="1" required />
       </label>
-      <button type="submit">Registrar</button>
+      <button type="submit">Reservar</button>
     </form>
   );
 }
@@ -165,8 +165,8 @@ Simple, sin renders por tecla, y aprovecha la validación nativa del navegador (
 ### Controlados: React guarda el valor
 
 ```tsx
-const [amount, setAmount] = useState("");
-<input value={amount} onChange={(e) => setAmount(e.target.value)} />;
+const [nights, setNights] = useState("");
+<input value={nights} onChange={(e) => setNights(e.target.value)} />;
 ```
 
 Necesarios cuando el valor afecta otras partes de la interfaz en vivo: validación mientras se escribe, campos que
@@ -179,9 +179,9 @@ La validación del cliente es **para la experiencia**; la del servidor es **para
 Zod puede usarse en ambos lados para que no diverjan:
 
 ```tsx
-export const PromiseInputSchema = z.object({
-  promisedFor: z.iso.date(),
-  amount: z.number().int().positive().max(10_000_000),
+export const BookingInputSchema = z.object({
+  checkIn: z.iso.date(),
+  nights: z.number().int().positive().max(30),
 });
 ```
 
@@ -195,30 +195,30 @@ import { useActionState, useOptimistic } from "react";
 
 type FormState = { error?: string; ok?: boolean };
 
-function PromiseForm({ debtId, promises }: { debtId: string; promises: PaymentPromise[] }) {
-  const [optimisticPromises, addOptimistic] = useOptimistic(promises, (current, added: PaymentPromise) => [
+function BookingForm({ roomId, bookings }: { roomId: string; bookings: Booking[] }) {
+  const [optimisticBookings, addOptimistic] = useOptimistic(bookings, (current, added: Booking) => [
     ...current,
     added,
   ]);
 
   const [state, formAction, isPending] = useActionState(async (_previous: FormState, formData: FormData) => {
-    const parsed = PromiseInputSchema.safeParse({
-      promisedFor: formData.get("promisedFor"),
-      amount: Number(formData.get("amount")),
+    const parsed = BookingInputSchema.safeParse({
+      checkIn: formData.get("checkIn"),
+      nights: Number(formData.get("nights")),
     });
-    if (!parsed.success) return { error: "Revisá la fecha y el monto." };
+    if (!parsed.success) return { error: "Revisá la fecha de llegada y las noches." };
 
-    addOptimistic({ id: "temp", debtId, ...parsed.data, status: "pending" }); // se ve al instante
-    const result = await registerPromise(debtId, parsed.data); // si falla, la UI optimista se descarta
+    addOptimistic({ id: "temp", roomId, ...parsed.data, status: "pending" }); // se ve al instante
+    const result = await createBooking(roomId, parsed.data); // si falla, la UI optimista se descarta
     return result.ok ? { ok: true } : { error: result.message };
   }, {});
 
   return (
     <form action={formAction}>
       {/* ...campos... */}
-      <button disabled={isPending}>{isPending ? "Guardando…" : "Registrar"}</button>
+      <button disabled={isPending}>{isPending ? "Reservando…" : "Reservar"}</button>
       {state.error && <p role="alert">{state.error}</p>}
-      <PromiseList promises={optimisticPromises} />
+      <BookingList bookings={optimisticBookings} />
     </form>
   );
 }
@@ -233,8 +233,8 @@ function PromiseForm({ debtId, promises }: { debtId: string; promises: PaymentPr
 **Suspense** declara qué mostrar **mientras** una parte de la interfaz espera (datos o código):
 
 ```tsx
-<Suspense fallback={<DebtsSkeleton />}>
-  <DebtsPanel customerId={customerId} />
+<Suspense fallback={<BookingsSkeleton />}>
+  <BookingsPanel guestId={guestId} />
 </Suspense>
 ```
 
@@ -247,9 +247,9 @@ Un **error boundary** declara qué mostrar si **falla** el render de sus hijos:
 ```tsx
 import { ErrorBoundary } from "react-error-boundary";
 
-<ErrorBoundary fallback={<PanelError message="No pudimos cargar las deudas." />}>
-  <Suspense fallback={<DebtsSkeleton />}>
-    <DebtsPanel customerId={customerId} />
+<ErrorBoundary fallback={<PanelError message="No pudimos cargar las reservas." />}>
+  <Suspense fallback={<BookingsSkeleton />}>
+    <BookingsPanel guestId={guestId} />
   </Suspense>
 </ErrorBoundary>;
 ```
@@ -284,7 +284,7 @@ esos se manejan con `try/catch` y estado.
 ## Errores frecuentes
 
 - **Guardar server state en un store global** y reimplementar caché a mano.
-- **No invalidar tras mutaciones**: la lista no refleja la promesa recién creada.
+- **No invalidar tras mutaciones**: la lista no refleja la reserva recién creada.
 - **Validar sólo en el cliente.**
 - **Formularios controlados enormes** que re-renderizan todo por tecla.
 - **Un único Suspense o error boundary** para toda la aplicación.
@@ -294,7 +294,7 @@ esos se manejan con `try/catch` y estado.
 
 <KnowledgeCheck
   id="react.data-forms.q1"
-  question="Dos componentes de la misma pantalla llaman a `useQuery` con la key `['customers', 'cus_1']`. ¿Cuántas requests se hacen?"
+  question="Dos componentes de la misma pantalla llaman a `useQuery` con la key `['guests', 'gst_1']`. ¿Cuántas requests se hacen?"
   options={[
     { text: "Dos, una por componente.", explanation: "La librería deduplica por query key." },
     {
@@ -308,11 +308,11 @@ esos se manejan con `try/catch` y estado.
 
 <KnowledgeCheck
   id="react.data-forms.q2"
-  question="Después de registrar una promesa de pago con una mutación, la lista de promesas sigue mostrando los datos viejos. ¿Qué falta?"
+  question="Después de crear una reserva con una mutación, la lista de reservas sigue mostrando los datos viejos. ¿Qué falta?"
   options={[
     { text: "Recargar la página.", explanation: "Funciona, pero rompe la experiencia y no es necesario." },
     {
-      text: "Invalidar (o actualizar) la query de promesas en el onSuccess de la mutación.",
+      text: "Invalidar (o actualizar) la query de reservas en el onSuccess de la mutación.",
       correct: true,
       explanation: "Correcto. La librería vuelve a pedir los datos afectados por la escritura.",
     },

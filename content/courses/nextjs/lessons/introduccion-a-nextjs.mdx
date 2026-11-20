@@ -83,8 +83,8 @@ Vaadin, aunque el modelo de componentes de React es muy distinto.
 ## Crear y ejecutar un proyecto
 
 ```bash
-pnpm create next-app@latest collections-app   # asistente: TypeScript, ESLint, Tailwind, App Router
-cd collections-app
+pnpm create next-app@latest marketplace-app   # asistente: TypeScript, ESLint, Tailwind, App Router
+cd marketplace-app
 pnpm dev     # servidor de desarrollo con recarga en caliente en http://localhost:3000
 pnpm build   # build de producción (compila, prerenderiza y verifica tipos)
 pnpm start   # sirve el build de producción
@@ -111,14 +111,14 @@ rol especial:
 app/
   layout.tsx                 → layout raíz (html y body), envuelve todo
   page.tsx                   → /
-  debts/
-    layout.tsx               → envuelve todo lo que está bajo /debts
-    page.tsx                 → /debts
-    loading.tsx              → se muestra mientras /debts carga
-    error.tsx                → se muestra si /debts falla
-    [debtId]/
-      page.tsx               → /debts/123 (segmento dinámico)
-      not-found.tsx          → si la deuda no existe
+  products/
+    layout.tsx               → envuelve todo lo que está bajo /products
+    page.tsx                 → /products
+    loading.tsx              → se muestra mientras /products carga
+    error.tsx                → se muestra si /products falla
+    [productId]/
+      page.tsx               → /products/123 (segmento dinámico)
+      not-found.tsx          → si el producto no existe
   api/
     webhooks/payments/
       route.ts               → endpoint HTTP POST /api/webhooks/payments
@@ -137,10 +137,10 @@ app/
   caption="Cómo se anidan los archivos de un segmento: el layout envuelve al error boundary, al Suspense de carga y a la página."
   chart={`
 flowchart TD
-  RL["app/layout.tsx<br/>layout raíz"] --> DL["debts/layout.tsx"]
-  DL --> EB["debts/error.tsx<br/>error boundary"]
-  EB --> LS["debts/loading.tsx<br/>Suspense"]
-  LS --> P["debts/page.tsx<br/>la página"]
+  RL["app/layout.tsx<br/>layout raíz"] --> DL["products/layout.tsx"]
+  DL --> EB["products/error.tsx<br/>error boundary"]
+  EB --> LS["products/loading.tsx<br/>Suspense"]
+  LS --> P["products/page.tsx<br/>la página"]
 `}
 />
 
@@ -149,21 +149,21 @@ flowchart TD
 Una **página** es un componente exportado por defecto desde `page.tsx`:
 
 ```tsx
-// app/debts/page.tsx
-export default async function DebtsPage() {
-  const debts = await getOverdueDebts(); // puede consultar la base directamente: corre en el servidor
+// app/products/page.tsx
+export default async function ProductsPage() {
+  const products = await getFeaturedProducts(); // puede consultar la base directamente: corre en el servidor
   return (
     <main>
-      <h1>Deudas vencidas</h1>
-      <DebtTable debts={debts} />
+      <h1>Productos destacados</h1>
+      <ProductGrid products={products} />
     </main>
   );
 }
 ```
 
 Un **layout** envuelve a las páginas de su segmento y de los segmentos hijos, y **se conserva entre navegaciones**:
-al pasar de `/debts` a `/debts/123`, el layout de `/debts` no se vuelve a montar (mantiene su estado, por ejemplo un
-filtro abierto en una barra lateral).
+al pasar de `/products` a `/products/123`, el layout de `/products` no se vuelve a montar (mantiene su estado,
+por ejemplo los filtros de categoría y precio abiertos en una barra lateral).
 
 ```tsx
 // app/layout.tsx: el layout raíz es obligatorio
@@ -183,7 +183,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
 ```tsx
 import Link from "next/link";
 
-<Link href={`/debts/${debt.id}`}>Ver detalle</Link>;
+<Link href={`/products/${product.id}`}>Ver producto</Link>;
 ```
 
 `Link` navega **del lado del cliente**: no recarga la página, conserva los layouts y **prefetchea** las rutas
@@ -200,27 +200,27 @@ El concepto más importante del App Router (y el tema central de la lección de 
   `"use client"` al principio del archivo.
 
 ```tsx
-// app/debts/[debtId]/page.tsx: Server Component
-export default async function DebtPage({ params }: { params: Promise<{ debtId: string }> }) {
-  const { debtId } = await params;
-  const debt = await getDebt(debtId);
+// app/products/[productId]/page.tsx: Server Component
+export default async function ProductPage({ params }: { params: Promise<{ productId: string }> }) {
+  const { productId } = await params;
+  const product = await getProduct(productId);
   return (
     <>
-      <DebtDetail debt={debt} /> {/* también Server Component: sólo muestra */}
-      <PromiseForm debtId={debt.id} /> {/* Client Component: tiene estado y eventos */}
+      <ProductDetail product={product} /> {/* también Server Component: sólo muestra */}
+      <AddToCartForm productId={product.id} /> {/* Client Component: tiene estado y eventos */}
     </>
   );
 }
 ```
 
 ```tsx
-// promise-form.tsx
+// add-to-cart-form.tsx
 "use client";
 
 import { useState } from "react";
 
-export function PromiseForm({ debtId }: { debtId: string }) {
-  const [open, setOpen] = useState(false);
+export function AddToCartForm({ productId }: { productId: string }) {
+  const [quantity, setQuantity] = useState(1);
   // ...
 }
 ```
@@ -274,7 +274,7 @@ en el cliente las partes con estado (quizzes, notas, progreso).
 
 <KnowledgeCheck
   id="nextjs.introduction.q1"
-  question="Creás `app/campaigns/[campaignId]/` con un `layout.tsx` pero sin `page.tsx`. ¿Qué pasa al visitar `/campaigns/7`?"
+  question="Creás `app/categories/[categoryId]/` con un `layout.tsx` pero sin `page.tsx`. ¿Qué pasa al visitar `/categories/7`?"
   options={[
     { text: "Se muestra el layout vacío.", explanation: "Sin page.tsx el segmento no es una ruta pública." },
     {
@@ -291,7 +291,7 @@ en el cliente las partes con estado (quizzes, notas, progreso).
 
 <KnowledgeCheck
   id="nextjs.introduction.q2"
-  question="Al navegar de `/debts` a `/debts/123`, ¿qué pasa con el layout de `app/debts/layout.tsx`?"
+  question="Al navegar de `/products` a `/products/123`, ¿qué pasa con el layout de `app/products/layout.tsx`?"
   options={[
     {
       text: "Se desmonta y se vuelve a montar.",

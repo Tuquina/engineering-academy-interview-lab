@@ -89,7 +89,7 @@ Los Server Components pueden consultar la base directamente, pero conviene que l
 acceso a datos** que centralice tres cosas: la consulta, la **autorización** y el **DTO** que se devuelve.
 
 ```tsx
-// src/modules/debts/data-access.ts
+// src/modules/bookings/data-access.ts
 import "server-only";
 import { cache } from "react";
 
@@ -100,10 +100,10 @@ export const getCurrentUser = cache(async () => {
   return session.user;
 });
 
-export async function getDebtSummary(customerId: string): Promise<DebtSummaryDto> {
+export async function getGuestBookings(guestId: string): Promise<BookingSummaryDto[]> {
   const user = await getCurrentUser();
-  const debts = await debtRepository.listByCustomer(user.tenantId, customerId); // filtra por tenant
-  return toDebtSummaryDto(debts); // sólo los campos que la UI necesita
+  const bookings = await bookingRepository.listByGuest(user.hotelId, guestId); // filtra por hotel
+  return bookings.map(toBookingSummaryDto); // sólo los campos que la UI necesita
 }
 ```
 
@@ -118,17 +118,17 @@ en una función de datos o en un componente completo:
 ```tsx
 import { cacheLife, cacheTag } from "next/cache";
 
-/** Plantillas de mensajes de un tenant: cambian poco, se leen en cada campaña. */
-export async function getMessageTemplates(tenantId: string) {
+/** Tipos de habitación de un hotel: cambian poco, se leen en cada búsqueda. */
+export async function getRoomTypes(hotelId: string) {
   "use cache";
   cacheLife("hours"); // cuánto dura la entrada
-  cacheTag(`templates:${tenantId}`); // etiqueta para invalidar cuando cambien
-  return templateRepository.listByTenant(tenantId);
+  cacheTag(`room-types:${hotelId}`); // etiqueta para invalidar cuando cambien
+  return roomTypeRepository.listByHotel(hotelId);
 }
 ```
 
-- **Los argumentos forman parte de la clave de caché**: `getMessageTemplates("tnt_a")` y `("tnt_b")` son entradas
-  distintas. Por eso el `tenantId` se pasa como argumento, nunca se omite.
+- **Los argumentos forman parte de la clave de caché**: `getRoomTypes("htl_a")` y `("htl_b")` son entradas distintas.
+  Por eso el `hotelId` se pasa como argumento, nunca se omite.
 - **`cacheLife`** acepta perfiles (`seconds`, `minutes`, `hours`, `days`, `weeks`, `max`) o un objeto con
   `stale`, `revalidate` y `expire`.
 - Dentro de un scope con `"use cache"` no se pueden leer `cookies()` ni `headers()`: los datos de la request se
@@ -143,13 +143,13 @@ renderiza en el momento, **dentro de un Suspense**, mientras el resto de la pág
   caption="Una página combina un shell prerenderizado, partes cacheadas y partes dinámicas que llegan por streaming."
   chart={`
 flowchart LR
-  subgraph PAGE["Página /campaigns/7"]
+  subgraph PAGE["Página /hotels/7"]
     SH["Shell estático<br/>layout y navegación"]
-    CA["Plantillas del tenant<br/>use cache + cacheLife hours"]
-    DY["Progreso en vivo<br/>dinámico dentro de Suspense"]
+    CA["Tipos de habitación<br/>use cache + cacheLife hours"]
+    DY["Disponibilidad en vivo<br/>dinámica dentro de Suspense"]
   end
   SH -->|"prerenderizado"| OUT["Respuesta inmediata"]
-  CA -->|"caché con tag templates"| OUT
+  CA -->|"caché con tag room-types"| OUT
   DY -->|"streaming por request"| OUT
 `}
 />
@@ -163,8 +163,8 @@ flowchart LR
 | `revalidatePath(path)`      | Invalida lo asociado a una ruta                                     | Server Actions, Route Handlers |
 | `refresh()`                 | Vuelve a renderizar la ruta actual en el cliente sin tocar la caché | Server Actions                 |
 
-Regla práctica: **`updateTag` cuando el usuario espera ver su cambio inmediatamente** (editó una plantilla y vuelve a
-la lista); **`revalidateTag` cuando un pequeño retraso es aceptable** (un webhook actualiza datos que otros verán).
+Regla práctica: **`updateTag` cuando el usuario espera ver su cambio inmediatamente** (editó un tipo de habitación y
+vuelve a la lista); **`revalidateTag` cuando un pequeño retraso es aceptable** (un webhook actualiza datos que otros verán).
 
 ## Server Actions: mutaciones desde la UI
 
@@ -172,32 +172,29 @@ Una **Server Action** es una función `async` marcada con `"use server"` que se 
 desde el cliente, típicamente como `action` de un formulario:
 
 ```tsx
-// src/modules/debts/actions.ts
+// src/modules/bookings/actions.ts
 "use server";
 
 import { updateTag } from "next/cache";
 import { z } from "zod";
 
-const RegisterPromiseSchema = z.object({
-  debtId: z.string().min(1),
-  promisedFor: z.iso.date(),
-  amountCents: z.coerce.number().int().positive(),
+const CreateBookingSchema = z.object({
+  roomId: z.string().min(1),
+  checkIn: z.iso.date(),
+  nights: z.coerce.number().int().positive().max(30),
 });
 
 export type ActionState = { error?: string; ok?: boolean };
 
-export async function registerPromiseAction(
-  _previous: ActionState,
-  formData: FormData,
-): Promise<ActionState> {
+export async function createBookingAction(_previous: ActionState, formData: FormData): Promise<ActionState> {
   const user = await getCurrentUser(); // 1. autenticación
-  const parsed = RegisterPromiseSchema.safeParse(Object.fromEntries(formData)); // 2. validación
-  if (!parsed.success) return { error: "Revisá la fecha y el monto." };
+  const parsed = CreateBookingSchema.safeParse(Object.fromEntries(formData)); // 2. validación
+  if (!parsed.success) return { error: "Revisá la fecha de llegada y las noches." };
 
-  const result = await registerPaymentPromise.execute({ ...parsed.data, actor: user }); // 3. caso de uso (autoriza)
+  const result = await createBooking.execute({ ...parsed.data, actor: user }); // 3. caso de uso (autoriza)
   if (!result.ok) return { error: messageFor(result.error) };
 
-  updateTag(`debt:${parsed.data.debtId}`); // 4. invalidar lo que cambió
+  updateTag(`room:${parsed.data.roomId}`); // 4. invalidar lo que cambió
   return { ok: true };
 }
 ```
@@ -206,15 +203,15 @@ export async function registerPromiseAction(
 "use client";
 
 import { useActionState } from "react";
-import { registerPromiseAction } from "@/modules/debts/actions";
+import { createBookingAction } from "@/modules/bookings/actions";
 
-export function PromiseForm({ debtId }: { debtId: string }) {
-  const [state, formAction, pending] = useActionState(registerPromiseAction, {});
+export function BookingForm({ roomId }: { roomId: string }) {
+  const [state, formAction, pending] = useActionState(createBookingAction, {});
   return (
     <form action={formAction}>
-      <input type="hidden" name="debtId" value={debtId} />
-      {/* campos promisedFor y amountCents */}
-      <button disabled={pending}>{pending ? "Guardando…" : "Registrar promesa"}</button>
+      <input type="hidden" name="roomId" value={roomId} />
+      {/* campos checkIn y nights */}
+      <button disabled={pending}>{pending ? "Reservando…" : "Reservar"}</button>
       {state.error && <p role="alert">{state.error}</p>}
     </form>
   );
@@ -224,7 +221,7 @@ export function PromiseForm({ debtId }: { debtId: string }) {
 <Callout type="danger" title="Una Server Action es un endpoint público">
   Next.js expone cada Server Action como un endpoint `POST`. Cualquiera puede invocarla con argumentos
   arbitrarios, no sólo tu formulario. Por eso cada acción **autentica, autoriza sobre el recurso concreto y
-  valida** todos sus argumentos (incluido el `debtId` del input oculto, que el usuario puede cambiar). La
+  valida** todos sus argumentos (incluido el `roomId` del input oculto, que el usuario puede cambiar). La
   documentación oficial lo repite como advertencia.
 </Callout>
 
@@ -266,13 +263,13 @@ import { NextResponse, type NextRequest } from "next/server";
 
 export function proxy(request: NextRequest) {
   const hasSession = request.cookies.has("session");
-  if (!hasSession && request.nextUrl.pathname.startsWith("/debts")) {
+  if (!hasSession && request.nextUrl.pathname.startsWith("/bookings")) {
     return NextResponse.redirect(new URL("/login", request.url));
   }
   return NextResponse.next();
 }
 
-export const config = { matcher: ["/debts/:path*", "/campaigns/:path*"] };
+export const config = { matcher: ["/bookings/:path*", "/hotels/:path*"] };
 ```
 
 La documentación es explícita: proxy **no** es una solución de autorización completa ni el lugar para consultas
@@ -292,7 +289,7 @@ lentas. La autorización real se verifica en la capa de acceso a datos, en cada 
 ## Errores frecuentes
 
 - **Server Actions sin autorización** confiando en que "sólo las llama mi formulario".
-- **Omitir el tenant en funciones cacheadas**: los argumentos son la clave de la caché.
+- **Omitir el hotel o el tenant en funciones cacheadas**: los argumentos son la clave de la caché.
 - **Leer cookies dentro de `"use cache"`.**
 - **No invalidar tras mutar**, o invalidar todo con `revalidatePath("/")`.
 - **Autorizar sólo en `proxy.ts`.**
@@ -302,14 +299,14 @@ lentas. La autorización real se verifica en la capa de acceso a datos, en cada 
 
 <KnowledgeCheck
   id="nextjs.data-mutations.q1"
-  question="Una Server Action recibe `debtId` de un input oculto y actualiza la deuda sin más chequeos, porque 'el formulario sólo muestra deudas del usuario'. ¿Qué problema hay?"
+  question="Una Server Action recibe `bookingId` de un input oculto y cancela la reserva sin más chequeos, porque 'el formulario sólo muestra reservas del usuario'. ¿Qué problema hay?"
   options={[
     {
       text: "Ninguno: los inputs ocultos no se pueden modificar.",
       explanation: "Se pueden modificar, y además la acción se puede invocar sin el formulario.",
     },
     {
-      text: "La acción es un endpoint POST: cualquiera puede invocarla con otro debtId; hay que autorizar sobre el recurso.",
+      text: "La acción es un endpoint POST: cualquiera puede invocarla con otro bookingId; hay que autorizar sobre el recurso.",
       correct: true,
       explanation: "Correcto. Autenticar, autorizar y validar en cada Server Action.",
     },
@@ -322,14 +319,14 @@ lentas. La autorización real se verifica en la capa de acceso a datos, en cada 
 
 <KnowledgeCheck
   id="nextjs.data-mutations.q2"
-  question="Un usuario edita una plantilla de mensajes y al volver a la lista debe ver su cambio inmediatamente. ¿Qué usás en la Server Action?"
+  question="Un administrador edita un tipo de habitación y al volver a la lista debe ver su cambio inmediatamente. ¿Qué usás en la Server Action?"
   options={[
     {
-      text: "`revalidateTag('templates', 'max')`",
+      text: "`revalidateTag('room-types', 'max')`",
       explanation: "Sirve la versión vieja mientras regenera: el usuario podría no ver su cambio.",
     },
     {
-      text: "`updateTag('templates:' + tenantId)`",
+      text: "`updateTag('room-types:' + hotelId)`",
       correct: true,
       explanation:
         "Correcto. Expira la entrada de inmediato para leer lo propio escrito; sólo se usa en Server Actions.",

@@ -58,9 +58,9 @@ summary:
 
 ## ¿Qué problema resuelve?
 
-Una plataforma de cobranzas tiene un panel de operadores, una sección de administración con su propio menú, el
-detalle de cada deuda, de cada cliente y de cada campaña, y páginas públicas de pago para los deudores, con otro
-diseño. El sistema de rutas tiene que permitir layouts distintos por sección, URLs limpias, parámetros dinámicos y
+Una plataforma educativa tiene un panel para docentes, una sección de administración con su propio menú, el
+detalle de cada alumno, de cada materia y de cada examen, y páginas públicas de inscripción para aspirantes, con
+otro diseño. El sistema de rutas tiene que permitir layouts distintos por sección, URLs limpias, parámetros dinámicos y
 un manejo coherente de "no existe" y "algo falló".
 
 ## Layouts anidados y templates
@@ -71,13 +71,13 @@ Cada nivel de carpetas puede tener su `layout.tsx`, y los layouts **se anidan**:
 app/
   layout.tsx              html, body, proveedores globales
   (app)/
-    layout.tsx            barra lateral del panel de operadores
-    debts/
-      layout.tsx          pestañas de la sección de deudas
+    layout.tsx            barra lateral del panel docente
+    students/
+      layout.tsx          pestañas de la sección de alumnos
       page.tsx
 ```
 
-Para `/debts`, el resultado es `RootLayout > AppLayout > DebtsLayout > DebtsPage`. Al navegar entre páginas
+Para `/students`, el resultado es `RootLayout > AppLayout > StudentsLayout > StudentsPage`. Al navegar entre páginas
 hermanas, **sólo se re-renderiza lo que cambia**; los layouts compartidos se conservan con su estado.
 
 `template.tsx` es como un layout pero **se vuelve a montar en cada navegación** (se pierde su estado). Se usa poco:
@@ -90,50 +90,50 @@ Una carpeta **entre paréntesis** organiza rutas **sin aparecer en la URL**:
 ```text
 app/
   (public)/
-    layout.tsx            diseño simple para deudores
-    pay/[token]/page.tsx  → /pay/abc123
+    layout.tsx            diseño simple para aspirantes
+    enroll/[token]/page.tsx  → /enroll/abc123
   (app)/
     layout.tsx            panel con barra lateral y autenticación
-    debts/page.tsx        → /debts
-    campaigns/page.tsx    → /campaigns
+    students/page.tsx     → /students
+    exams/page.tsx        → /exams
 ```
 
-`/pay/abc123` y `/debts` están en el mismo nivel de URL, pero usan layouts completamente distintos. También se usan
+`/enroll/abc123` y `/students` están en el mismo nivel de URL, pero usan layouts completamente distintos. También se usan
 para agrupar por funcionalidad o equipo sin afectar las rutas.
 
 ## Rutas dinámicas
 
 | Carpeta       | Coincide con                        | `params`                                  |
 | ------------- | ----------------------------------- | ----------------------------------------- |
-| `[debtId]`    | `/debts/123`                        | `{ debtId: "123" }`                       |
+| `[studentId]` | `/students/123`                     | `{ studentId: "123" }`                    |
 | `[...slug]`   | `/docs/a/b/c` (uno o más segmentos) | `{ slug: ["a", "b", "c"] }`               |
 | `[[...slug]]` | `/docs` y `/docs/a/b` (cero o más)  | `{ slug: undefined }` o `{ slug: [...] }` |
 
 En las páginas, layouts y metadata, **`params` y `searchParams` son Promises**:
 
 ```tsx
-// app/(app)/debts/[debtId]/page.tsx
+// app/(app)/students/[studentId]/page.tsx
 import { notFound } from "next/navigation";
 
-export default async function DebtPage({
+export default async function StudentPage({
   params,
   searchParams,
 }: {
-  params: Promise<{ debtId: string }>;
+  params: Promise<{ studentId: string }>;
   searchParams: Promise<{ tab?: string }>;
 }) {
-  const { debtId } = await params;
-  const { tab = "summary" } = await searchParams;
+  const { studentId } = await params;
+  const { tab = "grades" } = await searchParams;
 
-  const debt = await getDebtForCurrentUser(debtId); // incluye el chequeo de tenant
-  if (!debt) notFound(); // muestra el not-found.tsx más cercano
+  const student = await getStudentForCurrentTeacher(studentId); // incluye el chequeo de permisos
+  if (!student) notFound(); // muestra el not-found.tsx más cercano
 
-  return <DebtView debt={debt} tab={tab} />;
+  return <StudentView student={student} tab={tab} />;
 }
 ```
 
 <Callout type="warning" title="Los parámetros son datos externos">
-  `debtId` y `searchParams` vienen de la URL: cualquiera puede escribir lo que quiera. Se validan (formato,
+  `studentId` y `searchParams` vienen de la URL: cualquiera puede escribir lo que quiera. Se validan (formato,
   rango) y se verifica la autorización sobre el recurso igual que en una API.
 </Callout>
 
@@ -163,9 +163,9 @@ Cada lección se genera como HTML en el build: se sirve sin trabajo en el servid
   caption="Qué archivo responde en cada situación de un segmento."
   chart={`
 flowchart TD
-  R["Request a /debts/123"] --> L{"¿Los datos están listos?"}
+  R["Request a /students/123"] --> L{"¿Los datos están listos?"}
   L -->|"todavía no"| LO["loading.tsx<br/>esqueleto"]
-  L -->|"sí"| E{"¿Existe la deuda?"}
+  L -->|"sí"| E{"¿Existe el alumno?"}
   E -->|"no: notFound()"| NF["not-found.tsx"]
   E -->|"sí"| X{"¿Falló algo inesperado?"}
   X -->|"sí: excepción"| ER["error.tsx<br/>con botón de reintentar"]
@@ -180,17 +180,17 @@ La documentación separa dos tipos de errores:
 - **Inesperados** (bugs, dependencia caída): se lanzan y los captura el `error.tsx` más cercano.
 
 ```tsx
-// app/(app)/debts/error.tsx
+// app/(app)/students/error.tsx
 "use client"; // los error boundaries son Client Components
 
 import { useEffect } from "react";
 
-export default function DebtsError({ error, retry }: { error: unknown; retry: () => void }) {
+export default function StudentsError({ error, retry }: { error: unknown; retry: () => void }) {
   useEffect(() => reportError(error), [error]); // enviar a la herramienta de monitoreo
 
   return (
     <div role="alert">
-      <p>No pudimos cargar las deudas.</p>
+      <p>No pudimos cargar los alumnos.</p>
       <button onClick={() => retry()}>Reintentar</button>
       {/* En producción, el mensaje de un error del servidor se oculta; un digest permite buscarlo en los logs */}
     </div>
@@ -211,23 +211,23 @@ Dos herramientas avanzadas que vale la pena reconocer:
 - **Parallel routes** (`@slot`): un layout recibe varias páginas como props y las muestra a la vez, cada una con su
   carga y error independientes. Ejemplo: un dashboard con `@metrics` y `@alerts`.
 - **Intercepting routes** (`(.)photo/[id]`): al navegar desde la lista, la ruta se abre **dentro de un modal**; si se
-  entra directo por URL, se muestra como página completa. Ejemplo: el detalle de un deudor en un modal desde la
-  tabla, con URL compartible.
+  entra directo por URL, se muestra como página completa. Ejemplo: la entrega de un alumno en un modal desde la
+  lista de entregas, con URL compartible.
 
 ## Comparación con C# y Java
 
-| Concepto            | ASP.NET Core                                 | Spring Boot                          | Next.js                             |
-| ------------------- | -------------------------------------------- | ------------------------------------ | ----------------------------------- |
-| Parámetro de ruta   | `{debtId}` en la plantilla de ruta           | `@PathVariable`                      | Carpeta `[debtId]` + `await params` |
-| Query string        | `[FromQuery]`                                | `@RequestParam`                      | `await searchParams`                |
-| Layouts por sección | `_Layout` por carpeta, `Layout = ...`        | Layouts de Thymeleaf                 | `layout.tsx` + route groups         |
-| Página de error     | `UseExceptionHandler`, páginas de error      | `@ControllerAdvice`, `error.html`    | `error.tsx`, `global-error.tsx`     |
-| 404                 | `NotFound()`                                 | `ResponseStatusException(NOT_FOUND)` | `notFound()` + `not-found.tsx`      |
-| Prerenderizado      | Output caching / generación estática externa | No nativo                            | `generateStaticParams`              |
+| Concepto            | ASP.NET Core                                 | Spring Boot                          | Next.js                                |
+| ------------------- | -------------------------------------------- | ------------------------------------ | -------------------------------------- |
+| Parámetro de ruta   | `{studentId}` en la plantilla de ruta        | `@PathVariable`                      | Carpeta `[studentId]` + `await params` |
+| Query string        | `[FromQuery]`                                | `@RequestParam`                      | `await searchParams`                   |
+| Layouts por sección | `_Layout` por carpeta, `Layout = ...`        | Layouts de Thymeleaf                 | `layout.tsx` + route groups            |
+| Página de error     | `UseExceptionHandler`, páginas de error      | `@ControllerAdvice`, `error.html`    | `error.tsx`, `global-error.tsx`        |
+| 404                 | `NotFound()`                                 | `ResponseStatusException(NOT_FOUND)` | `notFound()` + `not-found.tsx`         |
+| Prerenderizado      | Output caching / generación estática externa | No nativo                            | `generateStaticParams`                 |
 
 ## Errores frecuentes
 
-- **Leer `params.debtId` sin `await`** (en versiones anteriores eran objetos; ahora son Promises).
+- **Leer `params.studentId` sin `await`** (en versiones anteriores eran objetos; ahora son Promises).
 - **Confiar en los parámetros de la URL** sin validar ni autorizar.
 - **Lanzar excepciones para errores esperados** en lugar de devolver valores o usar `notFound()`.
 - **Olvidar `"use client"` en `error.tsx`.**
@@ -238,17 +238,17 @@ Dos herramientas avanzadas que vale la pena reconocer:
 
 <KnowledgeCheck
   id="nextjs.routing.q1"
-  question="¿Qué URL corresponde a `app/(public)/pay/[token]/page.tsx`?"
+  question="¿Qué URL corresponde a `app/(public)/enroll/[token]/page.tsx`?"
   options={[
-    { text: "`/public/pay/abc`", explanation: "Las carpetas entre paréntesis no aparecen en la URL." },
+    { text: "`/public/enroll/abc`", explanation: "Las carpetas entre paréntesis no aparecen en la URL." },
     {
-      text: "`/pay/abc`",
+      text: "`/enroll/abc`",
       correct: true,
       explanation:
         "Correcto. (public) es un route group: organiza y permite un layout propio sin cambiar la URL.",
     },
     {
-      text: "`/(public)/pay/abc`",
+      text: "`/(public)/enroll/abc`",
       explanation: "Los paréntesis indican un route group, no un segmento literal.",
     },
   ]}
@@ -256,7 +256,7 @@ Dos herramientas avanzadas que vale la pena reconocer:
 
 <KnowledgeCheck
   id="nextjs.routing.q2"
-  question="La deuda pedida no existe. ¿Qué es lo más adecuado en la página?"
+  question="El alumno pedido no existe. ¿Qué es lo más adecuado en la página?"
   options={[
     {
       text: "Lanzar `new Error('No existe')` para que lo capture error.tsx.",

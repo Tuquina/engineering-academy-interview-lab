@@ -135,7 +135,7 @@ Al comparar el árbol nuevo con el anterior, React aplica reglas simples:
 3. **En listas**, empareja hijos por **key** en lugar de por posición.
 
 ```tsx
-function DebtFilters({ advanced }: { advanced: boolean }) {
+function LeaderboardFilters({ advanced }: { advanced: boolean }) {
   return (
     <div>
       {advanced ? <AdvancedFilters /> : <BasicFilters />}
@@ -146,15 +146,34 @@ function DebtFilters({ advanced }: { advanced: boolean }) {
 ```
 
 ```tsx
-// Mismo tipo, misma posición: el estado del input se CONSERVA al cambiar de cliente
-<NoteEditor customerId={customerId} />
+// Mismo tipo, misma posición: el estado del input se CONSERVA al cambiar de jugador
+<PlayerNoteEditor playerId={playerId} />
 
 // key distinta: React lo trata como otro componente y REINICIA su estado
-<NoteEditor key={customerId} customerId={customerId} />
+<PlayerNoteEditor key={playerId} playerId={playerId} />
 ```
 
 El segundo caso es un patrón útil: **cambiar la key para reiniciar el estado** de un formulario cuando cambia la
 entidad que edita, en lugar de sincronizarlo con un efecto.
+
+La tercera regla se ve clara en un ranking de partidas, donde las filas cambian de posición todo el tiempo:
+
+```tsx
+function Leaderboard({ players }: { players: Player[] }) {
+  return (
+    <ol>
+      {players.map((player) => (
+        // key estable: cuando un jugador sube del puesto 5 al 2, React MUEVE su fila (con su estado)
+        // en lugar de reutilizar la fila del puesto 2 con los datos de otro jugador.
+        <LeaderboardRow key={player.id} player={player} />
+      ))}
+    </ol>
+  );
+}
+```
+
+Con `key={index}`, la key de cada fila sería su puesto: al reordenar, React conservaría el estado de la fila 2
+(un panel expandido, una animación) y le pondría los datos del jugador que ahora ocupa ese puesto.
 
 <Callout type="danger" title="No declares componentes dentro de otros componentes">
   Si `function Row() {}` se define dentro de `function Table() {}`, cada render de `Table` crea un tipo de
@@ -184,15 +203,15 @@ el render.
 ```tsx
 // ❌ Impuro: muta una variable externa durante el render
 let renderedRows = 0;
-function DebtRow({ debt }: { debt: Debt }) {
+function LeaderboardRow({ player }: { player: Player }) {
   renderedRows++; // depende de cuántas veces React decidió renderizar
   return <tr>{/* ... */}</tr>;
 }
 
 // ❌ Impuro: efecto durante el render
-function CustomerHeader({ id }: { id: string }) {
-  fetch(`/api/customers/${id}/views`, { method: "POST" }); // se ejecuta en cada render, quizás dos veces
-  return <h1>Cliente {id}</h1>;
+function MatchHeader({ id }: { id: string }) {
+  fetch(`/api/matches/${id}/views`, { method: "POST" }); // se ejecuta en cada render, quizás dos veces
+  return <h1>Partida {id}</h1>;
 }
 ```
 
@@ -245,10 +264,10 @@ Blazor tomó un modelo muy parecido al de React (incluido `@key`), así que si l
 
 <KnowledgeCheck
   id="react.rendering-reconciliation.q2"
-  question="Un `<NoteEditor customerId={id} />` conserva el texto del cliente anterior al cambiar de cliente. ¿Cuál es la solución más simple?"
+  question="Un `<PlayerNoteEditor playerId={id} />` conserva el texto del jugador anterior al cambiar de jugador. ¿Cuál es la solución más simple?"
   options={[
     {
-      text: "Un useEffect que limpie el estado cuando cambia customerId.",
+      text: "Un useEffect que limpie el estado cuando cambia playerId.",
       explanation: "Funciona, pero produce un render extra con datos viejos; hay una opción más simple.",
     },
     {

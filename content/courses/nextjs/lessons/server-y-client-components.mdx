@@ -69,18 +69,18 @@ navegador como JavaScript.
 ## Server Components
 
 ```tsx
-// app/(app)/customers/[customerId]/page.tsx: Server Component (es el valor por defecto)
+// app/(app)/shipments/[shipmentId]/page.tsx: Server Component (es el valor por defecto)
 import { db } from "@/infrastructure/db";
 
-export default async function CustomerPage({ params }: { params: Promise<{ customerId: string }> }) {
-  const { customerId } = await params;
-  const customer = await db.customers.findForCurrentTenant(customerId); // acceso directo, sin API intermedia
+export default async function ShipmentPage({ params }: { params: Promise<{ shipmentId: string }> }) {
+  const { shipmentId } = await params;
+  const shipment = await db.shipments.findForCurrentMerchant(shipmentId); // acceso directo, sin API intermedia
 
   return (
     <main>
-      <h1>{customer.name}</h1>
-      <DebtSummary customerId={customer.id} />
-      <ContactHistory customerId={customer.id} />
+      <h1>Envío {shipment.trackingCode}</h1>
+      <TrackingTimeline shipmentId={shipment.id} />
+      <CarrierUpdates shipmentId={shipment.id} />
     </main>
   );
 }
@@ -106,10 +106,10 @@ bundle que se envía al navegador.
 
 import { useState } from "react";
 
-export function ContactNotes({ initialNotes }: { initialNotes: string }) {
-  const [notes, setNotes] = useState(initialNotes);
+export function DeliveryInstructions({ initialText }: { initialText: string }) {
+  const [text, setText] = useState(initialText);
   return (
-    <textarea value={notes} onChange={(e) => setNotes(e.target.value)} aria-label="Notas del contacto" />
+    <textarea value={text} onChange={(e) => setText(e.target.value)} aria-label="Instrucciones de entrega" />
   );
 }
 ```
@@ -121,12 +121,12 @@ además se **hidratan** y ejecutan en el navegador.
   caption="Un árbol mayormente de servidor con hojas interactivas: sólo las hojas marcadas con use client viajan al navegador."
   chart={`
 flowchart TD
-  P["page.tsx<br/>Server"] --> H["CustomerHeader<br/>Server"]
-  P --> D["DebtSummary<br/>Server: consulta la base"]
-  P --> C["ContactHistory<br/>Server"]
-  D --> F["PromiseForm<br/>Client: use client"]
-  C --> N["ContactNotes<br/>Client: use client"]
-  H --> B["CallButton<br/>Client: use client"]
+  P["page.tsx<br/>Server"] --> H["ShipmentHeader<br/>Server"]
+  P --> D["TrackingTimeline<br/>Server: consulta la base"]
+  P --> C["CarrierUpdates<br/>Server"]
+  D --> F["RescheduleForm<br/>Client: use client"]
+  C --> N["DeliveryInstructions<br/>Client: use client"]
+  H --> B["CopyTrackingButton<br/>Client: use client"]
 `}
 />
 
@@ -142,26 +142,26 @@ viajan como referencias invocables).
 
 ```tsx
 // ❌ Una función común no es serializable
-<PromiseForm onSubmit={(data) => save(data)} />
+<RescheduleForm onSubmit={(data) => save(data)} />
 
 // ✅ Una Server Action sí puede pasarse (viaja como referencia a una función del servidor)
-<PromiseForm action={registerPromiseAction} />
+<RescheduleForm action={rescheduleDeliveryAction} />
 ```
 
 Un patrón importante: un Client Component puede recibir **Server Components como `children`**. Así un contenedor
 interactivo (un panel desplegable, unas pestañas) puede envolver contenido renderizado en el servidor:
 
 ```tsx
-// app/(app)/customers/[customerId]/page.tsx
-<CollapsiblePanel title="Historial de contactos">
-  {/* ContactHistory sigue siendo Server Component: llega ya renderizado */}
-  <ContactHistory customerId={customerId} />
+// app/(app)/shipments/[shipmentId]/page.tsx
+<CollapsiblePanel title="Novedades del transportista">
+  {/* CarrierUpdates sigue siendo Server Component: llega ya renderizado */}
+  <CarrierUpdates shipmentId={shipmentId} />
 </CollapsiblePanel>
 ```
 
 <Callout type="danger" title="Cuidado con lo que se envía al cliente">
   Todo lo que se pasa como prop a un Client Component termina en el HTML y en el payload de la página. Si
-  pasás el objeto `customer` completo de la base, también viajan los campos internos. Pasá DTOs con lo
+  pasás el objeto `shipment` completo de la base, también viajan los campos internos. Pasá DTOs con lo
   estrictamente necesario, y marcá los módulos con secretos con `import "server-only"` para que fallen si se
   importan desde el cliente.
 </Callout>
@@ -174,11 +174,11 @@ interactivo (un panel desplegable, unas pestañas) puede envolver contenido rend
 sequenceDiagram
   participant B as Navegador
   participant S as Servidor Next.js
-  B->>S: GET /customers/42
+  B->>S: GET /shipments/42
   S-->>B: HTML del shell + fallbacks de Suspense
   Note over B: el usuario ya ve la página
-  S-->>B: HTML de DebtSummary (cuando se resuelve)
-  S-->>B: HTML de ContactHistory (cuando se resuelve)
+  S-->>B: HTML de TrackingTimeline (cuando se resuelve)
+  S-->>B: HTML de CarrierUpdates (cuando se resuelve)
   B->>B: descarga el JS de los Client Components
   B->>B: hidratación: los botones y formularios se vuelven interactivos
 `}
@@ -212,16 +212,16 @@ cargue de forma independiente:
 ```tsx
 import { Suspense } from "react";
 
-export default async function CustomerPage({ params }: { params: Promise<{ customerId: string }> }) {
-  const { customerId } = await params;
+export default async function ShipmentPage({ params }: { params: Promise<{ shipmentId: string }> }) {
+  const { shipmentId } = await params;
   return (
     <main>
-      <CustomerHeader customerId={customerId} /> {/* rápido */}
-      <Suspense fallback={<DebtSummarySkeleton />}>
-        <DebtSummary customerId={customerId} /> {/* consulta pesada: no bloquea al resto */}
+      <ShipmentHeader shipmentId={shipmentId} /> {/* rápido */}
+      <Suspense fallback={<TrackingTimelineSkeleton />}>
+        <TrackingTimeline shipmentId={shipmentId} /> {/* consulta pesada: no bloquea al resto */}
       </Suspense>
-      <Suspense fallback={<ContactHistorySkeleton />}>
-        <ContactHistory customerId={customerId} /> {/* depende de un servicio externo lento */}
+      <Suspense fallback={<CarrierUpdatesSkeleton />}>
+        <CarrierUpdates shipmentId={shipmentId} /> {/* consulta la API del transportista, que es lenta */}
       </Suspense>
     </main>
   );
@@ -235,11 +235,11 @@ fallback, y se muestra al instante al navegar.
 
 ```tsx
 // ❌ Cascada: la segunda consulta empieza cuando termina la primera
-const customer = await getCustomer(id);
-const debts = await getDebts(id);
+const shipment = await getShipment(id);
+const events = await getTrackingEvents(id);
 
 // ✅ En paralelo
-const [customer, debts] = await Promise.all([getCustomer(id), getDebts(id)]);
+const [shipment, events] = await Promise.all([getShipment(id), getTrackingEvents(id)]);
 
 // ✅ O mejor: cada componente pide lo suyo dentro de su propio Suspense
 ```
@@ -273,7 +273,7 @@ por una conexión persistente al servidor como Blazor Server).
 
 <KnowledgeCheck
   id="nextjs.server-client-components.q1"
-  question="Una página de cliente es un Server Component y tiene un único botón 'Llamar' con un onClick. ¿Cómo la estructurás?"
+  question="La página de seguimiento de un envío es un Server Component y tiene un único botón 'Copiar código' con un onClick. ¿Cómo la estructurás?"
   options={[
     {
       text: "Agregar 'use client' a la página.",
