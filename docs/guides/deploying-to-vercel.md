@@ -25,6 +25,7 @@ Si una migración falla, el build falla y la versión anterior sigue publicada.
 | `AUTH_ALLOW_SIGNUP`            | Production/Preview | `false`: sólo existe la cuenta del administrador                                          |
 | `DATABASE_POOL_MAX`            | Production/Preview | `3` conexiones por instancia                                                              |
 | `ENABLE_EXPERIMENTAL_COREPACK` | Production/Preview | `1`: Vercel usa el pnpm fijado en `packageManager`                                        |
+| `CRON_SECRET`                  | Production         | Secreto aleatorio que autoriza el ping diario a la base (ver "Plan gratuito")             |
 | `ANTHROPIC_API_KEY`, `AI_*`    | opcional           | Activa el modelo real en el AI Agents Lab y el Mentor; sin ella se usa el proveedor local |
 | `GITHUB_CLIENT_ID`/`_SECRET`   | opcional           | Inicio de sesión con GitHub (callback `https://<dominio>/api/auth/github/callback`)       |
 
@@ -62,7 +63,12 @@ redesplegar.
 
 ### Plan gratuito
 
-Supabase pausa los proyectos gratuitos tras una semana sin actividad. Si la app responde con errores de base, entrá
+Supabase pausa los proyectos gratuitos tras una semana sin actividad. Para evitarlo, **Vercel Cron** llama una vez
+por día (09:00 UTC, `crons` en `vercel.json`) a `/api/cron/keep-alive`, que hace una consulta real a la base. La ruta
+sólo responde si el header trae `Authorization: Bearer <CRON_SECRET>`, que Vercel envía solo cuando la variable está
+configurada. Las ejecuciones se ven en Vercel → Settings → Cron Jobs.
+
+Si aun así el proyecto se pausa (por ejemplo, si se borró `CRON_SECRET`), la app responde con errores de base: entrá
 al panel de Supabase y reanudá el proyecto (Restore). Los datos se conservan.
 
 ## Primer uso

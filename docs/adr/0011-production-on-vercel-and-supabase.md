@@ -44,7 +44,9 @@ sección de performance de STATUS). Si se quiere una ventana propia, una PWA ins
 ## Consecuencias
 
 - Costo mensual: $0 con los planes gratuitos (Vercel Hobby, Supabase Free). El plan gratuito de Supabase pausa el
-  proyecto tras una semana sin uso; se reanuda desde su panel sin perder datos.
+  proyecto tras una semana sin uso: un Vercel Cron diario (`/api/cron/keep-alive`, protegido con `CRON_SECRET`)
+  consulta la base para mantenerla activa. Se eligió sobre un workflow programado de GitHub Actions porque GitHub
+  desactiva esos workflows tras 60 días sin commits.
 - La conexión usa TLS sin validar la CA de Supabase (`uselibpqcompat=true&sslmode=require`). Para validarla haría
   falta incluir su certificado raíz en el despliegue.
 - Los límites del AI Agents Lab y del Mentor siguen en memoria por instancia; sólo importan si se configura una API

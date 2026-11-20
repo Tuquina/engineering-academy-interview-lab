@@ -2,7 +2,7 @@
   "id": "full-stack-ai-platform-engineer",
   "slug": "full-stack-ai-platform-engineer",
   "title": "Full Stack AI Platform Engineer",
-  "description": "Ruta principal de preparación para posiciones Full Stack en plataformas que configuran, orquestan y evalúan agentes conversacionales de IA (por ejemplo, para cobranzas).",
+  "description": "Ruta principal de preparación para posiciones Full Stack en plataformas que configuran, orquestan y evalúan agentes conversacionales de IA.",
   "audience": "Ingenieros backend con experiencia en C#/.NET o Java/Spring Boot que necesitan dominar el stack TypeScript, Node.js, React y Next.js, y la ingeniería de agentes LLM.",
   "order": 1,
   "stages": [

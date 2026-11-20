@@ -75,24 +75,16 @@ Priorizá una experiencia de aprendizaje extraordinaria, con interacciones útil
 
 ## 1. CONTEXTO DEL USUARIO
 
-La plataforma está dirigida inicialmente a un ingeniero de software con experiencia profesional en:
+La plataforma es una academia genérica para **prepararse para buscar trabajo** como ingeniero de software: aprender
+las tecnologías que piden las búsquedas, practicar y llegar preparado a las entrevistas técnicas. No está atada a una
+empresa ni a un puesto en particular, y debe ofrecer varias opciones de cursos y rutas según el perfil buscado.
 
-- C# y .NET.
-- Java y Spring Boot.
-- Arquitectura backend.
-- REST APIs.
-- Arquitectura limpia y buenas prácticas.
-- PostgreSQL, Oracle y SQL Server.
-- AWS, Docker, colas y sistemas asíncronos.
-- React y Go, con experiencia en proyectos personales.
-- Sistemas de cobranza y fintech.
-- Integración de herramientas de IA en desarrollo de software.
+El público inicial son desarrolladores con experiencia profesional (por ejemplo, en C#/.NET, Java/Spring Boot o
+backend en general) que quieren pasar a un stack nuevo o a otro tipo de puesto. No son principiantes en programación,
+aunque cada curso arranca desde su introducción.
 
-No es un principiante en programación.
-
-El objetivo es profundizar especialmente en tecnologías y conceptos requeridos por posiciones Full Stack orientadas a plataformas de agentes de IA.
-
-El usuario necesita dominar y demostrar conocimientos en:
+La primera ruta cubre posiciones Full Stack orientadas a plataformas de agentes de IA. Para esa ruta, el usuario
+necesita dominar y demostrar conocimientos en:
 
 1. TypeScript y Node.js.
 2. React y Next.js.
@@ -105,7 +97,8 @@ El usuario necesita dominar y demostrar conocimientos en:
 9. Diseño de APIs, webhooks e integraciones.
 10. Sistemas escalables, multi-tenant y event-driven.
 
-La plataforma debe ser útil también para aprender nuevas tecnologías en el futuro.
+La plataforma debe crecer con nuevas rutas y cursos (otros lenguajes, frontend, backend, datos, DevOps) sin cambiar
+su arquitectura.
 
 **Idioma:** el contenido estará en español, conservando los nombres técnicos habituales en inglés. El código utilizará identificadores en inglés y documentación de métodos y clases en español.
 
