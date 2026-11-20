@@ -74,14 +74,14 @@ convenciones uniformes para validación y errores.
 REST organiza la API alrededor de **recursos** (sustantivos) identificados por URLs, y usa la **semántica de HTTP**
 para las operaciones:
 
-| Operación                     | Método y ruta                              | Respuesta típica     |
-| ----------------------------- | ------------------------------------------ | -------------------- |
-| Listar deudas de un cliente   | `GET /customers/{id}/debts?status=pending` | `200` con la lista   |
-| Obtener una deuda             | `GET /debts/{id}`                          | `200` o `404`        |
-| Registrar una promesa de pago | `POST /debts/{id}/payment-promises`        | `201` con `Location` |
-| Reemplazar la configuración   | `PUT /agents/{id}/config`                  | `200` o `204`        |
-| Modificar parcialmente        | `PATCH /debts/{id}`                        | `200`                |
-| Cancelar una campaña          | `DELETE /campaigns/{id}`                   | `204`                |
+| Operación                    | Método y ruta                            | Respuesta típica     |
+| ---------------------------- | ---------------------------------------- | -------------------- |
+| Listar pedidos de un cliente | `GET /customers/{id}/orders?status=paid` | `200` con la lista   |
+| Obtener un pedido            | `GET /orders/{id}`                       | `200` o `404`        |
+| Solicitar una devolución     | `POST /orders/{id}/returns`              | `201` con `Location` |
+| Reemplazar la configuración  | `PUT /stores/{id}/shipping-config`       | `200` o `204`        |
+| Modificar parcialmente       | `PATCH /orders/{id}`                     | `200`                |
+| Eliminar un cupón            | `DELETE /coupons/{id}`                   | `204`                |
 
 ### Propiedades de los métodos
 
@@ -124,7 +124,7 @@ flowchart TB
   C["Cliente HTTP"] --> H["Handler / controller<br/>parsea, valida, mapea a HTTP"]
   H --> U["Caso de uso<br/>orquesta: carga, aplica reglas, persiste"]
   U --> D["Dominio<br/>entidades y reglas puras"]
-  U --> P["Puertos<br/>interfaces: DebtRepository, Notifier"]
+  U --> P["Puertos<br/>interfaces: OrderRepository, Notifier"]
   A["Adaptadores<br/>Postgres, proveedor de SMS"] -.->|"implementan"| P
 `}
 />
@@ -138,21 +138,21 @@ flowchart TB
 
 ```ts
 // Handler: delgado. Un Route Handler de Next.js, pero sería igual en Fastify o Express.
-export async function POST(request: Request, context: { params: Promise<{ debtId: string }> }) {
-  const { debtId } = await context.params;
-  const parsed = CreatePromiseSchema.safeParse(await request.json().catch(() => null));
+export async function POST(request: Request, context: { params: Promise<{ orderId: string }> }) {
+  const { orderId } = await context.params;
+  const parsed = CreateReturnSchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return problem(422, "invalid_body", z.flattenError(parsed.error).fieldErrors);
 
-  const result = await useCases.registerPaymentPromise.execute({
-    debtId,
+  const result = await useCases.requestReturn.execute({
+    orderId,
     ...parsed.data,
     actor: await currentUser(request),
   });
 
   if (!result.ok) return mapDomainError(result.error);
-  return Response.json(toPromiseDto(result.value), {
+  return Response.json(toReturnDto(result.value), {
     status: 201,
-    headers: { location: `/debts/${debtId}/payment-promises/${result.value.id}` },
+    headers: { location: `/orders/${orderId}/returns/${result.value.id}` },
   });
 }
 ```
@@ -182,14 +182,14 @@ export function problem(
 }
 
 /** Traduce errores esperables del dominio a HTTP en un único lugar. */
-function mapDomainError(error: RegisterPromiseError): Response {
+function mapDomainError(error: RequestReturnError): Response {
   switch (error.kind) {
-    case "debt_not_found":
-      return problem(404, "debt_not_found");
-    case "debt_already_paid":
-      return problem(409, "debt_already_paid");
-    case "date_out_of_range":
-      return problem(422, "promised_date_out_of_range");
+    case "order_not_found":
+      return problem(404, "order_not_found");
+    case "order_not_delivered":
+      return problem(409, "order_not_delivered");
+    case "quantity_exceeds_purchased":
+      return problem(422, "quantity_exceeds_purchased");
   }
 }
 ```
@@ -246,7 +246,7 @@ significado de un valor. Sólo los cambios incompatibles requieren versión nuev
 
 | Estrategia     | Ejemplo                             | Comentario                                          |
 | -------------- | ----------------------------------- | --------------------------------------------------- |
-| En la URL      | `/v2/debts`                         | La más simple y visible; la más usada               |
+| En la URL      | `/v2/orders`                        | La más simple y visible; la más usada               |
 | En un header   | `Api-Version: 2026-11-01`           | URLs estables; versionado por fecha (estilo Stripe) |
 | Por media type | `Accept: application/vnd.x.v2+json` | Purista, más incómodo para clientes                 |
 
@@ -274,7 +274,7 @@ minimalistas no lo hacen, así que **la disciplina de capas depende del equipo**
 - **Devolver `200` con `{ "error": ... }`.** Los clientes, proxies y métricas dependen del status.
 - **Mensajes de error con detalles internos** (stack traces, SQL, rutas del servidor).
 - **Un formato de error distinto por endpoint.**
-- **Verbos en las URLs** (`/getDebts`, `/createPromise`) en lugar de recursos y métodos.
+- **Verbos en las URLs** (`/getOrders`, `/createReturn`) en lugar de recursos y métodos.
 - **Versionar por cualquier cambio**, incluso compatibles, o no versionar nunca y romper clientes.
 - **Confiar la autorización sólo al middleware** de rutas sin chequear el acceso al recurso concreto.
 
@@ -282,14 +282,14 @@ minimalistas no lo hacen, así que **la disciplina de capas depende del equipo**
 
 <KnowledgeCheck
   id="nodejs.http-apis.q1"
-  question="Un cliente intenta registrar una promesa de pago sobre una deuda que ya está pagada. El body es válido. ¿Qué status corresponde?"
+  question="Un cliente pide la devolución de un pedido que todavía no fue entregado. El body es válido. ¿Qué status corresponde?"
   options={[
     { text: "`400 Bad Request`", explanation: "La request está bien formada." },
     {
       text: "`409 Conflict`",
       correct: true,
       explanation:
-        "Correcto. La operación choca con el estado actual del recurso (ya pagada). Algunos equipos usan 422; lo importante es la consistencia.",
+        "Correcto. La operación choca con el estado actual del recurso (todavía no entregado). Algunos equipos usan 422; lo importante es la consistencia.",
     },
     {
       text: "`500 Internal Server Error`",
@@ -308,7 +308,7 @@ minimalistas no lo hacen, así que **la disciplina de capas depende del equipo**
   options={[
     { text: "Renombrar `amount` a `amountCents`.", explanation: "Los clientes que leen amount se rompen." },
     {
-      text: "Agregar un campo opcional `promisedFor`.",
+      text: "Agregar un campo opcional `estimatedDeliveryAt`.",
       correct: true,
       explanation: "Correcto. Los clientes existentes ignoran campos que no conocen.",
     },

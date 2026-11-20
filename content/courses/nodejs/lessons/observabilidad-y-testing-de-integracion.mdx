@@ -68,9 +68,10 @@ summary:
 
 ## ¿Qué problema resuelve?
 
-Un supervisor reporta: "a algunos deudores les llegaron dos recordatorios ayer a la tarde". Para responder hace
-falta saber qué requests llegaron, qué decidió el agente, qué devolvió el proveedor de SMS y en qué orden. Si los
-logs son líneas sueltas como `console.log("enviado")`, sin cliente, sin campaña y sin forma de unir los pasos de
+Soporte reporta: "a algunos clientes les llegaron dos SMS de 'tu pedido está en camino' ayer a la tarde". Para
+responder hace falta saber qué eventos de tracking llegaron del transportista, qué decidió el servicio de
+notificaciones, qué devolvió el proveedor de SMS y en qué orden. Si los logs son líneas sueltas como
+`console.log("enviado")`, sin cliente, sin envío y sin forma de unir los pasos de
 una misma request, la investigación es imposible.
 
 La **observabilidad** es la capacidad de responder preguntas sobre el sistema en producción sin desplegar código
@@ -91,8 +92,8 @@ export const logger = pino({
 });
 
 logger.info(
-  { campaignId, customerId, channel: "sms", providerMessageId, durationMs: 182 },
-  "reminder_sent", // mensaje corto y estable: un nombre de evento, no una frase con datos interpolados
+  { shipmentId, customerId, channel: "sms", providerMessageId, durationMs: 182 },
+  "shipment_notification_sent", // mensaje corto y estable: un nombre de evento, no una frase con datos interpolados
 );
 ```
 
@@ -102,11 +103,11 @@ logger.info(
   "time": 1795070000000,
   "requestId": "9f2c...",
   "tenantId": "tnt_acme",
-  "campaignId": "cmp_7",
+  "shipmentId": "shp_7",
   "customerId": "cus_42",
   "channel": "sms",
   "durationMs": 182,
-  "msg": "reminder_sent"
+  "msg": "shipment_notification_sent"
 }
 ```
 
@@ -114,7 +115,7 @@ logger.info(
 | ------- | ------------------------------------------------------------------------------- |
 | `error` | Algo falló y requiere atención (un evento no se pudo procesar tras reintentos). |
 | `warn`  | Situación anómala pero manejada (reintento, degradación, input sospechoso).     |
-| `info`  | Eventos de negocio relevantes (campaña iniciada, pago aplicado).                |
+| `info`  | Eventos de negocio relevantes (envío despachado, pago aplicado).                |
 | `debug` | Detalle para desarrollo; apagado en producción.                                 |
 
 Reglas: **nunca loguear secretos ni datos personales completos** (tokens, contraseñas, teléfonos, documentos); los
@@ -152,7 +153,7 @@ export const log = () => logger.child(requestContext.getStore() ?? {});
 
 ```ts
 // En cualquier capa, sin recibir el ID por parámetro:
-log().info({ debtId }, "payment_applied");
+log().info({ orderId }, "payment_applied");
 ```
 
 El ID también se propaga **hacia afuera**: en el header de las llamadas a otros servicios y en los metadatos de los
@@ -180,7 +181,7 @@ flowchart LR
 Para cada servicio, el método **RED**: **R**ate (requests por segundo), **E**rrors (tasa de errores) y **D**uration
 (latencia en percentiles: p50, p95, p99; nunca sólo el promedio, que esconde la cola). Para recursos (CPU, memoria,
 pool de conexiones, event loop lag), el método USE: utilización, saturación y errores. Y **métricas de negocio**:
-mensajes enviados por canal, promesas de pago registradas, costo de tokens de LLM por tenant.
+notificaciones enviadas por canal, pedidos confirmados por minuto, costo de tokens de LLM por tenant.
 
 **Se alerta sobre síntomas** que afectan a usuarios (latencia p95 por encima del objetivo, tasa de errores) y no
 sobre cada causa posible (CPU al 80 %), que generan ruido.
@@ -195,13 +196,13 @@ Redis y otras librerías sin tocar el código:
 ```ts
 import { trace } from "@opentelemetry/api";
 
-const tracer = trace.getTracer("collections-api");
+const tracer = trace.getTracer("shipping-api");
 
-export async function runCampaignStep(campaignId: string) {
-  return tracer.startActiveSpan("campaign.step", async (span) => {
-    span.setAttribute("campaign.id", campaignId);
+export async function syncCarrierEvents(shipmentId: string) {
+  return tracer.startActiveSpan("shipment.sync_carrier_events", async (span) => {
+    span.setAttribute("shipment.id", shipmentId);
     try {
-      return await executeStep(campaignId); // los spans de HTTP y DB quedan como hijos
+      return await fetchAndApplyEvents(shipmentId); // los spans de HTTP y DB quedan como hijos
     } catch (error) {
       span.recordException(error as Error);
       throw error;

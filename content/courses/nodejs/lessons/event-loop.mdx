@@ -62,10 +62,10 @@ summary:
 
 ## ¿Qué problema resuelve?
 
-Un endpoint de la API de cobranzas genera un reporte de deudas y, para "proteger" los datos, firma el archivo derivando
-una clave con `crypto.pbkdf2Sync` con 600.000 iteraciones. En las pruebas tarda unos 300 ms y nadie se preocupa. En
-producción, cuando un operador pide un reporte, **todas** las conversaciones de los agentes se congelan durante esos
-300 ms: webhooks, health checks y respuestas al cliente esperan en fila.
+Un endpoint de la API de una app de viajes genera la liquidación mensual de los conductores y, para "proteger" los
+datos, firma el archivo derivando una clave con `crypto.pbkdf2Sync` con 600.000 iteraciones. En las pruebas tarda unos 300 ms y nadie se preocupa. En
+producción, cuando un operador pide una liquidación, **todas** las requests se congelan durante esos 300 ms: pedidos
+de viaje de los pasajeros, ubicaciones que envían los conductores, webhooks y health checks esperan en fila.
 
 No es un problema de ese endpoint: es el modelo de ejecución de Node.js. Entender el event loop permite explicar
 por qué pasa, predecir el orden en que corre el código y diseñar servicios que no se degraden así.
@@ -197,7 +197,7 @@ export async function POST(request: Request): Promise<Response> {
 Según el tipo de trabajo:
 
 - **Existe versión asíncrona** (crypto, zlib, fs): usala; corre en el thread pool.
-- **Cálculo propio pesado** (parsear un CSV enorme, scoring de miles de deudas): `worker_threads`, o mejor, una cola
+- **Cálculo propio pesado** (parsear un CSV enorme, recalcular la tarifa de miles de viajes): `worker_threads`, o mejor, una cola
   con workers dedicados si el trabajo puede ser asíncrono para el usuario.
 - **Trabajo divisible:** procesarlo en lotes cediendo el control entre lotes con `await setImmediate()` de
   `node:timers/promises`.
@@ -310,15 +310,15 @@ durante la I/O: un objetivo parecido al de Node, con otro modelo de programació
 
 <KnowledgeCheck
   id="nodejs.event-loop.q3"
-  question="La API de cobranzas sube su latencia p99 cada vez que se genera un reporte grande. ¿Cuál es la primera hipótesis a verificar?"
+  question="La API de viajes sube su latencia p99 cada vez que se genera una liquidación grande. ¿Cuál es la primera hipótesis a verificar?"
   options={[
     {
       text: "La base de datos está lenta.",
       explanation:
-        "Es posible, pero no explicaría que todas las requests se degraden justo durante el reporte. Medí el event loop delay antes.",
+        "Es posible, pero no explicaría que todas las requests se degraden justo durante la liquidación. Medí el event loop delay antes.",
     },
     {
-      text: "El reporte ejecuta trabajo CPU-bound síncrono que bloquea el event loop.",
+      text: "La liquidación ejecuta trabajo CPU-bound síncrono que bloquea el event loop.",
       correct: true,
       explanation:
         "Correcto: es el síntoma típico. Confirmalo con monitorEventLoopDelay o un profile de CPU y mové el trabajo al thread pool, a worker threads o a una cola.",
@@ -326,7 +326,7 @@ durante la I/O: un objetivo parecido al de Node, con otro modelo de programació
     {
       text: "Faltan instancias: hay que escalar horizontalmente.",
       explanation:
-        "Escalar reparte la carga pero cada instancia sigue bloqueándose al generar reportes. Primero hay que encontrar la causa.",
+        "Escalar reparte la carga pero cada instancia sigue bloqueándose al generar liquidaciones. Primero hay que encontrar la causa.",
     },
     {
       text: "El garbage collector de V8 es lento.",

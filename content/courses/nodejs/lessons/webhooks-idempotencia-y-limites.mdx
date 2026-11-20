@@ -60,9 +60,9 @@ summary:
 
 ## ¿Qué problema resuelve?
 
-El proveedor de pagos avisa con un webhook cada vez que un deudor paga. Ese webhook es la única fuente que actualiza
-el saldo y detiene los recordatorios. Si se pierde, el sistema sigue cobrando a alguien que ya pagó. Si se procesa
-dos veces, el saldo queda mal. Y el proveedor **va a reintentar** cada vez que tu endpoint tarde demasiado o
+En un SaaS, el proveedor de pagos avisa con un webhook cada vez que se cobra la renovación de una suscripción. Ese
+webhook es la única fuente que extiende el plan y detiene los avisos de pago pendiente. Si se pierde, el sistema
+bloquea a un cliente que ya pagó. Si se procesa dos veces, el plan se extiende dos períodos. Y el proveedor **va a reintentar** cada vez que tu endpoint tarde demasiado o
 devuelva un error, así que los duplicados no son una rareza: son el caso normal.
 
 El mismo problema existe en la otra dirección: cuando tu frontend o un agente llama `POST /payments` y la conexión
@@ -174,11 +174,11 @@ arquitectura [Webhooks confiables](/system-design/challenges/reliable-webhooks).
 
 ## Idempotency-Key para tus propios POST
 
-Para operaciones que no deben duplicarse (cobrar, enviar un mensaje, crear un acuerdo de pago), el cliente envía
+Para operaciones que no deben duplicarse (cobrar, enviar un mensaje, crear una reserva), el cliente envía
 una clave única por **operación lógica**. Si reintenta, envía **la misma clave**:
 
 ```text
-POST /payment-plans
+POST /bookings
 Idempotency-Key: 6f1c2a9e-8b7d-4c1e-9f3a-2d5e7b8c9a01
 ```
 
@@ -189,7 +189,7 @@ Idempotency-Key: 6f1c2a9e-8b7d-4c1e-9f3a-2d5e7b8c9a01
       detail: "INSERT atómico (clave, hash del body, estado in_progress). Si ya existe, ir al paso 4.",
       tone: "boundary",
     },
-    { title: "Ejecutar", detail: "Crear el plan de pagos." },
+    { title: "Ejecutar", detail: "Crear la reserva." },
     {
       title: "Guardar el resultado",
       detail: "Status y body de la respuesta asociados a la clave.",

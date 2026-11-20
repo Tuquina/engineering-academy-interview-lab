@@ -55,11 +55,12 @@ summary:
 
 ## ¿Qué problema resuelve?
 
-Un operador pide exportar todas las deudas de una campaña a CSV: dos millones de filas. La versión ingenua:
+Un cliente de una plataforma IoT pide exportar a CSV las lecturas de sus sensores del último mes: dos millones de
+filas. La versión ingenua:
 
 ```ts
-const debts = await db.query("SELECT * FROM debts WHERE campaign_id = $1", [campaignId]); // 2.000.000 filas en memoria
-const csv = debts.rows.map(toCsvLine).join("\n"); // otra copia completa como string
+const readings = await db.query("SELECT * FROM sensor_readings WHERE device_id = $1", [deviceId]); // 2.000.000 filas
+const csv = readings.rows.map(toCsvLine).join("\n"); // otra copia completa como string
 response.end(csv); // y una tercera en el buffer de salida
 ```
 
@@ -98,15 +99,15 @@ hijos. Es el patrón observer integrado en el runtime:
 ```ts
 import { EventEmitter, once } from "node:events";
 
-class CampaignRunner extends EventEmitter<{
+class ProductImport extends EventEmitter<{
   progress: [sent: number, total: number];
   error: [error: Error];
   done: [];
 }> {}
 
-const runner = new CampaignRunner();
+const runner = new ProductImport(); // importa el catálogo de un proveedor
 runner.on("progress", (sent, total) => console.log(`${sent}/${total}`));
-runner.on("error", (error) => logger.error({ error }, "campaign_failed")); // ¡imprescindible!
+runner.on("error", (error) => logger.error({ error }, "product_import_failed")); // ¡imprescindible!
 
 runner.emit("progress", 10, 100);
 await once(runner, "done"); // esperar un evento como Promise
@@ -196,13 +197,15 @@ escribir un Transform:
 ```ts
 import { pipeline } from "node:stream/promises";
 
-async function exportCampaignCsv(campaignId: string, response: NodeJS.WritableStream): Promise<void> {
+async function exportReadingsCsv(deviceId: string, response: NodeJS.WritableStream): Promise<void> {
   await pipeline(
-    db.streamQuery("SELECT id, customer_id, balance_cents FROM debts WHERE campaign_id = $1", [campaignId]),
-    async function* toCsv(rows: AsyncIterable<DebtRow>) {
-      yield "id,customer_id,balance_cents\n";
+    db.streamQuery("SELECT sensor_id, recorded_at, value FROM sensor_readings WHERE device_id = $1", [
+      deviceId,
+    ]),
+    async function* toCsv(rows: AsyncIterable<ReadingRow>) {
+      yield "sensor_id,recorded_at,value\n";
       for await (const row of rows) {
-        yield `${row.id},${row.customer_id},${row.balance_cents}\n`;
+        yield `${row.sensor_id},${row.recorded_at.toISOString()},${row.value}\n`;
       }
     },
     response,

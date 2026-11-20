@@ -99,7 +99,7 @@ Un load test genera tráfico controlado para ver cómo responde el sistema. Herr
 en JavaScript), autocannon (benchmarks HTTP simples en Node.js), Gatling o JMeter.
 
 ```js
-// k6: escenario de carga sobre el listado de deudas
+// k6: escenario de carga sobre el mapa de asientos de un evento
 import http from "k6/http";
 import { check } from "k6";
 
@@ -116,19 +116,19 @@ export const options = {
 };
 
 export default function () {
-  const response = http.get(`${__ENV.BASE_URL}/customers/cus_42/debts`, {
+  const response = http.get(`${__ENV.BASE_URL}/events/evt_42/seats`, {
     headers: { authorization: `Bearer ${__ENV.TOKEN}` },
   });
   check(response, { "status 200": (r) => r.status === 200 });
 }
 ```
 
-| Tipo de prueba | Objetivo                                                   |
-| -------------- | ---------------------------------------------------------- |
-| Load           | Comportamiento con la carga esperada                       |
-| Stress         | Dónde y cómo se rompe al superar la capacidad              |
-| Spike          | Reacción a picos bruscos (el inicio de una campaña masiva) |
-| Soak           | Estabilidad durante horas: fugas de memoria, conexiones    |
+| Tipo de prueba | Objetivo                                                                     |
+| -------------- | ---------------------------------------------------------------------------- |
+| Load           | Comportamiento con la carga esperada                                         |
+| Stress         | Dónde y cómo se rompe al superar la capacidad                                |
+| Spike          | Reacción a picos bruscos (la apertura de la venta de entradas de un recital) |
+| Soak           | Estabilidad durante horas: fugas de memoria, conexiones                      |
 
 Reglas: entorno parecido a producción (mismos límites de CPU y memoria, datos de volumen realista), el generador de
 carga en otra máquina, y **observar el sistema durante la prueba** (métricas y trazas), no sólo el resumen final.
@@ -157,19 +157,19 @@ problema es CPU en el proceso; si la latencia sube con lag bajo, el problema est
 ### Consultas N+1
 
 ```ts
-// ❌ 1 consulta para las deudas + 1 por cada deuda para su cliente: 201 consultas para 200 deudas
-const debts = await db.query("SELECT * FROM debts WHERE campaign_id = $1", [campaignId]);
-for (const debt of debts.rows) {
-  debt.customer = (await db.query("SELECT * FROM customers WHERE id = $1", [debt.customer_id])).rows[0];
+// ❌ 1 consulta para las partidas + 1 por cada partida para su ganador: 201 consultas para 200 partidas
+const matches = await db.query("SELECT * FROM matches WHERE tournament_id = $1", [tournamentId]);
+for (const match of matches.rows) {
+  match.winner = (await db.query("SELECT * FROM players WHERE id = $1", [match.winner_id])).rows[0];
 }
 
-// ✅ Una consulta con JOIN (o dos consultas: deudas y clientes con ANY)
+// ✅ Una consulta con JOIN (o dos consultas: partidas y jugadores con ANY)
 const rows = await db.query(
-  `SELECT d.id, d.balance_cents, c.id AS customer_id, c.name
-     FROM debts d
-     JOIN customers c ON c.id = d.customer_id
-    WHERE d.campaign_id = $1`,
-  [campaignId],
+  `SELECT m.id, m.finished_at, p.id AS winner_id, p.nickname
+     FROM matches m
+     JOIN players p ON p.id = m.winner_id
+    WHERE m.tournament_id = $1`,
+  [tournamentId],
 );
 ```
 
@@ -181,15 +181,15 @@ mismo tick en una sola consulta.
 
 ```ts
 // ❌ 3 llamadas independientes en serie: la latencia se suma
-const customer = await customers.get(id);
-const debts = await debtsRepo.listByCustomer(id);
-const history = await contactHistory.list(id);
+const player = await players.get(id);
+const matches = await matchesRepo.listByPlayer(id);
+const inventory = await inventories.list(id);
 
 // ✅ En paralelo: la latencia es la de la más lenta
-const [customer, debts, history] = await Promise.all([
-  customers.get(id),
-  debtsRepo.listByCustomer(id),
-  contactHistory.list(id),
+const [player, matches, inventory] = await Promise.all([
+  players.get(id),
+  matchesRepo.listByPlayer(id),
+  inventories.list(id),
 ]);
 ```
 

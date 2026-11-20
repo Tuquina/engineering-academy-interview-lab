@@ -61,9 +61,9 @@ summary:
 
 ## ¿Qué problema resuelve?
 
-Una plataforma de cobranzas maneja datos personales y financieros de miles de deudores, para varias empresas
-clientes (tenants). Un solo error de autorización (un endpoint que devuelve la deuda `debt_123` sin chequear a qué
-empresa pertenece) es una filtración de datos. La lista de riesgos de seguridad de APIs de OWASP pone ese error en
+Una plataforma de historias clínicas maneja datos de salud de miles de pacientes, para varias clínicas clientes
+(tenants). Un solo error de autorización (un endpoint que devuelve la historia de `pat_123` sin chequear a qué
+clínica pertenece) es una filtración de datos. La lista de riesgos de seguridad de APIs de OWASP pone ese error en
 el **primer lugar**: _Broken Object Level Authorization_.
 
 Esta lección cubre los conceptos que se esperan de un backend senior: cómo se establece la identidad, cómo se
@@ -89,12 +89,12 @@ sequenceDiagram
   B->>API: POST /login (credenciales)
   API->>S: crear sesión
   API-->>B: Set-Cookie: sid (HttpOnly, Secure)
-  B->>API: GET /debts (cookie sid)
+  B->>API: GET /patients (cookie sid)
   API->>S: buscar sesión
   Note over B,API: Token (JWT)
   B->>API: POST /login (credenciales)
   API-->>B: access token firmado
-  B->>API: GET /debts (Authorization: Bearer token)
+  B->>API: GET /patients (Authorization: Bearer token)
   API->>API: verificar firma y expiración
 `}
 />
@@ -121,10 +121,10 @@ Un JWT tiene tres partes en base64url separadas por puntos: `header.payload.sign
 ```json
 {
   "sub": "usr_42",
-  "tenant_id": "tnt_acme",
-  "roles": ["collections_agent"],
+  "tenant_id": "tnt_clinica_norte",
+  "roles": ["physician"],
   "iss": "https://auth.example.com",
-  "aud": "collections-api",
+  "aud": "clinical-records-api",
   "exp": 1795070000
 }
 ```
@@ -142,7 +142,7 @@ export async function authenticate(request: Request): Promise<AuthenticatedUser 
   try {
     const { payload } = await jwtVerify(header.slice(7), jwks, {
       issuer: "https://auth.example.com",
-      audience: "collections-api",
+      audience: "clinical-records-api",
       algorithms: ["RS256"], // nunca aceptar el algoritmo que diga el token
     });
     return AuthenticatedUserSchema.parse(payload); // los claims también son datos externos
@@ -198,9 +198,9 @@ const valid = await verify(passwordHash, attempt);
 
 ```ts
 const PERMISSIONS = {
-  admin: ["campaign:create", "campaign:cancel", "debt:read", "debt:write", "agent:configure"],
-  supervisor: ["campaign:create", "debt:read", "debt:write"],
-  collections_agent: ["debt:read"],
+  admin: ["clinic:configure", "appointment:create", "appointment:cancel", "record:read", "record:write"],
+  physician: ["appointment:create", "record:read", "record:write"],
+  receptionist: ["appointment:create", "appointment:cancel"],
 } as const satisfies Record<Role, readonly Permission[]>;
 
 export function can(user: AuthenticatedUser, permission: Permission): boolean {
@@ -209,23 +209,24 @@ export function can(user: AuthenticatedUser, permission: Permission): boolean {
 ```
 
 RBAC responde "¿este rol puede hacer esta acción?". Muchas reglas reales dependen además de **atributos**: "un
-supervisor puede aprobar quitas de hasta el 20 %", "un agente sólo ve las deudas de su cartera". Eso es ABAC, y
+médico sólo ve la historia clínica de los pacientes que atiende", "recepción puede cancelar turnos sólo con más de 24
+horas de anticipación". Eso es ABAC, y
 esas reglas viven en el **dominio o el caso de uso**, no en el middleware.
 
 ### Por recurso: el error número uno
 
 ```ts
-// ❌ BOLA / IDOR: cualquier usuario autenticado puede leer cualquier deuda cambiando el ID
-export async function GET(request: Request, { params }: { params: Promise<{ debtId: string }> }) {
+// ❌ BOLA / IDOR: cualquier usuario autenticado puede leer cualquier historia clínica cambiando el ID
+export async function GET(request: Request, { params }: { params: Promise<{ patientId: string }> }) {
   const user = await authenticate(request);
   if (!user) return problem(401, "unauthenticated");
-  const debt = await debts.findById((await params).debtId);
-  return Response.json(debt);
+  const patient = await patients.findById((await params).patientId);
+  return Response.json(patient);
 }
 
 // ✅ La consulta incluye el tenant de la identidad: un recurso de otro tenant "no existe"
-const debt = await debts.findById(user.tenantId, (await params).debtId);
-if (!debt) return problem(404, "debt_not_found");
+const patient = await patients.findById(user.tenantId, (await params).patientId);
+if (!patient) return problem(404, "patient_not_found");
 ```
 
 ## Aislamiento multi-tenant
@@ -291,17 +292,17 @@ criptografía propia.
 
 <KnowledgeCheck
   id="nodejs.auth-security.q1"
-  question="Un endpoint `GET /debts/:id` verifica el token pero busca la deuda sólo por ID. ¿Qué vulnerabilidad tiene?"
+  question="Un endpoint `GET /patients/:id` verifica el token pero busca al paciente sólo por ID. ¿Qué vulnerabilidad tiene?"
   options={[
     {
       text: "Ninguna: el usuario está autenticado.",
       explanation: "Autenticado no significa autorizado para ese recurso.",
     },
     {
-      text: "Broken Object Level Authorization: cambiando el ID se leen deudas de otros usuarios o tenants.",
+      text: "Broken Object Level Authorization: cambiando el ID se leen pacientes de otras clínicas (tenants).",
       correct: true,
       explanation:
-        "Correcto. La consulta debe filtrar por el tenant (y la cartera) de la identidad, y responder 404 si no corresponde.",
+        "Correcto. La consulta debe filtrar por el tenant (y, según las reglas, por los pacientes asignados) de la identidad, y responder 404 si no corresponde.",
     },
     {
       text: "Inyección SQL.",
