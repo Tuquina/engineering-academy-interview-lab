@@ -58,10 +58,10 @@ summary:
 
 ## ¿Qué problema resuelve?
 
-Una campaña de cobranzas envía 50.000 conversaciones por semana. Si cada una usa un agente que hace 6 llamadas al
+Un asistente de reservas de una cadena hotelera atiende 50.000 conversaciones por semana. Si cada una usa un agente que hace 6 llamadas al
 modelo con 8.000 tokens de contexto, son 2.400 millones de tokens de entrada por semana. Una decisión de diseño que
 agrega 2.000 tokens al system prompt cambia la factura de forma visible; una que reduce las iteraciones del agente
-de 6 a 4 también. Y cada segundo de latencia es un deudor esperando una respuesta en WhatsApp.
+de 6 a 4 también. Y cada segundo de latencia es un huésped esperando una respuesta en WhatsApp.
 
 Para diseñar con LLMs hay que razonar en sus unidades: **tokens, contexto, tiempo y dinero**.
 
@@ -72,8 +72,8 @@ _tokenizer_. En español, una palabra suele ser uno o dos tokens; los números l
 símbolos consumen más tokens de lo que parece.
 
 ```text
-"Hola, ¿cuánto debo?"          → unos pocos tokens
-"debt_8f3k2j9x4q"              → varios tokens: los IDs aleatorios se parten mucho
+"Hola, ¿tienen habitación?"    → unos pocos tokens
+"bkg_8f3k2j9x4q"               → varios tokens: los IDs aleatorios se parten mucho
 {"amountCents": 1500000}       → llaves, comillas y nombres también cuentan
 ```
 
@@ -109,15 +109,15 @@ atención a lo irrelevante.
 
 Cuando una conversación crece, las estrategias son:
 
-| Estrategia                          | Idea                                                                                                         |
-| ----------------------------------- | ------------------------------------------------------------------------------------------------------------ |
-| Estado fuera del historial          | El saldo, la promesa vigente y el plan viven en la base; se inyectan resumidos y actualizados en cada turno. |
-| Resumir (compaction)                | Reemplazar los turnos viejos por un resumen que conserve decisiones y datos clave.                           |
-| Recortar resultados de herramientas | Devolver sólo los campos necesarios, no la fila completa ni el JSON del proveedor.                           |
-| Recuperar en lugar de cargar        | Buscar los fragmentos relevantes (RAG) en vez de incluir todos los documentos.                               |
+| Estrategia                          | Idea                                                                                                     |
+| ----------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| Estado fuera del historial          | La reserva, las fechas y la tarifa viven en la base; se inyectan resumidas y actualizadas en cada turno. |
+| Resumir (compaction)                | Reemplazar los turnos viejos por un resumen que conserve decisiones y datos clave.                       |
+| Recortar resultados de herramientas | Devolver sólo los campos necesarios, no la fila completa ni el JSON del proveedor.                       |
+| Recuperar en lugar de cargar        | Buscar los fragmentos relevantes (RAG) en vez de incluir todos los documentos.                           |
 
-**Truncar a ciegas** (borrar los mensajes más viejos) es la peor opción: se pierde, sin saberlo, que el deudor dijo
-que estaba desempleado o que pidió no ser contactado por la mañana. El módulo de memoria profundiza en esto.
+**Truncar a ciegas** (borrar los mensajes más viejos) es la peor opción: se pierde, sin saberlo, que el huésped dijo
+que viaja con un bebé o que pidió no ser contactado por la mañana. El módulo de memoria profundiza en esto.
 
 ## Por qué las salidas varían
 

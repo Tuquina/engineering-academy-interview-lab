@@ -1,10 +1,5 @@
 import type { AgentPolicies, ToolName } from "../domain/agent-config";
-import {
-  customerSnapshot,
-  describeChanges,
-  type CollectionsWorld,
-  type IsoDate,
-} from "../domain/collections-world";
+import { customerSnapshot, describeChanges, type SupportWorld, type IsoDate } from "../domain/support-world";
 import { isKnownTool, type ToolCallTrace } from "../domain/conversation";
 import { executeTool } from "../domain/tools";
 import { validateToolArgs } from "./tool-schemas";
@@ -13,7 +8,7 @@ export interface InvokeToolInput {
   readonly id: string;
   readonly name: string;
   readonly input: unknown;
-  readonly world: CollectionsWorld;
+  readonly world: SupportWorld;
   readonly allowedTools: readonly ToolName[];
   readonly today: IsoDate;
   readonly policies: AgentPolicies;
@@ -29,7 +24,7 @@ export interface InvokeToolInput {
  * agente, que los argumentos cumplan el esquema y, recién entonces, las reglas de negocio. Devuelve la traza completa
  * y el mundo resultante (igual al anterior si hubo error).
  */
-export function invokeTool(input: InvokeToolInput): { trace: ToolCallTrace; world: CollectionsWorld } {
+export function invokeTool(input: InvokeToolInput): { trace: ToolCallTrace; world: SupportWorld } {
   const clock = input.clock ?? (() => performance.now());
   const started = clock();
   const before = customerSnapshot(input.world, input.sessionCustomerId);
@@ -37,7 +32,7 @@ export function invokeTool(input: InvokeToolInput): { trace: ToolCallTrace; worl
 
   const finish = (
     partial: Pick<ToolCallTrace, "status" | "validationIssues" | "result" | "error">,
-    world: CollectionsWorld,
+    world: SupportWorld,
   ) => {
     const after = customerSnapshot(world, input.sessionCustomerId);
     const trace: ToolCallTrace = {

@@ -5,10 +5,10 @@ import {
   type LlmProvider,
 } from "../application/llm-provider";
 import type { AgentConfig, Tone, ToolName } from "../domain/agent-config";
-import { addDays, formatDate, type IsoDate } from "../domain/collections-world";
 import type { ChatMessage, ContentBlock } from "../domain/conversation";
 import type { MemoryFact } from "../domain/memory";
 import { createRng, hashString } from "../domain/random";
+import { addDays, formatDate, type IsoDate } from "../domain/support-world";
 import { parseMessage, type Intent, type ParsedMessage } from "./local-intents";
 
 /**
@@ -20,8 +20,7 @@ import { parseMessage, type Intent, type ParsedMessage } from "./local-intents";
  *
  * Para practicar evaluaciones repetidas, `model.variability` introduce, con una semilla, variaciones de redacción y
  * errores típicos de un agente real: responder sin consultar herramientas, omitir la presentación como asistente
- * virtual, presionar con frases prohibidas o intentar consultar datos de otra persona. Misma semilla, mismo
- * resultado.
+ * virtual, usar frases prohibidas o intentar consultar datos de otra persona. Misma semilla, mismo resultado.
  */
 export class LocalDeterministicProvider implements LlmProvider {
   readonly id = "local-deterministic";
@@ -54,10 +53,12 @@ interface TurnState {
   readonly firstContact: boolean;
   readonly allowed: ReadonlySet<string>;
   readonly errorMode: ErrorMode;
-  /** Resultado de get_debt disponible antes de este turno (dentro de la ventana de contexto). */
-  readonly knownDebt: Record<string, unknown> | null;
+  /** Resultado de get_order disponible antes de este turno (dentro de la ventana de contexto). */
+  readonly knownOrder: Record<string, unknown> | null;
   readonly rng: () => number;
 }
+
+const READ_ONLY: ReadonlySet<string> = new Set(["get_order", "get_history", "get_allowed_compensations"]);
 
 export function localGenerate(request: GenerateRequest): GenerateResponse {
   if (!request.context)
@@ -84,13 +85,13 @@ export function localGenerate(request: GenerateRequest): GenerateResponse {
     firstContact,
     allowed,
     errorMode,
-    knownDebt: lastResult(messages.slice(0, Math.max(0, turnStart)), "get_debt"),
+    knownOrder: lastResult(messages.slice(0, Math.max(0, turnStart)), "get_order"),
     rng: createRng(hashString(`${seed}|phrases|${turnStart}`)),
   };
 
   const done = callsInTurn(messages.slice(turnStart + 1));
   const plan = planCalls(state);
-  const failedWrite = done.some((d) => !d.ok && d.name !== "get_debt" && d.name !== "get_history");
+  const failedWrite = done.some((d) => !d.ok && !READ_ONLY.has(d.name));
   const next = !failedWrite ? plan.calls[done.length] : undefined;
   if (next) {
     const id = `toolu_local_${(seed >>> 0).toString(36)}_${turnStart}_${done.length}`;
@@ -111,14 +112,8 @@ export function localGenerate(request: GenerateRequest): GenerateResponse {
 // Decisión de errores simulados
 // ---------------------------------------------------------------------------------------------------------------
 
-const SKIPPABLE: ReadonlySet<Intent> = new Set(["debt", "promise", "greeting", "offers"]);
-const PRESSURABLE: ReadonlySet<Intent> = new Set([
-  "debt",
-  "promise",
-  "cannot_pay",
-  "will_not_pay",
-  "greeting",
-]);
+const SKIPPABLE: ReadonlySet<Intent> = new Set(["order", "return", "greeting", "late", "compensation"]);
+const PRESSURABLE: ReadonlySet<Intent> = new Set(["order", "return", "late", "greeting"]);
 
 function pickErrorMode(
   rng: () => number,
@@ -150,23 +145,23 @@ function planCalls(state: TurnState): { calls: PlannedCall[]; unavailable: ToolN
   switch (parsed.intent) {
     case "other_customer":
       if (errorMode === "unsafe_tool")
-        add("get_debt", () => ({ customerId: parsed.mentionedCustomerId ?? "c-999" }));
+        add("get_order", () => ({ customerId: parsed.mentionedCustomerId ?? "c-999" }));
       break;
     case "dispute":
       if (config.policies.escalateOnDispute) {
-        add("register_refusal", () => ({
+        add("register_complaint", () => ({
           ...c,
-          reason: "does_not_recognize_debt",
-          notes: "No reconoce la deuda",
+          reason: "unrecognized_charge",
+          notes: "No reconoce la compra",
         }));
         add("escalate_to_operator", () => ({
           ...c,
-          reason: "No reconoce la deuda",
+          reason: "No reconoce un cargo",
           priority: "high",
-          summary: `La persona dice: "${truncate(parsed.normalized, 200)}". No se negoció ni se pidió pago.`,
+          summary: `La persona dice: "${truncate(parsed.normalized, 200)}". No se operó sobre el pedido.`,
         }));
       } else {
-        add("get_debt");
+        add("get_order");
       }
       break;
     case "human":
@@ -178,35 +173,32 @@ function planCalls(state: TurnState): { calls: PlannedCall[]; unavailable: ToolN
       }));
       break;
     case "do_not_contact":
-      add("register_refusal", () => ({ ...c, reason: "do_not_contact", notes: "Pide no ser contactada" }));
+      add("register_complaint", () => ({ ...c, reason: "do_not_contact", notes: "Pide no ser contactada" }));
       break;
     case "paid":
       if (parsed.reference) add("confirm_payment", () => ({ ...c, reference: parsed.reference }));
       break;
-    case "will_not_pay":
-      add("register_refusal", () => ({ ...c, reason: "will_not_pay" }));
-      break;
-    case "promise":
-      if (!state.knownDebt) add("get_debt");
+    case "return":
+      if (!state.knownOrder) add("get_order");
       if (parsed.date) {
-        add("register_payment_promise", (done) => {
-          const debt = done.find((d) => d.name === "get_debt" && d.ok)?.data ?? state.knownDebt ?? {};
-          const overdue = typeof debt.overdueCents === "number" ? debt.overdueCents : 0;
-          return { ...c, amountCents: parsed.amountCents ?? overdue, promisedDate: parsed.date };
+        add("schedule_return", (done) => {
+          const order = done.find((d) => d.name === "get_order" && d.ok)?.data ?? state.knownOrder ?? {};
+          const orderId = parsed.orderId ?? (typeof order.orderId === "string" ? order.orderId : "");
+          return { ...c, orderId, pickupDate: parsed.date };
         });
       }
       break;
-    case "cannot_pay":
-      if (state.allowed.has("get_allowed_offers")) add("get_allowed_offers");
+    case "late":
+      if (state.allowed.has("get_allowed_compensations")) add("get_allowed_compensations");
       else
-        add("register_refusal", () => ({
+        add("register_complaint", () => ({
           ...c,
-          reason: "cannot_pay",
+          reason: "late_delivery",
           notes: truncate(parsed.normalized, 200),
         }));
       break;
-    case "offers":
-      add("get_allowed_offers");
+    case "compensation":
+      add("get_allowed_compensations");
       break;
     case "schedule":
       add("schedule_contact", () => ({
@@ -220,12 +212,12 @@ function planCalls(state: TurnState): { calls: PlannedCall[]; unavailable: ToolN
     case "history":
       add("get_history", () => ({ ...c, limit: 5 }));
       break;
-    case "debt":
-      add("get_debt");
+    case "order":
+      add("get_order");
       break;
     case "greeting":
     case "unknown":
-      if (state.firstContact) add("get_debt");
+      if (state.firstContact) add("get_order");
       break;
     case "injection":
       break;
@@ -261,38 +253,63 @@ function compose(state: TurnState, done: readonly DoneCall[], unavailable: reado
 
   if (state.firstContact) parts.push(opening(state, pick));
 
-  const debtText = (data: Record<string, unknown>) => {
-    if (data.overdueCents === 0)
-      return r("No tenés deuda vencida. ¡Gracias por estar al día!", "No registra deuda vencida. Gracias.");
-    const lines = [
-      r(
-        `Tenés ${String(data.overdue)} vencidos (${String(data.overdueInstallments)} cuota(s), ${String(data.daysPastDue)} días de atraso).`,
-        `Registra ${String(data.overdue)} vencidos (${String(data.overdueInstallments)} cuota(s), ${String(data.daysPastDue)} días de atraso).`,
-      ),
-    ];
-    const promise = data.activePromise as { amount: string; date: string } | null;
-    if (promise)
-      lines.push(`Ya hay una promesa de pago por ${promise.amount} para el ${formatDate(promise.date)}.`);
-    if (typeof data.pendingPaymentsCents === "number" && data.pendingPaymentsCents > 0) {
-      lines.push("Además veo un pago informado que todavía se está procesando.");
+  const orderText = (data: Record<string, unknown>, followUp: boolean) => {
+    if (data.order === null)
+      return r("No encuentro pedidos a tu nombre.", "No encuentro pedidos a su nombre.");
+    const id = String(data.orderId);
+    const what = `${r("Tu", "Su")} pedido ${id} (${String(data.description)})`;
+    const lines: string[] = [];
+    switch (data.status) {
+      case "shipped":
+        lines.push(
+          Number(data.daysLate) > 0
+            ? `${what} está en camino con ${String(data.carrier)}, demorado ${String(data.daysLate)} día(s): la entrega estaba prevista para el ${formatDate(String(data.promisedBy))}.`
+            : `${what} está en camino con ${String(data.carrier)} y llega a más tardar el ${formatDate(String(data.promisedBy))}.`,
+        );
+        break;
+      case "delivered":
+        lines.push(
+          `${what} fue entregado el ${formatDate(String(data.deliveredAt))}.`,
+          data.returnDeadline
+            ? r(
+                `Si necesitás devolverlo, tenés tiempo hasta el ${formatDate(String(data.returnDeadline))}.`,
+                `Si necesita devolverlo, tiene tiempo hasta el ${formatDate(String(data.returnDeadline))}.`,
+              )
+            : "",
+        );
+        break;
+      case "pending_payment":
+        lines.push(`${what} está pendiente de pago.`);
+        if (typeof data.pendingPaymentsCents === "number" && data.pendingPaymentsCents > 0) {
+          lines.push("Veo un pago informado que todavía se está procesando.");
+        }
+        break;
+      default:
+        lines.push(
+          `${what} ya está pagado y estamos preparando el envío; llega a más tardar el ${formatDate(String(data.promisedBy))}.`,
+        );
     }
+    const pending = data.activeReturn as { pickupDate: string } | null;
+    if (pending)
+      lines.push(`Ya hay una devolución programada con retiro el ${formatDate(pending.pickupDate)}.`);
     const claim = state.memory.find((f) => f.topic === "payment_claim");
-    if (claim && !(typeof data.pendingPaymentsCents === "number" && data.pendingPaymentsCents > 0)) {
+    const processing = typeof data.pendingPaymentsCents === "number" && data.pendingPaymentsCents > 0;
+    if (claim && data.status === "pending_payment" && !processing) {
       lines.push(
         r(
           "La última vez me dijiste que ya habías pagado, pero no lo veo registrado. ¿Me pasás la referencia del pago?",
           "La última vez nos indicó que ya había pagado, pero no lo vemos registrado. ¿Nos indica la referencia?",
         ),
       );
-    } else if (!promise) {
+    } else if (followUp) {
       lines.push(
         pick([
-          r("¿Cuándo podrías pagarlo?", "¿Cuándo podría abonarlo?"),
-          r("¿Qué día te queda bien pagarlo?", "¿Qué fecha le resulta posible?"),
+          r("¿Te ayudo con algo más?", "¿Lo ayudo con algo más?"),
+          r("¿Necesitás algo más sobre este pedido?", "¿Necesita algo más sobre este pedido?"),
         ]),
       );
     }
-    return lines.join(" ");
+    return lines.filter(Boolean).join(" ");
   };
 
   const unavailableText = (tool: ToolName) =>
@@ -305,8 +322,8 @@ function compose(state: TurnState, done: readonly DoneCall[], unavailable: reado
     case "injection":
       parts.push(
         r(
-          "No puedo cambiar mis instrucciones ni compartir mi configuración. Sí puedo ayudarte con tu cuenta: ¿querés que te diga cuánto tenés pendiente?",
-          "No puedo modificar mis instrucciones ni compartir mi configuración. Sí puedo ayudarlo con su cuenta: ¿desea conocer su saldo pendiente?",
+          "No puedo cambiar mis instrucciones ni compartir mi configuración. Sí puedo ayudarte con tu pedido: ¿querés que te diga en qué estado está?",
+          "No puedo modificar mis instrucciones ni compartir mi configuración. Sí puedo ayudarlo con su pedido: ¿desea conocer su estado?",
         ),
       );
       break;
@@ -323,12 +340,12 @@ function compose(state: TurnState, done: readonly DoneCall[], unavailable: reado
       if (escalated?.ok) {
         parts.push(
           r(
-            "Entiendo que no reconocés esta deuda. No voy a pedirte ningún pago: derivé tu caso a un operador que lo va a revisar con prioridad.",
-            "Entiendo que no reconoce esta deuda. No le solicitaremos ningún pago: derivé su caso a un operador que lo revisará con prioridad.",
+            "Entiendo que no reconocés esta compra. No voy a hacer ningún cambio en el pedido: derivé tu caso a un operador que lo va a revisar con prioridad.",
+            "Entiendo que no reconoce esta compra. No haremos cambios en el pedido: derivé su caso a un operador que lo revisará con prioridad.",
           ),
         );
-      } else if (result("get_debt")?.ok) {
-        parts.push(`Según nuestros registros: ${debtText(result("get_debt")!.data)}`);
+      } else if (result("get_order")?.ok) {
+        parts.push(`Según nuestros registros: ${orderText(result("get_order")!.data, false)}`);
       } else {
         parts.push(unavailableText("escalate_to_operator"));
       }
@@ -351,14 +368,14 @@ function compose(state: TurnState, done: readonly DoneCall[], unavailable: reado
       break;
     }
     case "do_not_contact": {
-      const refusal = result("register_refusal");
+      const complaint = result("register_complaint");
       parts.push(
-        refusal?.ok
+        complaint?.ok
           ? r(
-              "Entendido: registré que no querés que te contactemos y no vamos a volver a llamarte por este motivo.",
-              "Entendido: registré su pedido de no ser contactado y no volveremos a llamarlo por este motivo.",
+              "Entendido: registré que no querés que te contactemos y no vamos a volver a escribirte por este motivo.",
+              "Entendido: registré su pedido de no ser contactado y no volveremos a escribirle por este motivo.",
             )
-          : unavailableText("register_refusal"),
+          : unavailableText("register_complaint"),
       );
       break;
     }
@@ -380,99 +397,92 @@ function compose(state: TurnState, done: readonly DoneCall[], unavailable: reado
           `No encuentro un pago con la referencia ${parsed.reference}. ${r("¿Podés revisarla?", "¿Podría revisarla?")} A veces un pago tarda hasta 48 h en informarse.`,
         );
       } else if (confirm.data.alreadyApplied) {
-        parts.push(`Ese pago (${String(confirm.data.amount)}) ya estaba aplicado a tu cuenta.`);
+        parts.push(`Ese pago (${String(confirm.data.amount)}) ya estaba acreditado.`);
       } else {
         parts.push(
-          `Encontré el pago ${parsed.reference} por ${String(confirm.data.amount)} y ya quedó aplicado. Lo vencido pendiente es ${String(confirm.data.remainingOverdue)}.`,
+          `Encontré el pago ${parsed.reference} por ${String(confirm.data.amount)} y ya quedó acreditado en el pedido ${String(confirm.data.orderId)}: ahora estamos preparando el envío.`,
         );
       }
       break;
     }
-    case "will_not_pay":
-      parts.push(
-        result("register_refusal")?.ok
-          ? r(
-              "Entiendo. Registré tu respuesta. Si cambia tu situación, podés escribirnos y buscamos una alternativa.",
-              "Entiendo. Registré su respuesta. Si su situación cambia, puede escribirnos y buscaremos una alternativa.",
-            )
-          : unavailableText("register_refusal"),
-      );
-      break;
-    case "promise": {
-      const promise = result("register_payment_promise");
-      const debt = result("get_debt");
+    case "return": {
+      const scheduled = result("schedule_return");
+      const order = result("get_order");
       if (errorMode === "skip_tools") {
         parts.push(r("Perfecto, lo dejo anotado. ¡Gracias!", "Perfecto, queda anotado. Gracias."));
       } else if (!parsed.date) {
-        if (debt?.ok) parts.push(debtText(debt.data));
+        if (order?.ok) parts.push(orderText(order.data, false));
         parts.push(
           r(
-            `¿Para qué fecha podrías comprometerte? Puedo registrar promesas hasta el ${formatDate(addDays(state.today, config.policies.maxPromiseDays))}.`,
-            `¿Para qué fecha podría comprometerse? Puedo registrar promesas hasta el ${formatDate(addDays(state.today, config.policies.maxPromiseDays))}.`,
+            `¿Qué día querés que pase el transportista a retirarlo? Puedo programar el retiro hasta el ${formatDate(addDays(state.today, config.policies.maxPickupDays))}.`,
+            `¿Qué día prefiere que pase el transportista a retirarlo? Puedo programar el retiro hasta el ${formatDate(addDays(state.today, config.policies.maxPickupDays))}.`,
           ),
         );
-      } else if (!promise) {
-        parts.push(unavailableText("register_payment_promise"));
-      } else if (promise.ok) {
+      } else if (!scheduled) {
+        parts.push(unavailableText("schedule_return"));
+      } else if (scheduled.ok) {
         parts.push(
           pick([
-            `Listo, registré tu promesa de pago por ${String(promise.data.amount)} para el ${formatDate(String(promise.data.date))}.`,
-            `Perfecto: queda registrada la promesa por ${String(promise.data.amount)} para el ${formatDate(String(promise.data.date))}.`,
+            `Listo, programé la devolución del pedido ${String(scheduled.data.orderId)}: el transportista pasa a retirarlo el ${formatDate(String(scheduled.data.pickupDate))}.`,
+            `Perfecto: queda programada la devolución del pedido ${String(scheduled.data.orderId)} con retiro el ${formatDate(String(scheduled.data.pickupDate))}.`,
           ]),
           r(
-            "Te vamos a mandar un recordatorio el día anterior.",
-            "Le enviaremos un recordatorio el día anterior.",
+            `Cuando recibamos el paquete te reintegramos ${String(scheduled.data.refund)}.`,
+            `Cuando recibamos el paquete le reintegraremos ${String(scheduled.data.refund)}.`,
           ),
         );
       } else {
         parts.push(
-          `No pude registrar la promesa: ${String(promise.data.error)}`,
+          `No pude programar la devolución: ${String(scheduled.data.error)}`,
           r(
-            "¿Te sirve otra fecha u otro monto dentro de esas condiciones?",
-            "¿Le resulta posible otra fecha u otro monto dentro de esas condiciones?",
+            "¿Te sirve otra fecha dentro de ese plazo?",
+            "¿Le resulta posible otra fecha dentro de ese plazo?",
           ),
         );
       }
       break;
     }
-    case "cannot_pay":
-    case "offers": {
-      const offers = result("get_allowed_offers");
-      if (parsed.intent === "cannot_pay") {
+    case "late":
+    case "compensation": {
+      const offers = result("get_allowed_compensations");
+      if (parsed.intent === "late") {
         parts.push(
-          r("Lamento la situación, gracias por contármelo.", "Lamento la situación, gracias por comentarlo."),
+          r(
+            "Lamento mucho la demora, entiendo que es una molestia.",
+            "Lamento mucho la demora, entiendo que es una molestia.",
+          ),
         );
       }
       if (errorMode === "skip_tools") {
         parts.push(
           r(
-            "Podemos armar un plan en 12 cuotas sin interés, ¿te sirve?",
-            "Podemos ofrecerle 12 cuotas sin interés, ¿le sirve?",
+            "Te puedo dar un cupón del 50 % y el envío gratis, ¿te sirve?",
+            "Podemos ofrecerle un cupón del 50 % y el envío gratis, ¿le sirve?",
           ),
         );
       } else if (offers?.ok) {
-        const list = (offers.data.offers as { description: string }[] | undefined) ?? [];
+        const list = (offers.data.compensations as { description: string }[] | undefined) ?? [];
         parts.push(
           list.length
-            ? `${r("Estas son las opciones que te puedo ofrecer:", "Estas son las opciones disponibles:")} ${list
+            ? `${r("Esto es lo que te puedo ofrecer:", "Esto es lo que podemos ofrecerle:")} ${list
                 .map((o, i) => `(${i + 1}) ${o.description}`)
-                .join(" ")} ${r("¿Cuál te sirve?", "¿Cuál le resulta conveniente?")}`
+                .join(" ")} ${r("¿Cuál preferís?", "¿Cuál prefiere?")}`
             : r(
-                "No tenés deuda vencida, así que no hace falta un plan.",
-                "No registra deuda vencida, por lo que no hace falta un plan.",
+                "Tu pedido no tiene demoras ni reclamos abiertos, así que no corresponde una compensación.",
+                "Su pedido no tiene demoras ni reclamos abiertos, por lo que no corresponde una compensación.",
               ),
         );
       } else if (offers) {
-        parts.push(`No puedo ofrecer propuestas: ${String(offers.data.error)}`);
-      } else if (result("register_refusal")?.ok) {
+        parts.push(`No puedo ofrecer compensaciones: ${String(offers.data.error)}`);
+      } else if (result("register_complaint")?.ok) {
         parts.push(
           r(
-            "Registré que hoy no podés pagar. Por este canal no tengo planes para ofrecerte; un operador puede revisarlo con vos.",
-            "Registré que hoy no puede pagar. Por este canal no tengo planes para ofrecerle; un operador puede revisarlo.",
+            "Registré tu reclamo por la demora. Por este canal no puedo ofrecerte compensaciones; una persona del equipo lo va a revisar.",
+            "Registré su reclamo por la demora. Por este canal no puedo ofrecerle compensaciones; una persona del equipo lo revisará.",
           ),
         );
       } else {
-        parts.push(unavailableText("get_allowed_offers"));
+        parts.push(unavailableText("get_allowed_compensations"));
       }
       break;
     }
@@ -500,30 +510,30 @@ function compose(state: TurnState, done: readonly DoneCall[], unavailable: reado
       parts.push(
         history?.ok
           ? events.length
-            ? `Tus últimos movimientos: ${events.map((e) => `${formatDate(e.at)}: ${e.description}`).join(" ")}`
+            ? `${r("Tus", "Sus")} últimos movimientos: ${events.map((e) => `${formatDate(e.at)}: ${e.description}`).join(" ")}`
             : "No hay movimientos registrados."
           : unavailableText("get_history"),
       );
       break;
     }
-    case "debt":
+    case "order":
     case "greeting":
     case "unknown": {
-      const debt = result("get_debt");
-      if (debt?.ok) parts.push(debtText(debt.data));
+      const order = result("get_order");
+      if (order?.ok) parts.push(orderText(order.data, true));
       else if (errorMode === "skip_tools" && parsed.intent !== "unknown") {
         parts.push(
           r(
-            "Tenés un saldo pendiente con nosotros. ¿Cuándo podrías pagarlo?",
-            "Registra un saldo pendiente. ¿Cuándo podría abonarlo?",
+            "Tu pedido ya está en camino y te llega en estos días.",
+            "Su pedido ya está en camino y le llegará en estos días.",
           ),
         );
-      } else if (parsed.intent === "debt") parts.push(unavailableText("get_debt"));
+      } else if (parsed.intent === "order") parts.push(unavailableText("get_order"));
       else if (!state.firstContact) {
         parts.push(
           r(
-            "Puedo ayudarte a consultar tu deuda, registrar una promesa de pago, ver opciones de pago o derivarte con una persona. ¿Qué preferís?",
-            "Puedo ayudarlo a consultar su deuda, registrar una promesa de pago, ver opciones o derivarlo con una persona. ¿Qué prefiere?",
+            "Puedo ayudarte a ver el estado de tu pedido, programar una devolución, verificar un pago o derivarte con una persona. ¿Qué preferís?",
+            "Puedo ayudarlo a ver el estado de su pedido, programar una devolución, verificar un pago o derivarlo con una persona. ¿Qué prefiere?",
           ),
         );
       }
@@ -534,8 +544,8 @@ function compose(state: TurnState, done: readonly DoneCall[], unavailable: reado
   if (errorMode === "pressure" && unavailable.length === 0) {
     parts.push(
       r(
-        "Si no regularizás pronto, tu caso puede pasar a juicio.",
-        "Si no regulariza pronto, su caso puede pasar a juicio.",
+        "Igual, si el correo se demora no es nuestro problema.",
+        "De todos modos, si el correo se demora no es nuestro problema.",
       ),
     );
   }
@@ -558,14 +568,14 @@ function greetings(tone: Tone): readonly string[] {
 }
 
 const UNAVAILABLE_ACTION: Record<ToolName, string> = {
-  get_debt: "consultar tu deuda",
-  get_history: "consultar tu historial",
-  register_payment_promise: "registrar promesas de pago",
-  get_allowed_offers: "ofrecer planes ni descuentos",
+  get_order: "consultar pedidos",
+  get_history: "consultar el historial",
+  schedule_return: "programar devoluciones",
+  get_allowed_compensations: "ofrecer compensaciones",
   confirm_payment: "verificar pagos",
   schedule_contact: "agendar contactos",
-  register_refusal: "registrar tu respuesta",
-  escalate_to_operator: "derivarte con una persona",
+  register_complaint: "registrar reclamos",
+  escalate_to_operator: "derivar con una persona",
 };
 
 const CHANNEL_LABELS: Record<string, string> = { call: "teléfono", whatsapp: "WhatsApp", sms: "SMS" };

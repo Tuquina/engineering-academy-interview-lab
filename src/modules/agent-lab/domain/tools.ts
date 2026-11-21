@@ -1,23 +1,23 @@
 import type { AgentPolicies, ToolName } from "./agent-config";
 import {
-  activePromise,
+  activeReturn,
   addDays,
-  customerInstallments,
+  customerOrders,
   daysBetween,
-  debtSummary,
   findCustomer,
   formatDate,
   formatMoney,
   isIsoDate,
   nextId,
-  type CollectionsWorld,
+  orderSummary,
+  type ComplaintReason,
   type IsoDate,
-  type RefusalReason,
+  type SupportWorld,
   type WorldEvent,
-} from "./collections-world";
+} from "./support-world";
 
 /**
- * Ejecución de las herramientas del agente sobre el mundo de cobranzas (MASTER_PROMPT §16.4).
+ * Ejecución de las herramientas del agente sobre el mundo del soporte al cliente (MASTER_PROMPT §16.4).
  *
  * Cada herramienta es una función pura `(mundo, argumentos, contexto) → resultado`. Los argumentos ya llegan
  * validados por esquema (capa de aplicación); acá se aplican las **reglas de negocio y las políticas**, que no
@@ -32,16 +32,16 @@ export interface ToolContext {
 }
 
 export type ToolOutcome =
-  | { readonly ok: true; readonly result: Record<string, unknown>; readonly world: CollectionsWorld }
+  | { readonly ok: true; readonly result: Record<string, unknown>; readonly world: SupportWorld }
   | { readonly ok: false; readonly error: string; readonly code: ToolErrorCode };
 
 export type ToolErrorCode = "not_found" | "forbidden" | "policy_violation" | "conflict";
 
 export interface ToolArgs {
-  get_debt: { customerId: string };
+  get_order: { customerId: string };
   get_history: { customerId: string; limit?: number };
-  register_payment_promise: { customerId: string; amountCents: number; promisedDate: string };
-  get_allowed_offers: { customerId: string };
+  schedule_return: { customerId: string; orderId: string; pickupDate: string };
+  get_allowed_compensations: { customerId: string };
   confirm_payment: { customerId: string; reference: string };
   schedule_contact: {
     customerId: string;
@@ -50,19 +50,22 @@ export interface ToolArgs {
     channel: "call" | "whatsapp" | "sms";
     reason: string;
   };
-  register_refusal: { customerId: string; reason: RefusalReason; notes?: string };
+  register_complaint: { customerId: string; reason: ComplaintReason; notes?: string };
   escalate_to_operator: { customerId: string; reason: string; priority: "normal" | "high"; summary: string };
 }
 
-type Executor<N extends ToolName> = (
-  world: CollectionsWorld,
-  args: ToolArgs[N],
-  ctx: ToolContext,
-) => ToolOutcome;
+type Executor<N extends ToolName> = (world: SupportWorld, args: ToolArgs[N], ctx: ToolContext) => ToolOutcome;
 
 const fail = (code: ToolErrorCode, error: string): ToolOutcome => ({ ok: false, code, error });
 
-function guardCustomer(world: CollectionsWorld, customerId: string, ctx: ToolContext): ToolOutcome | null {
+const STATUS_LABELS: Record<string, string> = {
+  pending_payment: "pendiente de pago",
+  paid: "pagado, preparando el envío",
+  shipped: "en camino",
+  delivered: "entregado",
+};
+
+function guardCustomer(world: SupportWorld, customerId: string, ctx: ToolContext): ToolOutcome | null {
   if (customerId !== ctx.sessionCustomerId) {
     return fail("forbidden", "Sólo se puede operar sobre el cliente de esta conversación.");
   }
@@ -70,28 +73,32 @@ function guardCustomer(world: CollectionsWorld, customerId: string, ctx: ToolCon
   return null;
 }
 
-function withEvent(world: CollectionsWorld, event: Omit<WorldEvent, "id">): CollectionsWorld {
+function withEvent(world: SupportWorld, event: Omit<WorldEvent, "id">): SupportWorld {
   return { ...world, events: [...world.events, { ...event, id: nextId("E", world.events) }] };
 }
 
-const getDebt: Executor<"get_debt"> = (world, args, ctx) => {
+const getOrder: Executor<"get_order"> = (world, args, ctx) => {
   const denied = guardCustomer(world, args.customerId, ctx);
   if (denied) return denied;
-  const debt = debtSummary(world, args.customerId, ctx.today);
-  const promise = activePromise(world, args.customerId);
+  const order = orderSummary(world, args.customerId, ctx.today, ctx.policies.returnWindowDays);
+  if (!order) return { ok: true, world, result: { order: null } };
+  const pending = activeReturn(world, args.customerId);
   return {
     ok: true,
     world,
     result: {
-      overdueCents: debt.overdueCents,
-      overdue: formatMoney(debt.overdueCents),
-      overdueInstallments: debt.overdueInstallments,
-      daysPastDue: debt.daysPastDue,
-      upcomingCents: debt.upcomingCents,
-      pendingPaymentsCents: debt.pendingPaymentsCents,
-      activePromise: promise
-        ? { id: promise.id, amount: formatMoney(promise.amountCents), date: promise.promisedDate }
-        : null,
+      orderId: order.orderId,
+      description: order.description,
+      status: order.status,
+      statusLabel: STATUS_LABELS[order.status] ?? order.status,
+      total: formatMoney(order.totalCents),
+      carrier: order.carrier,
+      promisedBy: order.promisedBy,
+      deliveredAt: order.deliveredAt,
+      daysLate: order.daysLate,
+      returnDeadline: order.returnDeadline,
+      pendingPaymentsCents: order.pendingPaymentsCents,
+      activeReturn: pending ? { id: pending.id, pickupDate: pending.pickupDate } : null,
     },
   };
 };
@@ -106,96 +113,104 @@ const getHistory: Executor<"get_history"> = (world, args, ctx) => {
   return { ok: true, world, result: { events } };
 };
 
-const registerPromise: Executor<"register_payment_promise"> = (world, args, ctx) => {
+const scheduleReturn: Executor<"schedule_return"> = (world, args, ctx) => {
   const denied = guardCustomer(world, args.customerId, ctx);
   if (denied) return denied;
   const customer = findCustomer(world, args.customerId)!;
   if (customer.disputed && ctx.policies.escalateOnDispute) {
-    return fail("policy_violation", "La deuda está en disputa: la política exige escalar a un operador.");
+    return fail("policy_violation", "Hay un cargo no reconocido: la política exige escalar a un operador.");
   }
-  if (!isIsoDate(args.promisedDate))
-    return fail("policy_violation", "La fecha debe tener formato AAAA-MM-DD.");
-  const days = daysBetween(ctx.today, args.promisedDate);
-  if (days < 0) return fail("policy_violation", "La fecha de la promesa no puede ser anterior a hoy.");
-  if (days > ctx.policies.maxPromiseDays) {
+  const order = customerOrders(world, args.customerId).find(
+    (o) => o.id === args.orderId.trim().toUpperCase(),
+  );
+  if (!order) return fail("not_found", `El pedido ${args.orderId} no pertenece a este cliente.`);
+  if (order.status !== "delivered" || !order.deliveredAt) {
+    return fail("conflict", "Sólo se pueden devolver pedidos entregados.");
+  }
+  const deadline = addDays(order.deliveredAt, ctx.policies.returnWindowDays);
+  if (ctx.today > deadline) {
     return fail(
       "policy_violation",
-      `La política permite promesas hasta ${ctx.policies.maxPromiseDays} días (hasta el ` +
-        `${formatDate(addDays(ctx.today, ctx.policies.maxPromiseDays))}).`,
+      `El plazo de devolución venció el ${formatDate(deadline)} (${ctx.policies.returnWindowDays} días desde la entrega).`,
     );
   }
-  const debt = debtSummary(world, args.customerId, ctx.today);
-  if (debt.overdueCents === 0) return fail("conflict", "El cliente no tiene deuda vencida.");
-  if (args.amountCents < debt.overdueCents) {
+  if (!isIsoDate(args.pickupDate)) return fail("policy_violation", "La fecha debe tener formato AAAA-MM-DD.");
+  const days = daysBetween(ctx.today, args.pickupDate);
+  if (days < 1) return fail("policy_violation", "El retiro se programa desde mañana en adelante.");
+  if (days > ctx.policies.maxPickupDays) {
     return fail(
       "policy_violation",
-      `La promesa debe cubrir al menos la deuda vencida (${formatMoney(debt.overdueCents)}). ` +
-        "Para montos menores, ofrecé un plan con get_allowed_offers.",
+      `La política permite programar el retiro hasta ${ctx.policies.maxPickupDays} días desde hoy (hasta el ` +
+        `${formatDate(addDays(ctx.today, ctx.policies.maxPickupDays))}).`,
     );
   }
-  if (args.amountCents > debt.overdueCents + debt.upcomingCents) {
-    return fail("policy_violation", "El monto supera la deuda total.");
+  if (world.returns.some((r) => r.orderId === order.id && r.status === "scheduled")) {
+    return fail("conflict", "Ya hay una devolución programada para este pedido: no se programa otra.");
   }
-  if (activePromise(world, args.customerId)) {
-    return fail("conflict", "Ya existe una promesa activa: no se registra otra.");
-  }
-  const promise = {
-    id: nextId("P", world.promises),
+  const request = {
+    id: nextId("R", world.returns),
     customerId: args.customerId,
-    amountCents: args.amountCents,
-    promisedDate: args.promisedDate,
+    orderId: order.id,
+    pickupDate: args.pickupDate,
+    refundCents: order.totalCents,
     createdAt: ctx.today,
-    status: "active" as const,
+    status: "scheduled" as const,
   };
   const next = withEvent(
-    { ...world, promises: [...world.promises, promise] },
+    { ...world, returns: [...world.returns, request] },
     {
       customerId: args.customerId,
       at: ctx.today,
-      type: "promise_registered",
-      description: `Promesa ${promise.id} por ${formatMoney(promise.amountCents)} para el ${promise.promisedDate}.`,
+      type: "return_scheduled",
+      description: `Devolución ${request.id} del pedido ${order.id}: retiro el ${request.pickupDate}.`,
     },
   );
   return {
     ok: true,
     world: next,
-    result: { promiseId: promise.id, amount: formatMoney(promise.amountCents), date: promise.promisedDate },
+    result: {
+      returnId: request.id,
+      orderId: order.id,
+      pickupDate: request.pickupDate,
+      refund: formatMoney(request.refundCents),
+    },
   };
 };
 
-const getAllowedOffers: Executor<"get_allowed_offers"> = (world, args, ctx) => {
+const getAllowedCompensations: Executor<"get_allowed_compensations"> = (world, args, ctx) => {
   const denied = guardCustomer(world, args.customerId, ctx);
   if (denied) return denied;
   const customer = findCustomer(world, args.customerId)!;
   if (customer.disputed && ctx.policies.escalateOnDispute) {
-    return fail("policy_violation", "La deuda está en disputa: no se ofrecen propuestas.");
+    return fail("policy_violation", "Hay un cargo no reconocido: no se ofrecen compensaciones.");
   }
-  const debt = debtSummary(world, args.customerId, ctx.today);
-  if (debt.overdueCents === 0) return { ok: true, world, result: { offers: [] } };
-  const offers: Record<string, unknown>[] = [
-    {
-      id: "full_payment",
-      description: `Pago total de lo vencido (${formatMoney(debt.overdueCents)}) en hasta ${ctx.policies.maxPromiseDays} días.`,
-    },
-  ];
-  // Planes y descuentos sólo con más de 30 días de atraso: antes se espera el pago de lo vencido.
-  if (debt.daysPastDue > 30) {
-    const installments = Math.min(ctx.policies.maxInstallments, 6);
-    const each = Math.ceil(debt.overdueCents / installments);
-    offers.push({
-      id: "installment_plan",
-      description: `Plan de ${installments} cuotas de ${formatMoney(each)}.`,
-      installments,
-      installmentCents: each,
-    });
-    if (ctx.policies.maxDiscountPercent > 0) {
-      offers.push({
-        id: "discount",
-        description: `Descuento de hasta ${ctx.policies.maxDiscountPercent} % sobre intereses pagando lo vencido en un pago.`,
+  const order = orderSummary(world, args.customerId, ctx.today, ctx.policies.returnWindowDays);
+  if (!order) return { ok: true, world, result: { compensations: [] } };
+  const compensations: Record<string, unknown>[] = [];
+  // Una demora habilita compensaciones; una demora larga, además, cancelar con reembolso total.
+  if (order.status === "shipped" && order.daysLate > 0) {
+    if (ctx.policies.maxCouponPercent > 0) {
+      compensations.push({
+        id: "coupon",
+        description: `Cupón del ${ctx.policies.maxCouponPercent} % para tu próxima compra.`,
+        percent: ctx.policies.maxCouponPercent,
+      });
+    }
+    compensations.push({ id: "shipping_refund", description: "Reintegro del costo de envío." });
+    if (order.daysLate > 7) {
+      compensations.push({
+        id: "cancel_refund",
+        description: `Cancelar el pedido con reembolso total (${formatMoney(order.totalCents)}).`,
       });
     }
   }
-  return { ok: true, world, result: { daysPastDue: debt.daysPastDue, offers } };
+  if (order.status === "delivered" && order.returnDeadline && ctx.today <= order.returnDeadline) {
+    compensations.push({
+      id: "return",
+      description: `Devolución con retiro a domicilio, pidiéndola hasta el ${formatDate(order.returnDeadline)}.`,
+    });
+  }
+  return { ok: true, world, result: { orderId: order.orderId, daysLate: order.daysLate, compensations } };
 };
 
 const confirmPayment: Executor<"confirm_payment"> = (world, args, ctx) => {
@@ -217,31 +232,20 @@ const confirmPayment: Executor<"confirm_payment"> = (world, args, ctx) => {
       result: { found: true, alreadyApplied: true, amount: formatMoney(payment.amountCents) },
     };
   }
-  // Aplica el pago a las cuotas abiertas, de la más antigua a la más nueva.
-  let remaining = payment.amountCents;
-  const touched = new Set(customerInstallments(world, args.customerId).map((i) => i.id));
-  const installments = world.installments.map((i) => {
-    if (!touched.has(i.id) || remaining === 0 || i.paidCents >= i.amountCents) return i;
-    const applied = Math.min(remaining, i.amountCents - i.paidCents);
-    remaining -= applied;
-    return { ...i, paidCents: i.paidCents + applied };
-  });
-  const promise = activePromise(world, args.customerId);
-  const promises = promise
-    ? world.promises.map((p) => (p.id === promise.id ? { ...p, status: "kept" as const } : p))
-    : world.promises;
+  // Aplica el pago: el pedido pendiente de pago pasa a pagado y entra en preparación.
   const next = withEvent(
     {
       ...world,
-      installments,
-      promises,
       payments: world.payments.map((p) => (p.id === payment.id ? { ...p, status: "applied" as const } : p)),
+      orders: world.orders.map((o) =>
+        o.id === payment.orderId && o.status === "pending_payment" ? { ...o, status: "paid" as const } : o,
+      ),
     },
     {
       customerId: args.customerId,
       at: ctx.today,
       type: "payment_applied",
-      description: `Pago ${payment.reference} por ${formatMoney(payment.amountCents)} aplicado.`,
+      description: `Pago ${payment.reference} por ${formatMoney(payment.amountCents)} aplicado al pedido ${payment.orderId}.`,
     },
   );
   return {
@@ -251,7 +255,8 @@ const confirmPayment: Executor<"confirm_payment"> = (world, args, ctx) => {
       found: true,
       applied: true,
       amount: formatMoney(payment.amountCents),
-      remainingOverdue: formatMoney(debtSummary(next, args.customerId, ctx.today).overdueCents),
+      orderId: payment.orderId,
+      orderStatus: next.orders.find((o) => o.id === payment.orderId)?.status ?? null,
     },
   };
 };
@@ -291,11 +296,11 @@ const scheduleContact: Executor<"schedule_contact"> = (world, args, ctx) => {
   };
 };
 
-const registerRefusal: Executor<"register_refusal"> = (world, args, ctx) => {
+const registerComplaint: Executor<"register_complaint"> = (world, args, ctx) => {
   const denied = guardCustomer(world, args.customerId, ctx);
   if (denied) return denied;
-  const refusal = {
-    id: nextId("R", world.refusals),
+  const complaint = {
+    id: nextId("RC", world.complaints),
     customerId: args.customerId,
     reason: args.reason,
     notes: args.notes ?? "",
@@ -305,7 +310,7 @@ const registerRefusal: Executor<"register_refusal"> = (world, args, ctx) => {
   const next = withEvent(
     {
       ...world,
-      refusals: [...world.refusals, refusal],
+      complaints: [...world.complaints, complaint],
       customers: optOut
         ? world.customers.map((c) => (c.id === args.customerId ? { ...c, doNotContact: true } : c))
         : world.customers,
@@ -314,11 +319,11 @@ const registerRefusal: Executor<"register_refusal"> = (world, args, ctx) => {
     {
       customerId: args.customerId,
       at: ctx.today,
-      type: "refusal_registered",
-      description: `Rechazo registrado (${args.reason}).`,
+      type: "complaint_registered",
+      description: `Reclamo registrado (${args.reason}).`,
     },
   );
-  return { ok: true, world: next, result: { refusalId: refusal.id, doNotContact: optOut } };
+  return { ok: true, world: next, result: { complaintId: complaint.id, doNotContact: optOut } };
 };
 
 const escalate: Executor<"escalate_to_operator"> = (world, args, ctx) => {
@@ -344,30 +349,30 @@ const escalate: Executor<"escalate_to_operator"> = (world, args, ctx) => {
       description: `Escalado a un operador (${args.priority}): ${args.reason}.`,
     },
   );
-  return { ok: true, world: next, result: { escalationId: escalation.id, queue: "operadores-cobranzas" } };
+  return { ok: true, world: next, result: { escalationId: escalation.id, queue: "soporte-tienda" } };
 };
 
 const EXECUTORS: { [N in ToolName]: Executor<N> } = {
-  get_debt: getDebt,
+  get_order: getOrder,
   get_history: getHistory,
-  register_payment_promise: registerPromise,
-  get_allowed_offers: getAllowedOffers,
+  schedule_return: scheduleReturn,
+  get_allowed_compensations: getAllowedCompensations,
   confirm_payment: confirmPayment,
   schedule_contact: scheduleContact,
-  register_refusal: registerRefusal,
+  register_complaint: registerComplaint,
   escalate_to_operator: escalate,
 };
 
 /** Herramientas que sólo leen: no cambian el mundo. */
 export const READ_ONLY_TOOLS: ReadonlySet<ToolName> = new Set([
-  "get_debt",
+  "get_order",
   "get_history",
-  "get_allowed_offers",
+  "get_allowed_compensations",
 ]);
 
 export function executeTool<N extends ToolName>(
   name: N,
-  world: CollectionsWorld,
+  world: SupportWorld,
   args: ToolArgs[N],
   ctx: ToolContext,
 ): ToolOutcome {

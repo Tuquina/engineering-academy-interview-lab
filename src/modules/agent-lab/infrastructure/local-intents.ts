@@ -1,4 +1,4 @@
-import { addDays, type IsoDate } from "../domain/collections-world";
+import { addDays, type IsoDate } from "../domain/support-world";
 import { normalizeText } from "../domain/memory";
 
 /**
@@ -15,13 +15,12 @@ export type Intent =
   | "human"
   | "do_not_contact"
   | "paid"
-  | "will_not_pay"
-  | "promise"
-  | "cannot_pay"
-  | "offers"
+  | "return"
+  | "late"
+  | "compensation"
   | "schedule"
   | "history"
-  | "debt"
+  | "order"
   | "greeting"
   | "unknown";
 
@@ -32,25 +31,24 @@ const PATTERNS: ReadonlyArray<readonly [Intent, RegExp]> = [
   ],
   [
     "dispute",
-    /no reconozco|no es mia|no es mio|nunca (saque|pedi)|no pedi (ningun|ese)|fraude|me robaron (la|el)/,
+    /no reconozco|yo no (hice|compre)|no hice (esa|esta) compra|nunca (compre|pedi)|no pedi (ningun|ese)|fraude|me robaron (la|el)/,
   ],
   ["human", /operador|una persona|un humano|asesor|supervisor|hablar con alguien|persona real/],
   [
     "do_not_contact",
-    /no me (llamen|contacten|escriban|llames|escribas)|dejen de (llamar|escribir)|no quiero que me (llamen|contacten)/,
+    /no me (llamen|contacten|escriban|llames|escribas|manden)|dejen de (llamar|escribir|mandar)|no quiero (que me (llamen|contacten)|recibir (mas )?mensajes)/,
   ],
   ["paid", /ya pague|ya transferi|hice el pago|ya deposite|pague ayer|ya lo pague/],
-  ["will_not_pay", /no (voy a|pienso) pagar|no quiero pagar|no les voy a pagar/],
-  // Antes que "promise": "no puedo pagar" contiene "puedo pagar".
   [
-    "cannot_pay",
-    /no puedo pagar|no tengo (plata|dinero|un peso)|me quede sin trabajo|perdi (el|mi) trabajo|no me alcanza/,
+    "return",
+    /devolver|devolucion|me (quedo|quedaron) (chico|chica|chicas|chicos|grande|grandes)|no me (sirve|sirvio)/,
   ],
-  ["promise", /(te |le |les )?(pago|puedo pagar|voy a pagar|pagaria|prometo pagar|abono|puedo abonar)\b/],
-  ["offers", /cuotas|plan de pago|descuento|refinanc|opciones|propuesta|no tengo todo/],
-  ["schedule", /llamame|llamenme|llamame|contactame|contactenme|escribime|mas tarde|otro dia|ahora no puedo/],
-  ["history", /historial|pagos anteriores|que pague|movimientos/],
-  ["debt", /cuanto debo|deuda|saldo|monto|debo|cuanto es|cuanto tengo/],
+  // Antes que "order": "mi pedido está atrasado" también menciona el pedido.
+  ["late", /atrasad|demorad|no (me )?lleg(a|o)\b|todavia no (llega|llego)|deberia haber llegado/],
+  ["compensation", /compensacion|cupon|descuento|reintegro|reembolso|que me ofrecen|opciones/],
+  ["schedule", /llamame|llamenme|contactame|contactenme|escribime|mas tarde|otro dia|ahora no puedo/],
+  ["history", /historial|compras anteriores|pedidos anteriores|movimientos/],
+  ["order", /donde esta|mi pedido|mi compra|mi envio|seguimiento|cuando (llega|me llega)|estado (del|de mi)/],
   ["greeting", /^(hola|buenas|buen dia|buenas tardes|buenas noches)\b/],
 ];
 
@@ -58,8 +56,9 @@ export interface ParsedMessage {
   readonly intent: Intent;
   readonly normalized: string;
   readonly date: IsoDate | null;
-  readonly amountCents: number | null;
   readonly reference: string | null;
+  /** Id de pedido mencionado (`O-1002`), si lo hay. */
+  readonly orderId: string | null;
   readonly hour: number | null;
   readonly mentionedCustomerId: string | null;
   readonly channel: "call" | "whatsapp" | "sms";
@@ -71,7 +70,8 @@ export function parseMessage(text: string, today: IsoDate, sessionCustomerId: st
   const mentionedCustomerId = mentioned && mentioned !== sessionCustomerId ? mentioned : null;
   const date = parseDate(normalized, today);
   const asksForOther =
-    mentionedCustomerId !== null || /deuda de (mi|otra|otro)|cuanto debe (mi|otra|otro)/.test(normalized);
+    mentionedCustomerId !== null ||
+    /pedido de (mi|otra|otro)|que compro (mi|otra|otro|el cliente|la clienta)/.test(normalized);
   let intent: Intent = "unknown";
   for (const [candidate, pattern] of PATTERNS) {
     if (pattern.test(normalized)) {
@@ -81,21 +81,19 @@ export function parseMessage(text: string, today: IsoDate, sessionCustomerId: st
   }
   // Pedir datos de otra persona tiene prioridad sobre todo salvo un intento de inyección.
   if (asksForOther && intent !== "injection") intent = "other_customer";
-  // "pago" sin fecha ni verbo de compromiso suele ser una pregunta ("¿cómo pago?"), no una promesa.
-  if (intent === "promise" && !date && !/prometo|voy a pagar|puedo pagar/.test(normalized)) intent = "debt";
   return {
     intent,
     normalized,
     date,
-    amountCents: parseAmount(normalized),
     reference: /\b([a-z]{2,4}-\d{3,})\b/.exec(normalized)?.[1]?.toUpperCase() ?? null,
+    orderId: /\b(o-\d{4})\b/.exec(normalized)?.[1]?.toUpperCase() ?? null,
     hour: parseHour(normalized),
     mentionedCustomerId,
     channel: /whatsapp|mensaje/.test(normalized) ? "whatsapp" : /sms/.test(normalized) ? "sms" : "call",
   };
 }
 
-/** Fechas relativas y absolutas frecuentes en una conversación de cobranza. */
+/** Fechas relativas y absolutas frecuentes en una conversación de atención al cliente. */
 export function parseDate(text: string, today: IsoDate): IsoDate | null {
   const [year, month, day] = today.split("-").map(Number) as [number, number, number];
   if (/pasado manana/.test(text)) return addDays(today, 2);
@@ -112,7 +110,7 @@ export function parseDate(text: string, today: IsoDate): IsoDate | null {
     const candidate = isoOf(year, m, d);
     return candidate < today ? isoOf(year + 1, m, d) : candidate;
   }
-  const dayOnly = /\bel (dia )?(\d{1,2})\b(?! de (cuotas|pesos))/.exec(text);
+  const dayOnly = /\bel (dia )?(\d{1,2})\b/.exec(text);
   if (dayOnly) {
     const d = Number(dayOnly[2]);
     if (d < 1 || d > 31) return null;
@@ -123,18 +121,6 @@ export function parseDate(text: string, today: IsoDate): IsoDate | null {
 
 function isoOf(year: number, month: number, day: number): IsoDate {
   return new Date(Date.UTC(year, month - 1, day)).toISOString().slice(0, 10);
-}
-
-/** Montos explícitos en pesos ("$45.000", "45000 pesos"); números chicos se interpretan como días u horas. */
-export function parseAmount(text: string): number | null {
-  const match = /\$\s?(\d{1,3}(?:\.\d{3})+|\d+)(?:,(\d{1,2}))?|(\d{1,3}(?:\.\d{3})+|\d{4,})\s?pesos/.exec(
-    text,
-  );
-  if (!match) return null;
-  const whole = (match[1] ?? match[3] ?? "").replace(/\./g, "");
-  const cents = match[2] ? Number(match[2].padEnd(2, "0")) : 0;
-  const value = Number(whole) * 100 + cents;
-  return Number.isFinite(value) && value > 0 ? value : null;
 }
 
 function parseHour(text: string): number | null {

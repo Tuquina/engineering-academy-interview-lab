@@ -62,7 +62,7 @@ export function AgentVersionsPanel({ agent, onRestored }: { agent: AgentRecord; 
           <input
             value={note}
             onChange={(e) => setNote(e.target.value)}
-            placeholder="Qué cambió (por ejemplo: plazo de promesa a 10 días)"
+            placeholder="Qué cambió (por ejemplo: plazo de retiro a 10 días)"
             aria-label="Nota de la versión"
             maxLength={200}
             className="border-border bg-surface-2 text-foreground h-9 min-w-0 flex-1 rounded-md border px-3 text-sm"

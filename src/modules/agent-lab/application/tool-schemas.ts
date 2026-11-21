@@ -17,7 +17,7 @@ const customerId = z
   .describe("Id del cliente de la conversación, por ejemplo c-001.");
 
 const SCHEMAS = {
-  get_debt: z.strictObject({ customerId }),
+  get_order: z.strictObject({ customerId }),
   get_history: z.strictObject({
     customerId,
     limit: z
@@ -28,15 +28,15 @@ const SCHEMAS = {
       .optional()
       .describe("Cantidad máxima de eventos (por defecto 10)."),
   }),
-  register_payment_promise: z.strictObject({
+  schedule_return: z.strictObject({
     customerId,
-    amountCents: z.number().int().positive().describe("Monto prometido en centavos."),
-    promisedDate: z
+    orderId: z.string().min(3).max(20).describe("Id del pedido a devolver, por ejemplo O-1002."),
+    pickupDate: z
       .string()
       .regex(/^\d{4}-\d{2}-\d{2}$/, "Formato AAAA-MM-DD")
-      .describe("Fecha prometida, AAAA-MM-DD."),
+      .describe("Día en que el transportista retira el paquete, AAAA-MM-DD."),
   }),
-  get_allowed_offers: z.strictObject({ customerId }),
+  get_allowed_compensations: z.strictObject({ customerId }),
   confirm_payment: z.strictObject({
     customerId,
     reference: z
@@ -55,9 +55,9 @@ const SCHEMAS = {
     channel: z.enum(["call", "whatsapp", "sms"]),
     reason: z.string().min(3).max(200),
   }),
-  register_refusal: z.strictObject({
+  register_complaint: z.strictObject({
     customerId,
-    reason: z.enum(["cannot_pay", "does_not_recognize_debt", "will_not_pay", "do_not_contact"]),
+    reason: z.enum(["late_delivery", "damaged_item", "unrecognized_charge", "do_not_contact"]),
     notes: z.string().max(500).optional(),
   }),
   escalate_to_operator: z.strictObject({
@@ -73,17 +73,18 @@ const SCHEMAS = {
 } satisfies { [N in ToolName]: z.ZodType<ToolArgs[N]> };
 
 export const TOOL_DESCRIPTIONS: Record<ToolName, string> = {
-  get_debt:
-    "Devuelve la deuda vencida, las cuotas atrasadas, los días de atraso y si hay una promesa activa.",
+  get_order:
+    "Devuelve el pedido más reciente del cliente: estado, transportista, fecha comprometida, días de demora, plazo de devolución y pagos en proceso.",
   get_history:
-    "Devuelve los últimos eventos del cliente: pagos, promesas, contactos, rechazos y escalamientos.",
-  register_payment_promise:
-    "Registra una promesa de pago. Debe cubrir la deuda vencida y respetar el plazo máximo de la política.",
-  get_allowed_offers:
-    "Devuelve las únicas propuestas que el agente puede ofrecer (pago total, plan en cuotas, descuento).",
-  confirm_payment: "Busca un pago por referencia y, si está pendiente, lo aplica a las cuotas.",
+    "Devuelve los últimos eventos del cliente: envíos, pagos, devoluciones, contactos, reclamos y escalamientos.",
+  schedule_return:
+    "Programa la devolución de un pedido entregado con retiro a domicilio. Respeta el plazo de devolución y el plazo máximo para el retiro.",
+  get_allowed_compensations:
+    "Devuelve las únicas compensaciones que el agente puede ofrecer (cupón, reintegro del envío, cancelación con reembolso, devolución).",
+  confirm_payment: "Busca un pago por referencia y, si está pendiente, lo aplica al pedido.",
   schedule_contact: "Programa un contacto futuro dentro de la ventana horaria permitida.",
-  register_refusal: "Registra que la persona rechaza pagar o pide no ser contactada.",
+  register_complaint:
+    "Registra un reclamo (demora, producto dañado, cargo no reconocido) o el pedido de no ser contactado.",
   escalate_to_operator: "Deriva la conversación a un operador humano con un resumen.",
 };
 
@@ -120,13 +121,13 @@ export function validateToolArgs<N extends ToolName>(name: N, input: unknown): A
 /** Argumentos de ejemplo para el Tool Calling Simulator. */
 export function exampleArgs(name: ToolName, customer: string, today: string): Record<string, unknown> {
   switch (name) {
-    case "get_debt":
-    case "get_allowed_offers":
+    case "get_order":
+    case "get_allowed_compensations":
       return { customerId: customer };
     case "get_history":
       return { customerId: customer, limit: 5 };
-    case "register_payment_promise":
-      return { customerId: customer, amountCents: 4_500_000, promisedDate: today };
+    case "schedule_return":
+      return { customerId: customer, orderId: "O-1002", pickupDate: today };
     case "confirm_payment":
       return { customerId: customer, reference: "TRX-88123" };
     case "schedule_contact":
@@ -137,8 +138,12 @@ export function exampleArgs(name: ToolName, customer: string, today: string): Re
         channel: "call",
         reason: "Recordatorio acordado",
       };
-    case "register_refusal":
-      return { customerId: customer, reason: "cannot_pay", notes: "Perdió el trabajo" };
+    case "register_complaint":
+      return {
+        customerId: customer,
+        reason: "late_delivery",
+        notes: "El pedido no llegó en la fecha prometida",
+      };
     case "escalate_to_operator":
       return {
         customerId: customer,

@@ -26,15 +26,15 @@ references:
   - title: "NIST — AI Risk Management Framework"
     url: "https://www.nist.gov/itl/ai-risk-management-framework"
 interviewQuestions:
-  - question: "¿Qué guardrails pondrías en un agente de cobranzas?"
+  - question: "¿Qué guardrails pondrías en un agente que atiende a los pacientes de una red de clínicas?"
     keyPoints:
-      - "Entrada: detección de intentos de inyección, datos sensibles, señales de vulnerabilidad y opt-out."
-      - "Acciones: herramientas permitidas, límites de negocio, confirmación humana para lo irreversible."
-      - "Salida: validación de montos y fechas contra el sistema, lenguaje prohibido, cumplimiento de horarios y normativa."
+      - "Entrada: detección de intentos de inyección, datos sensibles, síntomas de urgencia y opt-out."
+      - "Acciones: herramientas permitidas, límites (no diagnosticar ni indicar medicación), confirmación humana para lo irreversible."
+      - "Salida: validación de turnos y profesionales contra la agenda, lenguaje prohibido, cumplimiento de horarios y normativa."
       - "Los guardrails deterministas se prefieren; los basados en modelos se evalúan y se usan como capa adicional."
   - question: "¿Cuándo pondrías a un humano en el loop?"
     keyPoints:
-      - "Acciones de alto impacto o irreversibles: quitas grandes, cancelaciones, cambios contractuales."
+      - "Acciones de alto impacto o irreversibles: reembolsos grandes, cancelaciones, cambios contractuales."
       - "Señales de vulnerabilidad, conflicto o pedido explícito de la persona."
       - "Baja confianza o casos fuera de las políticas conocidas."
       - "El handoff transfiere un resumen y el estado estructurado para que el operador no empiece de cero."
@@ -55,9 +55,11 @@ summary:
 
 ## ¿Qué problema resuelve?
 
-Un agente de cobranzas habla con personas, muchas veces en situaciones difíciles, en nombre de una empresa regulada.
-Un error puede ser un mensaje agresivo, un plan de pago fuera de política, un contacto en horario prohibido o
-información de deuda revelada a un familiar. Para operar con responsabilidad hacen falta tres cosas: **guardrails**
+Un agente de una red de clínicas habla con pacientes, muchas veces preocupados o con dolor, en nombre de una
+organización regulada. Un error puede ser una respuesta fría ante una urgencia, un turno con el profesional
+equivocado, un contacto en horario prohibido o información de salud revelada a un familiar. En un comercio los
+riesgos son otros (un reembolso fuera de política, un descuento inventado), pero la estructura de la solución es la
+misma. Para operar con responsabilidad hacen falta tres cosas: **guardrails**
 que impidan lo inaceptable, **personas** en los puntos donde el criterio humano es necesario y **observabilidad** para
 saber qué pasó en cada conversación.
 
@@ -79,13 +81,13 @@ flowchart LR
 `}
 />
 
-| Punto       | Ejemplos                                                                                                    | Tipo de control       |
-| ----------- | ----------------------------------------------------------------------------------------------------------- | --------------------- |
-| **Entrada** | "No me escriban más" → registrar opt-out y cortar; menciones de enfermedad o duelo → escalar                | Reglas + clasificador |
-| **Acción**  | Descuento mayor al permitido → rechazar; quita mayor a un umbral → aprobación humana                        | Código determinista   |
-| **Salida**  | El mensaje menciona un monto que no coincide con el sistema → bloquear; fuera del horario legal → no enviar | Código + clasificador |
+| Punto       | Ejemplos                                                                                                                            | Tipo de control       |
+| ----------- | ----------------------------------------------------------------------------------------------------------------------------------- | --------------------- |
+| **Entrada** | "No me escriban más" → registrar opt-out y cortar; síntomas de urgencia (dolor en el pecho) → derivar a emergencias y a una persona | Reglas + clasificador |
+| **Acción**  | Cupón mayor al permitido → rechazar; reembolso mayor a un umbral → aprobación humana                                                | Código determinista   |
+| **Salida**  | El mensaje menciona un turno o un monto que no coincide con el sistema → bloquear; fuera del horario legal → no enviar              | Código + clasificador |
 
-**Preferí controles deterministas.** Que un monto coincida con el saldo, que la hora esté dentro del horario
+**Preferí controles deterministas.** Que un monto coincida con el pedido, que un turno exista en la agenda, que la hora esté dentro del horario
 permitido o que una herramienta no esté disponible son verificaciones exactas. Los **clasificadores basados en
 modelos** (detectar tono agresivo, señales de vulnerabilidad, intentos de manipulación) son útiles como capa
 adicional, pero son probabilísticos: tienen falsos positivos y negativos, y se evalúan como cualquier otro componente.
@@ -94,7 +96,7 @@ adicional, pero son probabilísticos: tienen falsos positivos y negativos, y se 
 /** Guardrail de salida: todo monto mencionado debe existir en los datos verificados del turno. */
 export function verifyMentionedAmounts(message: string, verified: VerifiedTurnData): GuardrailResult {
   const mentioned = extractAmounts(message); // parseo determinista de montos en el texto
-  const allowed = new Set([verified.balanceCents, ...verified.offeredPlans.map((p) => p.installmentCents)]);
+  const allowed = new Set([verified.orderTotalCents, ...verified.offeredRefunds.map((r) => r.amountCents)]);
   const unknown = mentioned.filter((amount) => !allowed.has(amount));
   return unknown.length === 0
     ? { action: "allow" }
@@ -107,19 +109,19 @@ escala); nunca envía el mensaje bloqueado.
 
 ## Human in the loop
 
-| Modalidad              | Cuándo                                                         | Ejemplo                                                               |
-| ---------------------- | -------------------------------------------------------------- | --------------------------------------------------------------------- |
-| **Aprobación previa**  | Acciones irreversibles o de alto impacto                       | Una quita del 40 % queda pendiente hasta que un supervisor la aprueba |
-| **Escalamiento**       | Señales de riesgo, conflicto, baja confianza, pedido explícito | "Quiero hablar con una persona"                                       |
-| **Handoff**            | La conversación pasa a un operador                             | Disputa sobre la existencia de la deuda                               |
-| **Revisión posterior** | Muestreo de conversaciones para control de calidad             | 2 % de las conversaciones cerradas se revisan                         |
+| Modalidad              | Cuándo                                                         | Ejemplo                                                                            |
+| ---------------------- | -------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| **Aprobación previa**  | Acciones irreversibles o de alto impacto                       | Un reembolso de más de $500.000 queda pendiente hasta que un supervisor lo aprueba |
+| **Escalamiento**       | Señales de riesgo, conflicto, baja confianza, pedido explícito | "Quiero hablar con una persona"                                                    |
+| **Handoff**            | La conversación pasa a un operador                             | La persona no reconoce un cargo de su tarjeta                                      |
+| **Revisión posterior** | Muestreo de conversaciones para control de calidad             | 2 % de las conversaciones cerradas se revisan                                      |
 
 Un buen **handoff** transfiere **contexto**: un resumen de la conversación, el estado estructurado (identidad
-verificada, saldo informado, ofertas hechas, motivo del escalamiento) y el historial completo accesible. El operador
+verificada, pedido consultado, compensaciones ofrecidas, motivo del escalamiento) y el historial completo accesible. El operador
 no debería tener que preguntar lo que la persona ya contestó.
 
-Las aprobaciones también son una parte del diseño de la experiencia: mientras una quita espera aprobación, el agente
-informa con honestidad que la propuesta está en revisión y cuándo habrá respuesta.
+Las aprobaciones también son una parte del diseño de la experiencia: mientras un reembolso espera aprobación, el agente
+informa con honestidad que el pedido está en revisión y cuándo habrá respuesta.
 
 ## Trazabilidad
 
@@ -152,23 +154,23 @@ guardrails; existen convenciones semánticas específicas para IA generativa (no
 operación). Así una conversación se sigue de punta a punta junto con el resto del sistema (curso de Node.js).
 
 <Callout type="warning" title="Los logs de un agente contienen datos personales">
-  Mensajes de deudores, montos, situaciones personales. Se **redactan** los datos sensibles en los logs
-  operativos, se separan los registros de auditoría (con acceso restringido) y se define una **retención**
-  acorde a la normativa y al contrato con el cliente.
+  Mensajes de pacientes y clientes, montos, situaciones personales y de salud. Se **redactan** los datos
+  sensibles en los logs operativos, se separan los registros de auditoría (con acceso restringido) y se define
+  una **retención** acorde a la normativa y al contrato con el cliente.
 </Callout>
 
 ## Métricas: calidad, costo y riesgo
 
-| Dimensión | Métricas                                                                                           |
-| --------- | -------------------------------------------------------------------------------------------------- |
-| Negocio   | Tasa de contacto efectivo, promesas registradas, promesas cumplidas, recupero                      |
-| Calidad   | Tasa de escalamiento, conversaciones bloqueadas por guardrails, puntaje de revisión humana, quejas |
-| Costo     | Tokens y costo por conversación, por promesa lograda, por tenant y por versión del agente          |
-| Operación | Latencia por turno (p50, p95), errores del proveedor, fallbacks usados                             |
-| Riesgo    | Intentos de inyección detectados, opt-outs, contactos fuera de horario bloqueados                  |
+| Dimensión | Métricas                                                                                            |
+| --------- | --------------------------------------------------------------------------------------------------- |
+| Negocio   | Resolución en el primer contacto, devoluciones gestionadas, turnos confirmados, satisfacción (CSAT) |
+| Calidad   | Tasa de escalamiento, conversaciones bloqueadas por guardrails, puntaje de revisión humana, quejas  |
+| Costo     | Tokens y costo por conversación, por caso resuelto, por tenant y por versión del agente             |
+| Operación | Latencia por turno (p50, p95), errores del proveedor, fallbacks usados                              |
+| Riesgo    | Intentos de inyección detectados, opt-outs, contactos fuera de horario bloqueados                   |
 
 Todas se cortan **por versión del agente**: es la forma de saber si una versión nueva mejoró o empeoró en producción
-(y alimenta la comparación de versiones del módulo de evals). El **costo por resultado** (por promesa cumplida) es más
+(y alimenta la comparación de versiones del módulo de evals). El **costo por resultado** (por caso resuelto) es más
 significativo que el costo por mensaje.
 
 <FlowDiagram
@@ -216,31 +218,33 @@ significativo que el costo por mensaje.
 
 <KnowledgeCheck
   id="llm-agents.guardrails-observability.q2"
-  question="Una persona cuenta que está internada y no puede pagar. ¿Qué hace un agente bien diseñado?"
+  question="Una persona que quiere reprogramar un turno cuenta que tiene un dolor fuerte en el pecho desde hace una hora. ¿Qué hace un agente bien diseñado?"
   options={[
     {
-      text: "Ofrece el plan con más cuotas disponible.",
-      explanation: "Hay señales de vulnerabilidad: corresponde criterio humano.",
+      text: "Le ofrece el primer turno disponible de cardiología.",
+      explanation: "Es una posible urgencia: un turno para otro día no es una respuesta segura.",
     },
     {
-      text: "Activa el escalamiento a un operador con un resumen y el estado de la conversación.",
+      text: "Le indica buscar atención de emergencia de inmediato y escala a una persona con un resumen y el estado de la conversación.",
       correct: true,
-      explanation: "Correcto. Es un caso para human in the loop, con un handoff que transfiera contexto.",
+      explanation:
+        "Correcto. Es un caso para un guardrail de entrada y human in the loop, con un handoff que transfiera contexto.",
     },
     {
-      text: "Continúa con el guion normal.",
-      explanation: "Ignorar la vulnerabilidad es un riesgo ético, legal y reputacional.",
+      text: "Continúa con el guion normal de reprogramación.",
+      explanation:
+        "Ignorar una posible urgencia médica pone en riesgo a la persona y es un riesgo legal y reputacional.",
     },
   ]}
 />
 
 <KnowledgeCheck
   id="llm-agents.guardrails-observability.q3"
-  question="La versión 8 de un agente bajó el costo por mensaje un 30 %, pero las promesas cumplidas cayeron. ¿Qué métrica lo revela mejor?"
+  question="La versión 8 de un agente bajó el costo por mensaje un 30 %, pero los casos resueltos en el primer contacto cayeron. ¿Qué métrica lo revela mejor?"
   options={[
     { text: "Costo por mensaje.", explanation: "Mejoró, y por eso es engañosa." },
     {
-      text: "Costo por promesa cumplida, cortado por versión del agente.",
+      text: "Costo por caso resuelto, cortado por versión del agente.",
       correct: true,
       explanation: "Correcto. El costo se mide contra el resultado de negocio y por versión.",
     },

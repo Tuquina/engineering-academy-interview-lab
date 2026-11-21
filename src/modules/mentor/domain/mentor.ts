@@ -10,7 +10,7 @@ export const MENTOR_MODES = [
     id: "explain",
     label: "Explicar un concepto",
     instruction:
-      "Explicá el concepto desde lo básico, con un ejemplo del dominio de cobranzas y una analogía si ayuda.",
+      "Explicá el concepto desde lo básico, con un ejemplo concreto de un dominio realista (comercio, reservas, pagos, salud, logística) y una analogía si ayuda.",
   },
   {
     id: "lesson_question",

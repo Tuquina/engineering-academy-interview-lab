@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { DEFAULT_CONFIG } from "../domain/agent-config";
 import { exampleAgents, EXAMPLE_AGENT_ID } from "../domain/agent-registry";
-import { LAB_TODAY, SEED_WORLD } from "../domain/collections-world";
 import { BUILT_IN_CASES } from "../domain/eval-suite";
 import { summarize } from "../domain/evaluation";
+import { LAB_TODAY, SEED_WORLD } from "../domain/support-world";
 import { LocalDeterministicProvider } from "../infrastructure/local-deterministic-provider";
 import { invokeTool } from "./invoke-tool";
 import { ProviderError, type LlmProvider } from "./llm-provider";
@@ -18,24 +18,25 @@ describe("invokeTool", () => {
   it("valida el esquema antes de ejecutar", () => {
     const { trace, world } = invokeTool({
       id: "t1",
-      name: "register_payment_promise",
-      input: { customerId: "c-001", amountCents: "mucho", promisedDate: "15/03" },
+      name: "schedule_return",
+      input: { customerId: "c-002", orderId: 1002, pickupDate: "15/03" },
       world: SEED_WORLD,
       allowedTools: DEFAULT_CONFIG.tools,
       today: LAB_TODAY,
       policies: DEFAULT_CONFIG.policies,
-      sessionCustomerId: "c-001",
+      sessionCustomerId: "c-002",
       clock,
     });
     expect(trace.status).toBe("invalid_args");
-    expect(trace.validationIssues.join(" ")).toMatch(/amountCents/);
+    expect(trace.validationIssues.join(" ")).toMatch(/orderId/);
+    expect(trace.validationIssues.join(" ")).toMatch(/pickupDate/);
     expect(world).toBe(SEED_WORLD);
   });
 
   it("rechaza herramientas no habilitadas para el agente", () => {
     const { trace } = invokeTool({
       id: "t1",
-      name: "get_debt",
+      name: "get_order",
       input: { customerId: "c-001" },
       world: SEED_WORLD,
       allowedTools: ["get_history"],
@@ -49,24 +50,24 @@ describe("invokeTool", () => {
 });
 
 describe("runAgentTurn con el proveedor local", () => {
-  it("encadena herramientas: consulta la deuda y registra la promesa", async () => {
+  it("encadena herramientas: consulta el pedido y programa la devolución", async () => {
     const result = await runAgentTurn({
       config: deterministic,
       provider,
       history: [],
-      userMessage: "Prometo pagar el 12",
+      userMessage: "Quiero devolver las zapatillas, que las retiren el 9",
       world: SEED_WORLD,
       memory: [],
-      customerId: "c-001",
+      customerId: "c-002",
       today: LAB_TODAY,
       seed: 1,
       clock,
     });
     expect(result.outcome).toBe("answered");
-    expect(result.toolCalls.map((t) => t.name)).toEqual(["get_debt", "register_payment_promise"]);
+    expect(result.toolCalls.map((t) => t.name)).toEqual(["get_order", "schedule_return"]);
     expect(result.reply).toMatch(/asistente virtual/);
-    expect(result.reply).toMatch(/12\/03\/2026/);
-    expect(result.memory.some((f) => f.topic === "promise")).toBe(true);
+    expect(result.reply).toContain("09/03/2026");
+    expect(result.memory.some((f) => f.topic === "return")).toBe(true);
   });
 
   it("es reproducible: misma semilla, misma respuesta", async () => {
@@ -76,7 +77,7 @@ describe("runAgentTurn con el proveedor local", () => {
         config,
         provider,
         history: [],
-        userMessage: "¿Cuánto debo?",
+        userMessage: "¿Dónde está mi pedido?",
         world: SEED_WORLD,
         memory: [],
         customerId: "c-002",
@@ -102,7 +103,7 @@ describe("runAgentTurn con el proveedor local", () => {
       provider: failing,
       fallbackProvider: provider,
       history: [],
-      userMessage: "¿Cuánto debo?",
+      userMessage: "¿Dónde está mi pedido?",
       world: SEED_WORLD,
       memory: [],
       customerId: "c-001",

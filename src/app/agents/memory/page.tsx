@@ -15,7 +15,7 @@ const SOURCES = [
   },
   {
     name: "Estado estructurado del negocio",
-    what: "Cuotas, pagos, promesas, pedidos de no contacto: el sistema de registro.",
+    what: "Pedidos, pagos, devoluciones, pedidos de no contacto: el sistema de registro.",
     authority: "Alta: es la verdad operativa. Las herramientas la leen y la modifican con reglas.",
     risk: "Leerlo tarde (caché vieja) o modificarlo sin validar.",
   },
@@ -90,8 +90,8 @@ flowchart TD
           <div className="text-muted space-y-3 text-sm">
             <h3 className="text-foreground font-semibold">Información contradictoria y desactualizada</h3>
             <p>
-              <strong className="text-foreground">Cada hecho lleva fecha, fuente y vencimiento.</strong> Una
-              promesa recordada vence con la fecha prometida; una afirmación de pago vence en días; una
+              <strong className="text-foreground">Cada hecho lleva fecha, fuente y vencimiento.</strong> Un
+              retiro recordado vence con la fecha acordada; una afirmación de pago vence en días; una
               preferencia no vence, pero envejece y se marca como vieja.
             </p>
             <p>
@@ -102,8 +102,8 @@ flowchart TD
             </p>
             <p>
               <strong className="text-foreground">Ante una contradicción gana el estado del negocio.</strong>{" "}
-              Si la persona dice que pagó y no hay pago, no se da la deuda por saldada: se pide la referencia
-              y se verifica con una herramienta.
+              Si la persona dice que pagó y no hay pago, no se despacha el pedido: se pide la referencia y se
+              verifica con una herramienta.
             </p>
             <p>
               <strong className="text-foreground">

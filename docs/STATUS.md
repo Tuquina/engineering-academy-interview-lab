@@ -119,7 +119,7 @@ en [guides/adding-exercises.md](guides/adding-exercises.md).
   - 8 de código: debounce, throttle, retry con backoff, concurrency limiter, Result type, webhook idempotente,
     carrera en un cobro, memoria de un agente de cobranzas.
   - 1 de React (Sandpack + Jest + Testing Library): corregir un `useEffect` problemático.
-  - 1 de SQL (promesas de pago incumplidas).
+  - 1 de SQL (envíos demorados).
   - 2 de diseño con rúbrica y autoevaluación: rate limiting y agentes multi-tenant.
 - **Guardado de intentos (`eal:practice`):** intentos (tests aprobados / total, resuelto), borradores por challenge,
   respuestas y rúbricas de diseño, y soluciones reveladas. El catálogo marca los resueltos.
@@ -312,11 +312,14 @@ Decisiones en [ADR-0009](adr/0009-agent-lab-providers-and-evals.md). Módulos `a
 
 ### Implementado y verificado
 
-- **AI Agents Lab** (`/agents`): agentes guardados en el navegador, con un agente de ejemplo (v1 publicada con fallas
-  de cumplimiento, v2 mejorada) y "Restaurar ejemplo".
+- **AI Agents Lab** (`/agents`): agentes guardados en el navegador, con un agente de ejemplo de atención al cliente de
+  un comercio electrónico (v1 publicada con fallas de cumplimiento, v2 mejorada) y "Restaurar ejemplo". Hasta el lote 5
+  del plan de dominios variados el ejemplo era de cobranzas; el estado guardado pasó a la versión 2 y el de la versión
+  1 no se migra (se empieza de nuevo con los ejemplos).
 - **Configuración** (§16.3): identidad, tono, voz (propiedad versionada, sin síntesis de audio), system prompt con
   variables `{{nombre}}` validadas, objetivo, reglas, herramientas permitidas, políticas (presentación como IA, plazo
-  de promesa, cuotas, descuento, horario, escalamiento ante disputas, frases prohibidas), memoria (largo plazo y
+  para el retiro de una devolución, plazo de devolución, cupón máximo por demora, horario, escalamiento ante cargos no
+  reconocidos, frases prohibidas), memoria (largo plazo y
   ventana de corto plazo), modelo (proveedor, modelo permitido, variabilidad simulada, pasos, timeout, reintentos,
   fallback) y escenarios de evaluación. Vista del system prompt final.
 - **Versionado**: versiones inmutables numeradas, diff campo a campo entre versiones o contra el borrador, publicar
@@ -332,8 +335,9 @@ Decisiones en [ADR-0009](adr/0009-agent-lab-providers-and-evals.md). Módulos `a
   habilitación, esquema Zod y reglas de negocio (incluida la de operar sólo sobre el cliente de la conversación).
 - **Proveedor local determinista**: reglas explícitas de intención y plantillas por tono; no lee el system prompt y lo
   dice en un aviso permanente. La variabilidad con semilla simula redacciones distintas y errores típicos.
-- **Memoria** (§16.5, `/agents/memory`): demo día 1 → 16 (promesa, afirmación de pago sin respaldo, campaña bloqueada,
-  recordatorio en la franja preferida, promesa vencida y memoria desactualizada). Memoria conversacional, estado del
+- **Memoria** (§16.5, `/agents/memory`): demo día 1 → 7 (devolución con retiro programado, afirmación sin respaldo en el
+  sistema, avisos bloqueados hasta la víspera, recordatorio en la franja preferida, retiro no realizado y memoria
+  desactualizada). Memoria conversacional, estado del
   negocio e historial separados; hechos con fecha, vencimiento y reemplazo; contradicciones resueltas a favor del
   sistema de registro.
 - **Evals** (§16.6 y §16.7, `/agents/evals`): golden dataset de 13 casos (5 críticos) y casos propios; verificaciones

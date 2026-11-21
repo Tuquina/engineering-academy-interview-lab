@@ -1,5 +1,5 @@
 import type { AgentPolicies, ToolName } from "./agent-config";
-import type { CollectionsWorld, CustomerSnapshot, IsoDate } from "./collections-world";
+import type { CustomerSnapshot, IsoDate, SupportWorld } from "./support-world";
 import type { ToolCallTrace } from "./conversation";
 import { normalizeText, type MemoryFact } from "./memory";
 
@@ -28,12 +28,12 @@ export const CATEGORY_LABELS: Record<CaseCategory, string> = {
 };
 
 export type StateAssertion =
-  | "promise_registered"
-  | "no_promise"
+  | "return_scheduled"
+  | "no_return"
   | "escalated"
   | "do_not_contact"
   | "payment_applied"
-  | "refusal_registered";
+  | "complaint_registered";
 
 export type Check =
   | {
@@ -61,20 +61,26 @@ export function checkKind(check: Check): CheckKind {
 
 /** Conceptos buscados por las verificaciones semánticas: conjuntos de sinónimos sobre texto normalizado. */
 export const CONCEPTS = {
-  amount: { label: "menciona un monto", patterns: [/\$\s?\d/] },
-  promise_confirmation: {
-    label: "confirma la promesa registrada",
-    patterns: [/registr\w* (tu |su |la )?promesa/, /queda registrada la promesa/],
+  order_status: {
+    label: "informa el estado del pedido",
+    patterns: [/en camino/, /entregado/, /demorad/, /pendiente de pago/, /preparando el envio/],
+  },
+  return_confirmation: {
+    label: "confirma la devolución programada",
+    patterns: [/programe (la |tu |su )?devolucion/, /queda programad[ao] (la devolucion|el retiro)/],
   },
   alternative: {
     label: "propone una alternativa",
-    patterns: [/otra fecha/, /otro monto/, /opciones/, /hasta el \d/],
+    patterns: [/otra fecha/, /opciones/, /hasta el \d/],
   },
   ask_reference: {
     label: "pide la referencia del pago",
     patterns: [/referencia/, /numero de operacion/, /comprobante/],
   },
-  offers: { label: "presenta propuestas de pago", patterns: [/cuotas/, /plan/, /descuento/] },
+  offers: {
+    label: "presenta compensaciones",
+    patterns: [/cupon/, /reintegro/, /reembolso/, /devolucion con retiro/],
+  },
   empathy: {
     label: "responde con empatía",
     patterns: [/lamento/, /entiendo/, /gracias por contar/, /gracias por comentar/],
@@ -98,7 +104,7 @@ export const CONCEPTS = {
   opt_out_confirmation: {
     label: "confirma que no se volverá a contactar",
     patterns: [
-      /no (vamos a|volveremos a) (volver a )?llamar/,
+      /no (vamos a|volveremos a) (volver a )?(contactar|llamar|escribir)/,
       /no queres que te contactemos|de no ser contactado/,
     ],
   },
@@ -129,7 +135,7 @@ export interface RunObservation {
   readonly toolCalls: readonly ToolCallTrace[];
   readonly initialState: CustomerSnapshot;
   readonly finalState: CustomerSnapshot;
-  readonly world: CollectionsWorld;
+  readonly world: SupportWorld;
   readonly customerId: string;
   readonly policies: AgentPolicies;
 }
@@ -169,12 +175,12 @@ export function describeCheck(check: Check): string {
 }
 
 const STATE_LABELS: Record<StateAssertion, string> = {
-  promise_registered: "Queda registrada una promesa activa",
-  no_promise: "No se registra ninguna promesa nueva",
+  return_scheduled: "Queda programada una devolución",
+  no_return: "No se programa ninguna devolución nueva",
   escalated: "Queda un escalamiento a operador",
   do_not_contact: "El cliente queda marcado como no contactar",
   payment_applied: "El pago queda aplicado",
-  refusal_registered: "Queda registrado el rechazo",
+  complaint_registered: "Queda registrado el reclamo",
 };
 
 /** Evalúa todas las verificaciones no-juez. Las de juez se marcan como omitidas (las completa la aplicación). */
@@ -264,17 +270,17 @@ function stateAssertion(assertion: StateAssertion, run: RunObservation): [boolea
   const added = <T extends { id: string }>(a: readonly T[], b: readonly T[]) =>
     b.filter((item) => !a.some((x) => x.id === item.id));
   switch (assertion) {
-    case "promise_registered": {
-      const created = added(before.promises, after.promises).filter((p) => p.status === "active");
+    case "return_scheduled": {
+      const created = added(before.returns, after.returns).filter((r) => r.status === "scheduled");
       return created.length
-        ? [true, `Promesa ${created[0]!.id} para el ${created[0]!.promisedDate}.`]
-        : [false, "No hay promesas nuevas."];
+        ? [true, `Devolución ${created[0]!.id} con retiro el ${created[0]!.pickupDate}.`]
+        : [false, "No hay devoluciones nuevas."];
     }
-    case "no_promise": {
-      const created = added(before.promises, after.promises);
+    case "no_return": {
+      const created = added(before.returns, after.returns);
       return created.length === 0
-        ? [true, "No se registraron promesas."]
-        : [false, `Se registró ${created[0]!.id}.`];
+        ? [true, "No se programaron devoluciones."]
+        : [false, `Se programó ${created[0]!.id}.`];
     }
     case "escalated": {
       const created = added(before.escalations, after.escalations);
@@ -294,9 +300,9 @@ function stateAssertion(assertion: StateAssertion, run: RunObservation): [boolea
         ? [true, `Pago ${applied[0]!.reference} aplicado.`]
         : [false, "Ningún pago pendiente pasó a aplicado."];
     }
-    case "refusal_registered": {
-      const created = added(before.refusals, after.refusals);
-      return created.length ? [true, `Rechazo ${created[0]!.reason}.`] : [false, "No se registró rechazo."];
+    case "complaint_registered": {
+      const created = added(before.complaints, after.complaints);
+      return created.length ? [true, `Reclamo ${created[0]!.reason}.`] : [false, "No se registró reclamo."];
     }
   }
 }

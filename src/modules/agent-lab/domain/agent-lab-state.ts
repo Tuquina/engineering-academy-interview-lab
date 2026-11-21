@@ -17,7 +17,9 @@ import {
 
 /** Estado persistido del AI Agents Lab (modo invitado: localStorage, ADR-0004). */
 
-export const AGENT_LAB_SCHEMA_VERSION = 1;
+// v2: el lab pasó de cobranzas a soporte al cliente (herramientas y políticas nuevas). El estado v1 no se migra:
+// sus configuraciones y casos usan herramientas que ya no existen, así que se empieza de nuevo con los ejemplos.
+export const AGENT_LAB_SCHEMA_VERSION = 2;
 export const MAX_EVAL_HISTORY = 40;
 export const MAX_CUSTOM_CASES = 30;
 

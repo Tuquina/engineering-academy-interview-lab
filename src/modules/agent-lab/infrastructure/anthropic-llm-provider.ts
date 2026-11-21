@@ -94,7 +94,7 @@ export class AnthropicJudge implements Judge {
         model: this.model,
         max_tokens: 1_024,
         system:
-          "Sos un evaluador estricto de conversaciones de cobranza. Evaluás sólo con la rúbrica dada, sin suponer " +
+          "Sos un evaluador estricto de conversaciones de atención al cliente. Evaluás sólo con la rúbrica dada, sin suponer " +
           "información que no esté en la conversación. Si hay dudas razonables, el caso no cumple.",
         messages: [
           {

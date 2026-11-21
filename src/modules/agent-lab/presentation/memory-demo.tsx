@@ -11,16 +11,15 @@ import { DEFAULT_CONFIG } from "../domain/agent-config";
 import {
   SEED_WORLD,
   customerSnapshot,
-  debtSummary,
   formatDate,
-  formatMoney,
-  type CollectionsWorld,
+  orderSummary,
+  type SupportWorld,
   type IsoDate,
-} from "../domain/collections-world";
+} from "../domain/support-world";
 import {
   FACT_KIND_LABELS,
   decideContactEligibility,
-  expirePromises,
+  expireReturns,
   reconcile,
   recallFacts,
   type Contradiction,
@@ -29,12 +28,12 @@ import {
 } from "../domain/memory";
 import { useAgentRuntime } from "./agent-lab-context";
 
-const CUSTOMER = "c-001";
+const CUSTOMER = "c-002";
 const CONFIG = { ...DEFAULT_CONFIG, model: { ...DEFAULT_CONFIG.model, variability: 0 } };
 
 interface DemoState {
   readonly date: IsoDate;
-  readonly world: CollectionsWorld;
+  readonly world: SupportWorld;
   readonly facts: readonly MemoryFact[];
   readonly said: string | null;
   readonly reply: string | null;
@@ -52,36 +51,36 @@ interface Step {
 
 const STEPS: readonly Step[] = [
   {
-    title: "Día 1 · la persona promete pagar el 15",
+    title: "Día 1 · pide devolver las zapatillas con retiro el 6",
     narrative:
-      "Conversación con el agente. La promesa se registra con una herramienta (estado del negocio) y el agente recuerda el compromiso (memoria).",
+      "Conversación con el agente. La devolución se programa con una herramienta (estado del negocio) y el agente recuerda el compromiso (memoria).",
     date: "2026-03-01",
-    message: "Te pago el 15",
+    message: "Quiero devolver las zapatillas, que las retiren el 6",
   },
   {
-    title: "Día 3 · dice que ya pagó y pide que la llamen a la tarde",
+    title: "Día 3 · dice que ya llevó el paquete al correo y pide que le escriban a la tarde",
     narrative:
-      "Dos hechos nuevos para la memoria: una preferencia (útil) y una afirmación que el sistema de registro no confirma.",
+      "Dos hechos nuevos para la memoria: una preferencia (útil) y una afirmación que el sistema de registro no confirma: el retiro sigue programado.",
     date: "2026-03-03",
-    message: "Ya pagué. Y llamame siempre a la tarde",
+    message: "Ya lo llevé al correo. Y escribime siempre a la tarde",
   },
   {
-    title: "Día 5 · el orquestador arma una campaña de cobranza",
-    narrative: "Antes de contactar se consulta el estado del negocio (y la memoria para ajustar el cómo).",
+    title: "Día 4 · el orquestador arma los avisos proactivos del día",
+    narrative: "Antes de avisar se consulta el estado del negocio (y la memoria para ajustar el cómo).",
+    date: "2026-03-04",
+    campaign: true,
+  },
+  {
+    title: "Día 5 · víspera del retiro",
+    narrative: "Se permite sólo un recordatorio, en la franja que la persona prefiere.",
     date: "2026-03-05",
     campaign: true,
   },
   {
-    title: "Día 14 · víspera de la promesa",
-    narrative: "Se permite sólo un recordatorio, en la franja que la persona prefiere.",
-    date: "2026-03-14",
-    campaign: true,
-  },
-  {
-    title: "Día 16 · la promesa venció sin pago",
+    title: "Día 7 · el transportista no pasó a retirar",
     narrative:
-      "Un job diario marca la promesa como incumplida. La memoria del compromiso quedó desactualizada.",
-    date: "2026-03-16",
+      "Un job diario marca el retiro como no realizado. La memoria del compromiso quedó desactualizada.",
+    date: "2026-03-07",
     campaign: true,
     expire: true,
   },
@@ -108,7 +107,7 @@ export function MemoryDemo() {
     if (!step || busy) return;
     setBusy(true);
     try {
-      let world = step.expire ? expirePromises(state.world, step.date) : state.world;
+      let world = step.expire ? expireReturns(state.world, step.date) : state.world;
       let facts = state.facts;
       let reply: string | null = null;
       if (step.message) {
@@ -145,7 +144,7 @@ export function MemoryDemo() {
     ? reconcile(state.facts, state.world, CUSTOMER, state.date)
     : [];
   const snapshot = customerSnapshot(state.world, CUSTOMER);
-  const debt = debtSummary(state.world, CUSTOMER, state.date);
+  const order = orderSummary(state.world, CUSTOMER, state.date, CONFIG.policies.returnWindowDays);
   const current = STEPS[done - 1];
 
   return (
@@ -179,7 +178,9 @@ export function MemoryDemo() {
         <CardTitle>{current ? current.title : "Antes de empezar"}</CardTitle>
         <CardDescription>
           Fecha simulada: {formatDate(state.date)}.{" "}
-          {current ? current.narrative : "Lucía tiene una cuota vencida de $45.000 y ninguna promesa."}
+          {current
+            ? current.narrative
+            : "Martín recibió sus zapatillas el 20/02 y tiene 30 días para devolverlas. No hay devoluciones programadas."}
         </CardDescription>
         {state.said ? (
           <div className="mt-3 space-y-1.5 text-sm">
@@ -202,7 +203,7 @@ export function MemoryDemo() {
             data-testid="eligibility-decision"
           >
             <p className="text-foreground font-semibold">
-              Decisión de la campaña: {ACTION_LABELS[state.decision.action]}
+              Decisión de los avisos: {ACTION_LABELS[state.decision.action]}
             </p>
             <ul className="text-foreground mt-1 list-disc pl-5">
               {state.decision.reasons.map((r) => (
@@ -247,25 +248,27 @@ export function MemoryDemo() {
         <Card>
           <CardTitle>2. Estado del negocio</CardTitle>
           <CardDescription>
-            Sistema de registro: cuotas, pagos y promesas. La verdad para decidir.
+            Sistema de registro: pedidos, pagos y devoluciones. La verdad para decidir.
           </CardDescription>
           <dl className="mt-2 grid grid-cols-2 gap-1 text-sm">
-            <dt className="text-muted">Vencido</dt>
-            <dd className="text-foreground text-right">{formatMoney(debt.overdueCents)}</dd>
-            <dt className="text-muted">Pagos pendientes</dt>
-            <dd className="text-foreground text-right">{formatMoney(debt.pendingPaymentsCents)}</dd>
+            <dt className="text-muted">Pedido</dt>
+            <dd className="text-foreground text-right">{order?.orderId ?? "—"}</dd>
+            <dt className="text-muted">Plazo de devolución</dt>
+            <dd className="text-foreground text-right">
+              {order?.returnDeadline ? formatDate(order.returnDeadline) : "—"}
+            </dd>
           </dl>
           <ul className="mt-2 space-y-1 text-sm">
-            {snapshot.promises.length === 0 ? <li className="text-muted">Sin promesas.</li> : null}
-            {snapshot.promises.map((p) => (
-              <li key={p.id}>
+            {snapshot.returns.length === 0 ? <li className="text-muted">Sin devoluciones.</li> : null}
+            {snapshot.returns.map((r) => (
+              <li key={r.id}>
                 <Badge
-                  tone={p.status === "active" ? "success" : p.status === "broken" ? "warning" : "neutral"}
+                  tone={r.status === "scheduled" ? "success" : r.status === "missed" ? "warning" : "neutral"}
                 >
-                  {PROMISE_LABELS[p.status]}
+                  {RETURN_LABELS[r.status]}
                 </Badge>{" "}
                 <span className="text-foreground">
-                  {p.id}: {formatMoney(p.amountCents)} para el {formatDate(p.promisedDate)}
+                  {r.id}: pedido {r.orderId}, retiro el {formatDate(r.pickupDate)}
                 </span>
               </li>
             ))}
@@ -312,7 +315,7 @@ const ACTION_LABELS: Record<EligibilityDecision["action"], string> = {
   wait: "no contactar todavía",
   do_not_contact: "no contactar (pedido de la persona)",
   route_to_operator: "derivar a un operador",
-  nothing_due: "nada que cobrar",
+  nothing_due: "nada que avisar",
 };
 
 const BASIS_LABELS: Record<EligibilityDecision["basis"], string> = {
@@ -327,4 +330,8 @@ const STATUS_LABELS = {
   expired: "vencido",
   superseded: "reemplazado",
 } as const;
-const PROMISE_LABELS = { active: "Activa", kept: "Cumplida", broken: "Incumplida" } as const;
+const RETURN_LABELS = {
+  scheduled: "Programada",
+  picked_up: "Retirada",
+  missed: "Retiro no realizado",
+} as const;

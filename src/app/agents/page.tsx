@@ -17,7 +17,7 @@ const TOOLS = [
     href: "/agents/memory",
     icon: BrainCircuit,
     title: "Memoria",
-    text: "Día 1 promete pagar el 15; día 5 se arma una campaña. Memoria conversacional, estado del negocio e historial.",
+    text: "Día 1 programa una devolución; día 4 se arman los avisos proactivos. Memoria conversacional, estado del negocio e historial.",
   },
   {
     href: "/agents/evals",
@@ -33,8 +33,8 @@ export default function AgentsLabPage() {
       <header className="mb-6">
         <h1 className="text-foreground text-3xl font-bold tracking-tight">AI Agents Lab</h1>
         <p className="text-muted mt-2 max-w-3xl">
-          Laboratorio de ingeniería de agentes de cobranzas: configuración versionada, tool calling con
-          validación, memoria, evaluaciones y publicación con quality gate. Funciona sin API key con un
+          Laboratorio de ingeniería de agentes de atención al cliente: configuración versionada, tool calling
+          con validación, memoria, evaluaciones y publicación con quality gate. Funciona sin API key con un
           proveedor local determinista (una simulación, siempre identificada como tal).
         </p>
       </header>
@@ -73,7 +73,7 @@ sequenceDiagram
   P->>A: mensaje
   A->>A: system prompt + memoria vigente + ventana de mensajes
   A->>M: generate (timeout, reintentos, fallback)
-  M-->>A: tool_use(get_debt)
+  M-->>A: tool_use(get_order)
   A->>T: ¿habilitada? ¿esquema válido? reglas de negocio
   T-->>A: resultado + estado nuevo + traza
   A->>M: tool_result

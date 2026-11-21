@@ -49,8 +49,10 @@ summary:
 
 ## Qué vas a aprender en este curso
 
-Este curso apunta al corazón de la posición: construir una plataforma donde **agentes de IA** conversan con deudores,
-registran promesas de pago, consultan saldos y escalan a humanos. Está pensado para ingenieros que nunca integraron
+Este curso apunta a construir productos donde **agentes de IA** conversan con personas reales y actúan sobre sistemas
+de negocio: un asistente de soporte que consulta pedidos y programa devoluciones, uno de reservas que busca
+disponibilidad, uno de turnos médicos que agenda y deriva a un profesional, uno de finanzas personales que explica
+movimientos. Está pensado para ingenieros que nunca integraron
 un LLM y quieren entenderlo con la misma rigurosidad que cualquier otra dependencia de un sistema.
 
 | Módulo                | Qué vas a poder hacer                                                                                                                                        |
@@ -104,15 +106,16 @@ flowchart LR
 `}
 />
 
-- **Llamada simple:** clasificar la intención de un mensaje entrante, extraer una fecha de promesa de un texto.
-- **Workflow:** el código orquesta pasos fijos (clasificar el mensaje, si es una promesa extraer la fecha, validar
-  contra reglas, redactar la confirmación). Previsible y fácil de evaluar por partes.
-- **Agente:** el modelo recibe un objetivo ("gestionar la conversación con este deudor") y herramientas
-  (`getDebtBalance`, `registerPaymentPromise`, `escalateToHuman`), y decide en un loop qué hacer.
+- **Llamada simple:** clasificar la intención de un mensaje entrante, extraer la fecha y la cantidad de huéspedes de un
+  pedido de reserva.
+- **Workflow:** el código orquesta pasos fijos (clasificar el mensaje, si es un pedido de reserva extraer las fechas,
+  consultar disponibilidad, redactar la confirmación). Previsible y fácil de evaluar por partes.
+- **Agente:** el modelo recibe un objetivo ("resolver la consulta de este cliente sobre su pedido") y herramientas
+  (`getOrder`, `scheduleReturn`, `escalateToHuman`), y decide en un loop qué hacer.
 
 La recomendación de la industria es **empezar por lo más simple que funcione**. Un agente se justifica cuando los
-pasos no se pueden especificar de antemano y el valor compensa el costo y el riesgo. En cobranzas, una conversación
-abierta con un deudor suele justificarlo; extraer una fecha de un mensaje, no.
+pasos no se pueden especificar de antemano y el valor compensa el costo y el riesgo. En soporte al cliente, una
+conversación abierta sobre un pedido con problemas suele justificarlo; extraer una fecha de un mensaje, no.
 
 ## Llamar a un modelo desde código
 
@@ -128,8 +131,9 @@ const client = new Anthropic(); // lee las credenciales del entorno (ANTHROPIC_A
 const response = await client.messages.create({
   model: "claude-opus-5-5",
   max_tokens: 16000,
-  system: "Sos un asistente de cobranzas. Respondés en español, con tono cordial y breve.",
-  messages: [{ role: "user", content: "Hola, ¿cuánto debo?" }],
+  system:
+    "Sos un asistente de atención al cliente de una tienda online. Respondés en español, con tono cordial y breve.",
+  messages: [{ role: "user", content: "Hola, ¿dónde está mi pedido?" }],
 });
 
 for (const block of response.content) {
@@ -212,7 +216,7 @@ se centralizan en el adaptador; y los tests usan un **fake determinista** que de
 
 <FlowDiagram
   steps={[
-    { title: "Entrada del deudor", detail: "Texto libre: no confiable.", tone: "boundary" },
+    { title: "Entrada de la persona", detail: "Texto libre: no confiable.", tone: "boundary" },
     { title: "Contexto armado por código", detail: "Datos del sistema, reglas, historial: determinista." },
     { title: "Modelo", detail: "Genera texto o pide herramientas: probabilístico.", tone: "boundary" },
     {
@@ -225,18 +229,20 @@ se centralizan en el adaptador; y los tests usan un **fake determinista** que de
   caption="Rodear al componente probabilístico con código determinista es la base de un agente confiable."
 />
 
-Un buen diseño **minimiza lo que depende del modelo**: las reglas de negocio (montos mínimos, fechas permitidas,
-horarios de contacto, quién puede recibir qué información) se aplican en código, no se "piden" en el prompt.
+Un buen diseño **minimiza lo que depende del modelo**: las reglas de negocio (plazos de devolución, fechas
+permitidas, horarios de contacto, quién puede recibir qué información) se aplican en código, no se "piden" en el prompt.
 
-## Casos de uso en cobranzas
+## Casos de uso en distintos dominios
 
-| Caso                                              | Nivel recomendado                      |
-| ------------------------------------------------- | -------------------------------------- |
-| Clasificar la intención de un mensaje entrante    | Llamada simple                         |
-| Extraer fecha y monto de una promesa de pago      | Llamada simple con salida estructurada |
-| Resumir una conversación para el operador humano  | Llamada simple                         |
-| Campaña: seleccionar, redactar, enviar, registrar | Workflow                               |
-| Conversar con el deudor y negociar un plan        | Agente con herramientas y guardrails   |
+| Caso                                                             | Nivel recomendado                       |
+| ---------------------------------------------------------------- | --------------------------------------- |
+| Clasificar un ticket de soporte por tema y urgencia              | Llamada simple                          |
+| Extraer fechas y huéspedes de un pedido de reserva               | Llamada simple con salida estructurada  |
+| Resumir una conversación para el operador humano                 | Llamada simple                          |
+| Recordatorio de turnos médicos: seleccionar, redactar, enviar    | Workflow                                |
+| Moderar comentarios de una red social con reglas y apelación     | Workflow                                |
+| Resolver un pedido con problemas: consultar, compensar, devolver | Agente con herramientas y guardrails    |
+| Asistente de finanzas personales que explica y categoriza gastos | Agente con herramientas de sólo lectura |
 
 ## Errores frecuentes
 
@@ -251,7 +257,7 @@ horarios de contacto, quién puede recibir qué información) se aplican en cód
 
 <KnowledgeCheck
   id="llm-agents.introduction.q1"
-  question="Hay que extraer la fecha y el monto de los mensajes en los que un deudor promete pagar. ¿Qué nivel de autonomía es el adecuado?"
+  question="Hay que extraer las fechas de entrada y salida y la cantidad de huéspedes de los mensajes que piden una reserva. ¿Qué nivel de autonomía es el adecuado?"
   options={[
     {
       text: "Un agente con herramientas.",

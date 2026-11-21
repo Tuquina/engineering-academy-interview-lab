@@ -240,32 +240,32 @@ export function AgentConfigForm({
             onChange={(v) => setIn("policies", { discloseAiIdentity: v })}
           />
           <Check
-            label="Escalar si no reconoce la deuda"
+            label="Escalar si no reconoce un cargo"
             checked={config.policies.escalateOnDispute}
             onChange={(v) => setIn("policies", { escalateOnDispute: v })}
           />
-          <Field label="Plazo máximo de promesa (días)">
+          <Field label="Plazo máximo para el retiro (días desde hoy)">
             <NumberInput
-              value={config.policies.maxPromiseDays}
+              value={config.policies.maxPickupDays}
               min={1}
-              max={60}
-              onChange={(v) => setIn("policies", { maxPromiseDays: v })}
+              max={30}
+              onChange={(v) => setIn("policies", { maxPickupDays: v })}
             />
           </Field>
-          <Field label="Cuotas máximas">
+          <Field label="Plazo de devolución (días desde la entrega)">
             <NumberInput
-              value={config.policies.maxInstallments}
+              value={config.policies.returnWindowDays}
               min={1}
-              max={24}
-              onChange={(v) => setIn("policies", { maxInstallments: v })}
+              max={90}
+              onChange={(v) => setIn("policies", { returnWindowDays: v })}
             />
           </Field>
-          <Field label="Descuento máximo (%)">
+          <Field label="Cupón máximo por demora (%)">
             <NumberInput
-              value={config.policies.maxDiscountPercent}
+              value={config.policies.maxCouponPercent}
               min={0}
               max={50}
-              onChange={(v) => setIn("policies", { maxDiscountPercent: v })}
+              onChange={(v) => setIn("policies", { maxCouponPercent: v })}
             />
           </Field>
           <Field label="Horario de contacto (desde / hasta)">

@@ -8,7 +8,7 @@ import { Button } from "@/shared/ui/button";
 import { Card, CardDescription, CardTitle } from "@/shared/ui/card";
 import { TOOL_NAMES, type ToolName } from "../domain/agent-config";
 import type { EvalRunRecord } from "../domain/agent-lab-state";
-import { SEED_WORLD } from "../domain/collections-world";
+import { SEED_WORLD } from "../domain/support-world";
 import {
   CATEGORY_LABELS,
   CONCEPTS,

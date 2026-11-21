@@ -53,9 +53,9 @@ summary:
 
 ## Qué vas a aprender en este curso
 
-En el stack de una plataforma de agentes, Redis aparece en casi todos los lugares donde la base relacional sería
-demasiado lenta o inadecuada: caché de configuración de agentes, rate limiting de mensajes salientes, deduplicación
-de webhooks, locks para no procesar dos veces una conversación, colas de trabajo.
+En casi cualquier backend, Redis aparece donde la base relacional sería demasiado lenta o inadecuada: la caché del
+catálogo de un comercio, el ranking en vivo de un juego, las sesiones de una app, el rate limiting de SMS salientes,
+la deduplicación de webhooks de pagos, locks para no liquidar dos veces el mismo viaje, colas de trabajo.
 
 | Módulo                      | Qué vas a poder hacer                                                               |
 | --------------------------- | ----------------------------------------------------------------------------------- |
@@ -84,7 +84,7 @@ los comandos de Redis que ofrecen varios proveedores de nube. Para lo que cubre 
   caption="Redis complementa a PostgreSQL: datos efímeros, rápidos o de coordinación; la verdad del negocio sigue en la base."
   chart={`
 flowchart LR
-  API["API / workers Node.js"] -->|"fuente de verdad<br/>deudas, pagos, promesas"| PG["PostgreSQL"]
+  API["API / workers Node.js"] -->|"fuente de verdad<br/>pedidos, pagos, reservas"| PG["PostgreSQL"]
   API -->|"caché, rate limits,<br/>locks, deduplicación"| R["Redis"]
   R -.->|"si se pierde, se reconstruye"| PG
 `}
@@ -93,16 +93,16 @@ flowchart LR
 ## Ejecutarlo en Docker y usar redis-cli
 
 ```bash
-docker run --name collections-redis -p 6379:6379 -d redis:8
+docker run --name lab-redis -p 6379:6379 -d redis:8
 
-docker exec -it collections-redis redis-cli
+docker exec -it lab-redis redis-cli
 ```
 
 ```bash
-127.0.0.1:6379> SET agent:config:42 '{"tone":"cordial"}'
+127.0.0.1:6379> SET product:42 '{"name":"Mat de yoga","price_cents":1600000}'
 OK
-127.0.0.1:6379> GET agent:config:42
-"{\"tone\":\"cordial\"}"
+127.0.0.1:6379> GET product:42
+"{\"name\":\"Mat de yoga\",\"price_cents\":1600000}"
 127.0.0.1:6379> SET session:abc123 "usr_7" EX 3600      # expira en una hora
 OK
 127.0.0.1:6379> TTL session:abc123
@@ -113,7 +113,7 @@ OK
 OK
 127.0.0.1:6379> SET webhook:evt_91 1 NX EX 86400
 (nil)                                                    # ya existía: duplicado
-127.0.0.1:6379> DEL agent:config:42
+127.0.0.1:6379> DEL product:42
 (integer) 1
 ```
 
@@ -130,7 +130,7 @@ OK
 
 ### Convención de nombres
 
-Las claves se nombran con prefijos separados por `:` que expresan una jerarquía: `tenant:42:agent:7:config`,
+Las claves se nombran con prefijos separados por `:` que expresan una jerarquía: `tenant:42:course:7`,
 `ratelimit:sms:tnt_1:2026-11-19T10`. En un sistema multi-tenant, **el tenant forma parte de la clave**: una clave de
 caché sin tenant puede devolver datos de otro cliente.
 
@@ -171,8 +171,8 @@ const redis = createClient({ url: process.env.REDIS_URL });
 redis.on("error", (error) => logger.error({ error }, "redis_error")); // evita que un error sin listener tire el proceso
 await redis.connect();
 
-await redis.set(`tenant:${tenantId}:agent:${agentId}:config`, JSON.stringify(config), { EX: 300 });
-const cached = await redis.get(`tenant:${tenantId}:agent:${agentId}:config`);
+await redis.set(`tenant:${tenantId}:course:${courseId}`, JSON.stringify(course), { EX: 300 });
+const cached = await redis.get(`tenant:${tenantId}:course:${courseId}`);
 const sentToday = await redis.incr(`sms:sent:${tenantId}:${today}`);
 ```
 

@@ -27,9 +27,9 @@ export const agentConfigSchema = z.object({
   rules: z.array(z.string().max(500)).max(30),
   policies: z.object({
     discloseAiIdentity: z.boolean(),
-    maxPromiseDays: z.number().int(),
-    maxInstallments: z.number().int(),
-    maxDiscountPercent: z.number(),
+    maxPickupDays: z.number().int(),
+    returnWindowDays: z.number().int(),
+    maxCouponPercent: z.number(),
     contactHourStart: z.number().int(),
     contactHourEnd: z.number().int(),
     escalateOnDispute: z.boolean(),
@@ -99,12 +99,12 @@ const checkSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("state"),
     assertion: z.enum([
-      "promise_registered",
-      "no_promise",
+      "return_scheduled",
+      "no_return",
       "escalated",
       "do_not_contact",
       "payment_applied",
-      "refusal_registered",
+      "complaint_registered",
     ]),
   }),
   z.object({ type: z.literal("mentions"), concept: conceptId }),

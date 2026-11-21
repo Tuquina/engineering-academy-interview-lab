@@ -1,13 +1,13 @@
 import {
-  activePromise,
+  activeReturn,
   addDays,
   daysBetween,
-  debtSummary,
   findCustomer,
   formatDate,
-  type CollectionsWorld,
+  orderSummary,
   type IsoDate,
-} from "./collections-world";
+  type SupportWorld,
+} from "./support-world";
 
 /**
  * Memoria de un agente entre conversaciones (MASTER_PROMPT §16.5).
@@ -15,9 +15,9 @@ import {
  * Hay tres fuentes distintas, con distinta autoridad:
  *
  * 1. **Memoria conversacional**: hechos que el agente extrajo de lo que dijo la persona ("prefiere que la llamen a
- *    la tarde", "dice que ya pagó"). Son útiles para personalizar, pero son **afirmaciones**: pueden estar
- *    desactualizadas o ser falsas.
- * 2. **Estado estructurado del negocio**: cuotas, pagos, promesas (el sistema de registro). Es la verdad para
+ *    la tarde", "dice que ya despachó el paquete"). Son útiles para personalizar, pero son **afirmaciones**: pueden
+ *    estar desactualizadas o ser falsas.
+ * 2. **Estado estructurado del negocio**: pedidos, pagos, devoluciones (el sistema de registro). Es la verdad para
  *    decidir.
  * 3. **Historial de eventos**: qué pasó y cuándo. Permite auditar y reconstruir cómo se llegó al estado actual.
  *
@@ -32,7 +32,7 @@ export interface MemoryFact {
   readonly kind: FactKind;
   readonly text: string;
   readonly observedAt: IsoDate;
-  /** Fecha a partir de la cual el hecho ya no aplica (una promesa vencida, una preferencia temporal). */
+  /** Fecha a partir de la cual el hecho ya no aplica (un retiro ya pasado, una preferencia temporal). */
   readonly expiresAt: IsoDate | null;
   /** Hecho que lo reemplaza (por ejemplo, una preferencia más nueva sobre lo mismo). */
   readonly supersededBy: string | null;
@@ -49,6 +49,9 @@ export const FACT_KIND_LABELS: Record<FactKind, string> = {
 
 /** Antigüedad a partir de la cual un hecho se considera posiblemente desactualizado. */
 export const STALE_AFTER_DAYS = 30;
+
+/** Plazo de devolución usado por la memoria para describir el pedido (el de la política por defecto). */
+const RETURN_WINDOW_DAYS = 30;
 
 export interface RecalledFact {
   readonly fact: MemoryFact;
@@ -109,34 +112,40 @@ export interface Contradiction {
  */
 export function reconcile(
   facts: readonly MemoryFact[],
-  world: CollectionsWorld,
+  world: SupportWorld,
   customerId: string,
   today: IsoDate,
 ): Contradiction[] {
   const result: Contradiction[] = [];
-  const debt = debtSummary(world, customerId, today);
-  const promise = activePromise(world, customerId);
+  const order = orderSummary(world, customerId, today, RETURN_WINDOW_DAYS);
+  const pendingReturn = activeReturn(world, customerId);
   for (const { fact, status } of recallFacts(facts, customerId, today)) {
     if (status === "superseded") continue;
-    if (fact.topic === "payment_claim" && debt.pendingPaymentsCents === 0 && debt.overdueCents > 0) {
-      const appliedAfter = world.events.some(
-        (e) => e.customerId === customerId && e.type === "payment_applied" && e.at >= fact.observedAt,
-      );
-      if (!appliedAfter) {
-        result.push({
-          factId: fact.id,
-          message: `Memoria del ${formatDate(fact.observedAt)}: "${fact.text}". El sistema no tiene pagos pendientes ni aplicados desde esa fecha.`,
-          resolution:
-            "Gana el sistema de registro: se pide la referencia del pago y no se da la deuda por saldada.",
-        });
-      }
-    }
-    if (fact.topic === "promise" && !promise) {
+    if (
+      fact.topic === "payment_claim" &&
+      order?.status === "pending_payment" &&
+      order.pendingPaymentsCents === 0
+    ) {
       result.push({
         factId: fact.id,
-        message: `La memoria recuerda "${fact.text}", pero no hay una promesa activa en el sistema.`,
+        message: `Memoria del ${formatDate(fact.observedAt)}: "${fact.text}". El pedido ${order.orderId} sigue pendiente de pago y no hay pagos informados.`,
+        resolution: "Gana el sistema de registro: se pide la referencia del pago y no se despacha el pedido.",
+      });
+    }
+    if (fact.topic === "return_claim" && pendingReturn) {
+      result.push({
+        factId: fact.id,
+        message: `Memoria del ${formatDate(fact.observedAt)}: "${fact.text}". El sistema todavía tiene la devolución ${pendingReturn.id} esperando el retiro del ${formatDate(pendingReturn.pickupDate)}.`,
         resolution:
-          "La promesa se cumplió o venció: la memoria quedó desactualizada y no habilita a esperar.",
+          "Gana el sistema de registro: el reembolso se libera cuando el transportista registra el retiro, no por lo que se dijo en el chat.",
+      });
+    }
+    if (fact.topic === "return" && !pendingReturn) {
+      result.push({
+        factId: fact.id,
+        message: `La memoria recuerda "${fact.text}", pero no hay una devolución programada en el sistema.`,
+        resolution:
+          "El retiro se hizo o no se concretó: la memoria quedó desactualizada y no habilita a esperar.",
       });
     }
   }
@@ -144,7 +153,7 @@ export function reconcile(
 }
 
 // ---------------------------------------------------------------------------------------------------------------
-// Elegibilidad de contacto: la decisión del Día 5
+// Elegibilidad de contacto proactivo: la decisión del Día 5
 // ---------------------------------------------------------------------------------------------------------------
 
 export interface EligibilityDecision {
@@ -157,14 +166,14 @@ export interface EligibilityDecision {
 }
 
 /**
- * Decide si una campaña de cobranza puede contactar a un cliente en una fecha.
+ * Decide si los avisos proactivos del soporte (demoras, retiros, pagos) pueden contactar a un cliente en una fecha.
  *
- * Se basa en el estado del negocio (promesa activa, pago pendiente, pedido de no contacto, disputa); la memoria
- * sólo **ajusta** cómo contactar (por ejemplo, la franja horaria preferida), nunca habilita algo que el estado
- * prohíbe.
+ * Se basa en el estado del negocio (devolución programada, pago en proceso, pedido de no contacto, cargo no
+ * reconocido); la memoria sólo **ajusta** cómo contactar (por ejemplo, la franja horaria preferida), nunca habilita
+ * algo que el estado prohíbe.
  */
 export function decideContactEligibility(
-  world: CollectionsWorld,
+  world: SupportWorld,
   facts: readonly MemoryFact[],
   customerId: string,
   date: IsoDate,
@@ -189,85 +198,93 @@ export function decideContactEligibility(
     return {
       eligible: false,
       action: "route_to_operator",
-      reasons: ["La deuda está en disputa: la gestiona un operador, no una campaña automática."],
+      reasons: ["Hay un cargo no reconocido: lo gestiona un operador, no un aviso automático."],
       basis: "business_state",
     };
   }
-  const debt = debtSummary(world, customerId, date);
-  if (debt.overdueCents === 0) {
-    return {
-      eligible: false,
-      action: "nothing_due",
-      reasons: ["No hay deuda vencida."],
-      basis: "business_state",
-    };
-  }
-  if (debt.pendingPaymentsCents > 0) {
+  const order = orderSummary(world, customerId, date, RETURN_WINDOW_DAYS);
+  if (order && order.pendingPaymentsCents > 0) {
     return {
       eligible: false,
       action: "wait",
       reasons: [
-        "Hay un pago informado pendiente de aplicar: contactar ahora sería cobrar algo que quizás ya se pagó.",
+        "Hay un pago informado que se está procesando: avisar ahora que el pedido no está pago sería un error.",
       ],
       basis: "business_state",
     };
   }
-  const promise = activePromise(world, customerId);
   const preference = factsForPrompt(facts, customerId, date).find((f) => f.topic === "contact_time");
   const tail = preference ? [`Memoria: ${preference.text}. Se respeta al programar.`] : [];
-  if (promise && promise.promisedDate >= date) {
-    const reminderDay = addDays(promise.promisedDate, -1);
-    if (date === reminderDay) {
+  const basis = preference ? ("both" as const) : ("business_state" as const);
+  const scheduled = activeReturn(world, customerId);
+  if (scheduled && scheduled.pickupDate >= date) {
+    if (date === addDays(scheduled.pickupDate, -1)) {
       return {
         eligible: true,
         action: "reminder_only",
         reasons: [
-          `Mañana vence la promesa del ${formatDate(promise.promisedDate)}: sólo se envía un recordatorio.`,
+          `Mañana es el retiro de la devolución (${formatDate(scheduled.pickupDate)}): sólo se envía un recordatorio.`,
           ...tail,
         ],
-        basis: preference ? "both" : "business_state",
+        basis,
       };
     }
     return {
       eligible: false,
       action: "wait",
       reasons: [
-        `Hay una promesa activa para el ${formatDate(promise.promisedDate)}: no se contacta para cobrar antes de esa fecha.`,
+        `Hay una devolución con retiro el ${formatDate(scheduled.pickupDate)}: no se envían avisos antes de la víspera.`,
       ],
       basis: "business_state",
     };
   }
-  const lastPromise = world.promises.filter((p) => p.customerId === customerId).at(-1);
+  const missed = world.returns.filter((r) => r.customerId === customerId && r.status === "missed").at(-1);
+  if (missed) {
+    return {
+      eligible: true,
+      action: "contact",
+      reasons: [
+        `El retiro del ${formatDate(missed.pickupDate)} no se concretó: se contacta para reprogramarlo.`,
+        ...tail,
+      ],
+      basis,
+    };
+  }
+  if (order && order.status === "shipped" && order.daysLate > 0) {
+    return {
+      eligible: true,
+      action: "contact",
+      reasons: [
+        `El pedido ${order.orderId} lleva ${order.daysLate} día(s) de demora: se avisa de forma proactiva.`,
+        ...tail,
+      ],
+      basis,
+    };
+  }
   return {
-    eligible: true,
-    action: "contact",
-    reasons: [
-      lastPromise?.status === "broken" ||
-      (lastPromise?.status === "active" && lastPromise.promisedDate < date)
-        ? `La promesa del ${formatDate(lastPromise.promisedDate)} venció sin pago: el cliente vuelve a ser elegible.`
-        : `Tiene ${debt.overdueInstallments} cuota(s) vencida(s) y no hay promesas activas.`,
-      ...tail,
-    ],
-    basis: preference ? "both" : "business_state",
+    eligible: false,
+    action: "nothing_due",
+    reasons: ["No hay demoras, retiros ni pagos pendientes que avisar."],
+    basis: "business_state",
   };
 }
 
-/** Marca como incumplidas las promesas activas cuya fecha ya pasó (lo que haría un job diario). */
-export function expirePromises(world: CollectionsWorld, today: IsoDate): CollectionsWorld {
-  const expired = world.promises.filter((p) => p.status === "active" && p.promisedDate < today);
+/** Marca como no realizados los retiros cuya fecha ya pasó (lo que haría un job diario con datos del transportista). */
+export function expireReturns(world: SupportWorld, today: IsoDate): SupportWorld {
+  const expired = world.returns.filter((r) => r.status === "scheduled" && r.pickupDate < today);
   if (expired.length === 0) return world;
-  const ids = new Set(expired.map((p) => p.id));
+  const ids = new Set(expired.map((r) => r.id));
   return {
     ...world,
-    promises: world.promises.map((p) => (ids.has(p.id) ? { ...p, status: "broken" as const } : p)),
+    returns: world.returns.map((r) => (ids.has(r.id) ? { ...r, status: "missed" as const } : r)),
     events: [
       ...world.events,
-      ...expired.map((p, i) => ({
-        id: `E-exp-${p.id}-${i}`,
-        customerId: p.customerId,
-        at: addDays(p.promisedDate, 1),
-        type: "promise_broken",
-        description: `La promesa ${p.id} venció sin pago.`,
+      ...expired.map((r, i) => ({
+        id: `E-exp-${r.id}-${i}`,
+        customerId: r.customerId,
+        at: addDays(r.pickupDate, 1),
+        type: "pickup_missed",
+        description: `El transportista no retiró la devolución ${r.id} el día acordado.`,
       })),
     ],
   };
@@ -319,36 +336,46 @@ export function extractFacts(
       expiresAt: addDays(today, 7),
     });
   }
-  if (/\b(me quede sin trabajo|perdi (el|mi) trabajo|estoy desemplead[oa])\b/.test(text)) {
+  if (/\b(ya (lo |la |los |las )?(despache|devolvi|lleve al correo|entregue el paquete))\b/.test(text)) {
+    facts.push({
+      ...base,
+      id: nextFactId(),
+      kind: "claim",
+      topic: "return_claim",
+      text: "Dice que ya despachó el paquete de la devolución",
+      expiresAt: addDays(today, 7),
+    });
+  }
+  if (/\b(regalo|cumpleanos)\b/.test(text)) {
     facts.push({
       ...base,
       id: nextFactId(),
       kind: "context",
-      topic: "employment",
-      text: "Comentó que perdió el trabajo",
+      topic: "gift",
+      text: "Comentó que el pedido es un regalo",
       expiresAt: null,
     });
   }
   return facts;
 }
 
-/** Hecho de compromiso derivado de una promesa registrada con éxito (lo confirma una herramienta). */
-export function promiseFact(
+/** Hecho de compromiso derivado de una devolución programada con éxito (lo confirma una herramienta). */
+export function returnFact(
   id: string,
   customerId: string,
   today: IsoDate,
-  promisedDate: IsoDate,
-  amount: string,
+  pickupDate: IsoDate,
+  orderId: string,
 ): MemoryFact {
   return {
     id,
     customerId,
     kind: "commitment",
-    topic: "promise",
-    text: `Prometió pagar ${amount} el ${formatDate(promisedDate)}`,
+    topic: "return",
+    text: `Coordinó el retiro de la devolución del pedido ${orderId} el ${formatDate(pickupDate)}`,
     observedAt: today,
-    // Vence al terminar el día prometido: desde el día siguiente ya no describe un compromiso vigente.
-    expiresAt: promisedDate,
+    // Vence al terminar el día del retiro: desde el día siguiente ya no describe un compromiso vigente.
+    expiresAt: pickupDate,
     supersededBy: null,
   };
 }

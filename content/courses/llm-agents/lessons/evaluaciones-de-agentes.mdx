@@ -26,10 +26,10 @@ references:
   - title: "Hamel Husain — Your AI Product Needs Evals"
     url: "https://hamel.dev/blog/posts/evals/"
 interviewQuestions:
-  - question: "¿Cómo evaluarías un agente de cobranzas antes de publicar una nueva versión del prompt?"
+  - question: "¿Cómo evaluarías un agente de atención al cliente antes de publicar una nueva versión del prompt?"
     keyPoints:
       - "Un dataset de casos representativos y difíciles (incluidos adversarios y de cumplimiento), versionado, que crece con los incidentes de producción."
-      - "Evaluadores por criterio: deterministas para hechos verificables (tool calls, montos, políticas), rúbricas y LLM as judge para tono y calidad."
+      - "Evaluadores por criterio: deterministas para hechos verificables (tool calls, montos, fechas, políticas), rúbricas y LLM as judge para tono y calidad."
       - "Varias corridas por caso para estimar tasas de éxito con intervalos, no una prueba manual."
       - "Comparación contra la versión publicada y quality gate: no se publica si empeora un criterio crítico."
   - question: "¿Qué es LLM as judge y qué riesgos tiene?"
@@ -90,41 +90,41 @@ export interface AgentEvalCase {
   id: string;
   category: "typical" | "edge" | "adversarial" | "compliance" | "regression";
   description: string;
-  initialState: DebtorStateFixture; // saldo, promesas, preferencias: datos controlados
-  conversation: Array<{ role: "debtor"; content: string }>; // mensajes del deudor (o un simulador de usuario)
+  initialState: CustomerStateFixture; // pedidos, pagos, devoluciones, preferencias: datos controlados
+  conversation: Array<{ role: "customer"; content: string }>; // mensajes del cliente (o un simulador de usuario)
   expectations: {
     mustCallTools?: Array<{ name: string; argsMatch?: Record<string, unknown> }>;
     mustNotCallTools?: string[];
     mustEscalate?: boolean;
-    forbiddenContent?: string[]; // por ejemplo, el saldo antes de verificar identidad
+    forbiddenContent?: string[]; // por ejemplo, la dirección de entrega antes de verificar identidad
     rubric?: string[]; // criterios para evaluación semántica
   };
 }
 ```
 
-| Categoría    | Ejemplos                                                                               |
-| ------------ | -------------------------------------------------------------------------------------- |
-| Típicos      | Promesa clara de pago, consulta de saldo, pedido de plan de cuotas                     |
-| Bordes       | Fecha ambigua ("a fin de mes"), monto mayor al saldo, mensajes en varias partes        |
-| Adversarios  | Prompt injection, tercero que se hace pasar por el deudor, presión para obtener quitas |
-| Cumplimiento | Opt-out, horario prohibido, vulnerabilidad, lenguaje prohibido por normativa           |
-| Regresión    | Cada incidente de producción convertido en un caso                                     |
+| Categoría    | Ejemplos                                                                                           |
+| ------------ | -------------------------------------------------------------------------------------------------- |
+| Típicos      | Dónde está mi pedido, devolución dentro de plazo, pago que no se acreditó                          |
+| Bordes       | Fecha ambigua ("a fin de mes"), devolución el último día del plazo, mensajes en varias partes      |
+| Adversarios  | Prompt injection, tercero que se hace pasar por el cliente, presión para obtener reembolsos dobles |
+| Cumplimiento | Opt-out, horario prohibido, cargo no reconocido, lenguaje prohibido por la política                |
+| Regresión    | Cada incidente de producción convertido en un caso                                                 |
 
 **Golden dataset** es el conjunto de casos con la respuesta o el comportamiento correcto definido (**ground truth**)
-por expertos (en cobranzas, el equipo de compliance y los supervisores). Se **versiona** como código y **crece**: cada
+por expertos (en soporte, los supervisores, el equipo legal y quienes conocen las políticas de devolución). Se **versiona** como código y **crece**: cada
 conversación problemática de producción se convierte en un caso.
 
-Para conversaciones de varios turnos, se usa un **simulador de usuario**: otro modelo que actúa como deudor siguiendo
+Para conversaciones de varios turnos, se usa un **simulador de usuario**: otro modelo que actúa como cliente siguiendo
 un perfil ("dice que ya pagó, se enoja si se lo contradice"), lo que permite evaluar el diálogo completo.
 
 ## Evaluadores: determinista, semántico y LLM as judge
 
-| Tipo                | Qué mide                                    | Ejemplos                                                                                                           |
-| ------------------- | ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ |
-| **Determinista**    | Hechos verificables con código              | Llamó a `verify_identity` antes de `get_debt_summary`; el monto registrado es 4.000.000; no envió fuera de horario |
-| **Semántico**       | Similitud de significado con una referencia | La respuesta contiene la información esencial (embeddings, comparación de hechos)                                  |
-| **LLM as judge**    | Criterios cualitativos con una rúbrica      | Tono respetuoso; explicó las opciones con claridad; no presionó                                                    |
-| **Revisión humana** | Calibración y casos difíciles               | Muestras etiquetadas por supervisores                                                                              |
+| Tipo                | Qué mide                                    | Ejemplos                                                                                                                |
+| ------------------- | ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| **Determinista**    | Hechos verificables con código              | Llamó a `verify_identity` antes de `get_order_details`; el reembolso registrado es 9.800.000; no envió fuera de horario |
+| **Semántico**       | Similitud de significado con una referencia | La respuesta contiene la información esencial (embeddings, comparación de hechos)                                       |
+| **LLM as judge**    | Criterios cualitativos con una rúbrica      | Tono respetuoso; explicó las opciones con claridad; no culpó al cliente                                                 |
+| **Revisión humana** | Calibración y casos difíciles               | Muestras etiquetadas por supervisores                                                                                   |
 
 **Regla:** si algo se puede verificar con código, se verifica con código. Es más barato, más rápido y no tiene
 sesgos. LLM as judge se reserva para lo que de verdad es cualitativo.
@@ -153,11 +153,11 @@ export function evaluateToolCalls(
     results.push({ criterion: `no llama a ${forbidden}`, passed: !calls.includes(forbidden) });
   }
 
-  // Orden obligatorio: nunca consultar la deuda antes de verificar identidad
+  // Orden obligatorio: nunca mostrar datos del pedido (dirección, tarjeta) antes de verificar identidad
   const verifiedAt = calls.indexOf("verify_identity");
-  const summaryAt = calls.indexOf("get_debt_summary");
+  const summaryAt = calls.indexOf("get_order_details");
   results.push({
-    criterion: "verifica identidad antes de consultar la deuda",
+    criterion: "verifica identidad antes de consultar el pedido",
     passed: summaryAt === -1 || (verifiedAt !== -1 && verifiedAt < summaryAt),
     critical: true,
   });
@@ -169,7 +169,7 @@ export function evaluateToolCalls(
 
 Un **juez** es un modelo que califica la salida de otro con una rúbrica. Funciona si se diseña con cuidado:
 
-- **Criterios concretos y, de ser posible, binarios:** "¿menciona al menos una opción de pago concreta? sí/no" es mejor
+- **Criterios concretos y, de ser posible, binarios:** "¿menciona al menos una compensación concreta? sí/no" es mejor
   que "calificá la calidad del 1 al 10".
 - **Un criterio por evaluación** en lugar de un puntaje global.
 - **Razonamiento antes del veredicto** y salida estructurada con el veredicto y la justificación.
@@ -184,8 +184,8 @@ const JudgeVerdictSchema = z.object({
   verdict: z.enum(["pass", "fail"]),
 });
 
-const JUDGE_PROMPT = `Evaluás mensajes de un agente de cobranzas según UN criterio.
-Criterio: el mensaje no contiene presión indebida (amenazas, urgencia falsa, consecuencias inventadas).
+const JUDGE_PROMPT = `Evaluás mensajes de un agente de atención al cliente según UN criterio.
+Criterio: el mensaje no culpa al cliente ni promete compensaciones que no devolvió una herramienta.
 Razoná brevemente citando el texto y después emití el veredicto.`;
 ```
 
@@ -196,8 +196,8 @@ Los casos adversarios y de cumplimiento se evalúan con criterios **críticos**:
 - Prompt injection directa e indirecta: el agente no ejecuta acciones fuera de política.
 - Suplantación: no revela información sin verificación de identidad.
 - Opt-out y horarios: nunca contacta a quien pidió no ser contactado ni fuera de horario.
-- Lenguaje prohibido por la normativa de cobranzas del país del tenant.
-- Datos personales: no revela datos de un deudor a otro ni de un tenant a otro.
+- Lenguaje prohibido por la política del tenant y la normativa de defensa del consumidor de su país.
+- Datos personales: no revela datos de un cliente a otro ni de un tenant a otro.
 
 Un criterio crítico se exige **en todas las corridas**: un 99 % de cumplimiento en "no revelar datos sin verificar
 identidad" significa una filtración cada cien conversaciones.
@@ -268,10 +268,10 @@ lugar de un puntaje vago.
 
 <KnowledgeCheck
   id="llm-agents.evals.q1"
-  question="Querés verificar que el agente registra la promesa con el monto correcto. ¿Qué evaluador usás?"
+  question="Querés verificar que el agente registra el reembolso con el monto correcto. ¿Qué evaluador usás?"
   options={[
     {
-      text: "LLM as judge con la pregunta '¿registró bien la promesa?'.",
+      text: "LLM as judge con la pregunta '¿registró bien el reembolso?'.",
       explanation: "Es verificable con código: un juez agrega costo y error.",
     },
     {
@@ -309,7 +309,7 @@ lugar de un puntaje vago.
 
 <KnowledgeCheck
   id="llm-agents.evals.q3"
-  question="El criterio 'no revelar el saldo antes de verificar identidad' pasa el 99 % de las corridas. ¿Es aceptable?"
+  question="El criterio 'no revelar la dirección de entrega antes de verificar identidad' pasa el 99 % de las corridas. ¿Es aceptable?"
   options={[
     {
       text: "Sí, 99 % es excelente.",

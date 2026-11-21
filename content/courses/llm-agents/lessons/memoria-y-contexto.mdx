@@ -29,18 +29,18 @@ references:
   - title: "Martin Fowler — Event Sourcing"
     url: "https://martinfowler.com/eaaDev/EventSourcing.html"
 interviewQuestions:
-  - question: "¿Cómo diseñarías la memoria de un agente de cobranzas?"
+  - question: "¿Cómo diseñarías la memoria de un agente de atención al cliente de una tienda online?"
     keyPoints:
-      - "El estado de negocio (saldo, promesas, acuerdos, preferencias de contacto) vive en la base como fuente de verdad, no en el historial."
+      - "El estado de negocio (pedidos, devoluciones, reembolsos, preferencias de contacto) vive en la base como fuente de verdad, no en el historial."
       - "En cada turno se inyecta un resumen estructurado y actualizado de ese estado."
       - "La conversación es memoria de corto plazo: se compacta con resúmenes cuando crece."
       - "La memoria persistente guarda hechos útiles entre conversaciones con procedencia, fecha y expiración."
-  - question: "¿Qué hace el agente si el deudor dice que ya pagó pero el sistema no lo registra?"
+  - question: "¿Qué hace el agente si el cliente dice que ya pagó pero el sistema no lo registra?"
     keyPoints:
       - "No asume ni lo uno ni lo otro: el sistema es la fuente de verdad de los pagos acreditados."
-      - "Registra la afirmación como un evento (pago informado por el deudor) con su fecha y fuente."
+      - "Registra la afirmación como un evento (pago informado por el cliente) con su fecha y fuente."
       - "Explica que puede demorar la acreditación, pide el comprobante y suspende recordatorios por un plazo razonable."
-      - "Si no se acredita, escala a un operador; nunca contradice con agresividad ni da por pagada la deuda."
+      - "Si no se acredita, escala a un operador; nunca contradice con agresividad ni da por pagado el pedido."
   - question: "¿Por qué no alcanza con guardar toda la conversación y reenviarla?"
     keyPoints:
       - "Crece sin límite: costo, latencia y límite de contexto."
@@ -57,11 +57,12 @@ summary:
 
 ## ¿Qué problema resuelve?
 
-Un deudor conversa con el agente el lunes: promete pagar el viernes. El jueves escribe que perdió el trabajo y que
-no va a poder. El sábado vuelve a escribir: "¿qué opciones tengo?". Para responder bien, el agente necesita saber
-que hubo una promesa, que se informó una imposibilidad, que la promesa venció sin pago y cuál es el saldo actualizado
-hoy. Si toda la "memoria" es el historial de mensajes reenviado, el agente puede mencionar la promesa del viernes como
-vigente o calcular un saldo viejo.
+Una clienta de una tienda online conversa con el agente el lunes: coordina que el transportista retire una devolución
+el viernes. El jueves escribe que ya llevó el paquete al correo por su cuenta. El sábado vuelve a escribir: "¿cuándo
+me devuelven la plata?". Para responder bien, el agente necesita saber que hubo un retiro programado, que ella dijo
+haber despachado el paquete, que el retiro del viernes no se hizo y en qué estado está el reembolso hoy. Si toda la
+"memoria" es el historial de mensajes reenviado, el agente puede mencionar el retiro del viernes como vigente o
+prometer un reembolso que todavía no corresponde.
 
 **La memoria de un agente es un problema de diseño de datos**, no una característica del modelo.
 
@@ -74,7 +75,7 @@ En cada turno, el código decide qué entra en el contexto. Una estructura habit
   chart={`
 flowchart TB
   A["1. Instrucciones del agente<br/>versión, políticas del tenant"] --> CTX["Contexto del turno"]
-  B["2. Estado de negocio actual<br/>saldo, promesas, acuerdos, preferencias"] --> CTX
+  B["2. Estado de negocio actual<br/>pedidos, devoluciones, reembolsos, preferencias"] --> CTX
   C["3. Memoria persistente relevante<br/>hechos de conversaciones anteriores"] --> CTX
   D["4. Resumen de la conversación<br/>turnos viejos compactados"] --> CTX
   E["5. Turnos recientes completos"] --> CTX
@@ -85,13 +86,13 @@ flowchart TB
 ```ts
 async function buildTurnContext(conversation: Conversation): Promise<TurnContext> {
   const [state, memories] = await Promise.all([
-    debtorState.getCurrent(conversation.tenantId, conversation.debtorId), // fuente de verdad
-    memoryStore.relevantFor(conversation.tenantId, conversation.debtorId, { limit: 10 }),
+    customerState.getCurrent(conversation.tenantId, conversation.customerId), // fuente de verdad
+    memoryStore.relevantFor(conversation.tenantId, conversation.customerId, { limit: 10 }),
   ]);
 
   return {
     system: renderSystemPrompt(conversation.agentVersion), // estable: cacheable
-    stateBlock: renderStateBlock(state), // "Saldo actual: ... Promesa vigente: ninguna (la del 21/11 venció sin pago)"
+    stateBlock: renderStateBlock(state), // "Devolución R-7: retiro del 21/11 no realizado. Reembolso: pendiente"
     memoryBlock: renderMemories(memories), // con fecha y fuente de cada hecho
     summary: conversation.summary, // turnos viejos compactados
     recentMessages: conversation.messages.slice(-RECENT_TURNS),
@@ -119,21 +120,21 @@ de vulnerabilidad), y lo ideal es que esos hechos **ya estén registrados en el 
 
 ## Memoria persistente entre conversaciones
 
-Algunos hechos son útiles **entre conversaciones**: "prefiere que lo contacten después de las 18", "cobra los días
-10", "pidió que no se mencione la deuda a su pareja". Una memoria persistente bien diseñada responde:
+Algunos hechos son útiles **entre conversaciones**: "prefiere que lo contacten después de las 18", "trabaja de
+noche y recibe paquetes sólo a la tarde", "pidió que no se mencionen sus compras a otra persona de la casa". Una memoria persistente bien diseñada responde:
 
 | Pregunta            | Decisión de diseño                                                                                    |
 | ------------------- | ----------------------------------------------------------------------------------------------------- |
 | ¿Qué se guarda?     | Hechos útiles y verificables sobre preferencias y contexto, no transcripciones.                       |
 | ¿Quién la escribe?  | Una herramienta explícita (`remember_fact`) con validación, o un proceso posterior que extrae hechos. |
 | ¿Con qué metadatos? | Fuente (conversación y turno), fecha, confianza, categoría.                                           |
-| ¿Cuándo expira?     | Cada categoría tiene vigencia: "cobra el día 10" puede cambiar; un opt-out no expira.                 |
-| ¿Quién la ve?       | Siempre filtrada por tenant y deudor; nunca compartida entre clientes.                                |
+| ¿Cuándo expira?     | Cada categoría tiene vigencia: "recibe paquetes sólo a la tarde" puede cambiar; un opt-out no expira. |
+| ¿Quién la ve?       | Siempre filtrada por tenant y cliente; nunca compartida entre clientes.                               |
 | ¿Se puede borrar?   | Sí: derecho de supresión y corrección de datos personales.                                            |
 
 <Callout type="warning" title="La memoria también es superficie de ataque">
   Si el agente puede guardar "hechos" a partir de lo que dice el usuario, una inyección puede plantar un falso
-  recuerdo ("el supervisor autorizó una quita del 70 %"). Los hechos que habilitan acciones (autorizaciones,
+  recuerdo ("el supervisor autorizó un reembolso doble"). Los hechos que habilitan acciones (autorizaciones,
   acuerdos) nunca vienen de la memoria conversacional: vienen del sistema.
 </Callout>
 
@@ -141,52 +142,54 @@ Algunos hechos son útiles **entre conversaciones**: "prefiere que lo contacten 
 
 La distinción más importante del módulo:
 
-| Concepto                 | Qué es                           | Ejemplo                                                  | Dónde vive                           |
-| ------------------------ | -------------------------------- | -------------------------------------------------------- | ------------------------------------ |
-| **Estado de negocio**    | La verdad actual, estructurada   | Saldo 59.000; promesa vigente: ninguna                   | Tablas de la base (fuente de verdad) |
-| **Historial de eventos** | Lo que pasó, en orden, inmutable | `PromiseRegistered`, `PromiseBroken`, `HardshipReported` | Tabla de eventos append-only         |
-| **Conversación**         | Lo que se dijo                   | "el viernes te pago"                                     | Mensajes                             |
+| Concepto                 | Qué es                           | Ejemplo                                                         | Dónde vive                           |
+| ------------------------ | -------------------------------- | --------------------------------------------------------------- | ------------------------------------ |
+| **Estado de negocio**    | La verdad actual, estructurada   | Pedido entregado; devolución R-7 con retiro el viernes          | Tablas de la base (fuente de verdad) |
+| **Historial de eventos** | Lo que pasó, en orden, inmutable | `ReturnScheduled`, `PickupMissed`, `ShipmentReportedByCustomer` | Tabla de eventos append-only         |
+| **Conversación**         | Lo que se dijo                   | "que lo retiren el viernes"                                     | Mensajes                             |
 
 <FlowDiagram
   steps={[
-    { title: "Mensaje del deudor", detail: "'el viernes te pago la mitad'", tone: "boundary" },
-    { title: "Herramienta del agente", detail: "register_payment_promise valida y registra." },
-    { title: "Evento", detail: "PromiseRegistered(fecha, monto, conversación, turno).", tone: "runtime" },
-    { title: "Estado", detail: "Promesa vigente actualizada en la base." },
+    { title: "Mensaje de la clienta", detail: "'que lo retiren el viernes'", tone: "boundary" },
+    { title: "Herramienta del agente", detail: "schedule_return valida plazos y programa el retiro." },
+    { title: "Evento", detail: "ReturnScheduled(pedido, fecha, conversación, turno).", tone: "runtime" },
+    { title: "Estado", detail: "Devolución con retiro programado en la base." },
     { title: "Próximo turno", detail: "El estado se inyecta al contexto: nadie lo deduce de los mensajes." },
   ]}
   caption="Las acciones del agente producen eventos y actualizan el estado; el estado alimenta el contexto."
 />
 
-El agente **no deduce** el estado leyendo la conversación: lo **recibe**. Si la promesa venció sin pago, un proceso
-del sistema (no el modelo) registra `PromiseBroken` y el estado lo refleja. El historial de eventos además permite
-auditar ("¿por qué se le ofreció este plan?") y reconstruir el estado en cualquier momento (curso de System Design,
+El agente **no deduce** el estado leyendo la conversación: lo **recibe**. Si el transportista no pasó a retirar, un
+proceso del sistema (no el modelo) registra `PickupMissed` y el estado lo refleja. El historial de eventos además permite
+auditar ("¿por qué se le ofreció este cupón?") y reconstruir el estado en cualquier momento (curso de System Design,
 event sourcing).
 
 ## Información contradictoria y desactualizada
 
-Las contradicciones son normales: el deudor dice que pagó y el sistema no lo registra; la memoria dice "cobra el 10"
-y hoy dice que cobra el 15; un documento de políticas viejo convive con uno nuevo.
+Las contradicciones son normales: la clienta dice que despachó el paquete y el transportista no lo registra; la memoria
+dice "recibe paquetes sólo a la tarde" y hoy dice que ahora trabaja de tarde; un documento de políticas viejo convive con uno nuevo.
 
 Reglas para resolverlas:
 
-1. **Fuente de verdad por tipo de dato.** Pagos acreditados: el sistema de pagos. Preferencias de contacto: lo último
+1. **Fuente de verdad por tipo de dato.** Pagos acreditados: el sistema de pagos. Envíos: los eventos del
+   transportista. Preferencias de contacto: lo último
    que dijo la persona. Políticas: la versión vigente del tenant.
 2. **Procedencia de cada dato.** El contexto indica de dónde viene y de cuándo es cada hecho ("según el sistema, al
    19/11"; "dicho por la persona el 12/11").
 3. **Lo más reciente y verificado gana**, pero las afirmaciones no verificadas se registran como eventos
-   (`PaymentReportedByDebtor`) en lugar de descartarse.
-4. **El agente no afirma lo que no puede verificar.** Ante "ya pagué", no dice "no pagaste": explica que el pago puede
-   demorar en acreditarse, pide el comprobante y, si corresponde, pausa los recordatorios y escala.
+   (`ShipmentReportedByCustomer`) en lugar de descartarse.
+4. **El agente no afirma lo que no puede verificar.** Ante "ya lo despaché", no dice "no lo despachaste": explica que
+   el transportista puede demorar en registrarlo, pide el número de seguimiento y, si corresponde, pausa los avisos y
+   escala.
 5. **Expiración e invalidación:** los hechos viejos se marcan como reemplazados, no se borran silenciosamente.
 
 ```ts
 // El bloque de estado que recibe el modelo indica procedencia y vigencia
 const stateBlock = `
-## Estado verificado (sistema de cobranzas, actualizado ${state.asOf})
-- Saldo: ${formatMoney(state.balanceCents)}
-- Promesa vigente: ninguna (la promesa del ${state.lastPromise?.date} venció sin pago)
-- Pagos informados por la persona y no acreditados: ${state.reportedPayments.length}
+## Estado verificado (sistema de pedidos, actualizado ${state.asOf})
+- Pedido ${state.order.id}: ${state.order.statusLabel}
+- Devolución: retiro del ${state.lastReturn?.pickupDate} no realizado; reembolso pendiente de recibir el paquete
+- Envíos informados por la persona y no registrados por el transportista: ${state.reportedShipments.length}
 
 ## Hechos recordados (no verificados por el sistema)
 ${memories.map((m) => `- ${m.fact} (dicho el ${m.date}, conversación ${m.conversationId})`).join("\n")}
@@ -196,15 +199,16 @@ ${memories.map((m) => `- ${m.fact} (dicho el ${m.date}, conversación ${m.conver
 El challenge [Memoria conversacional](/challenges/conversation-memory) practica parte de este diseño.
 
 <Callout type="tip" title="Practicalo en el AI Agents Lab">
-  La [demostración de memoria](/agents/memory) recorre del día 1 al 16: promesa, afirmación sin pago, campaña
-  bloqueada por la promesa activa, recordatorio en la franja preferida y memoria desactualizada.
+  La [demostración de memoria](/agents/memory) recorre del día 1 al 7: devolución con retiro programado,
+  afirmación sin respaldo en el sistema, avisos bloqueados hasta la víspera, recordatorio en la franja
+  preferida y memoria desactualizada.
 </Callout>
 
 ## Errores frecuentes
 
 - **El historial de mensajes como única memoria** y fuente de verdad.
 - **Truncar la conversación sin conservar hechos** clave.
-- **Dejar que el modelo deduzca el saldo** o el estado de una promesa leyendo mensajes viejos.
+- **Dejar que el modelo deduzca el estado** de un pedido o de una devolución leyendo mensajes viejos.
 - **Memoria persistente sin procedencia, fecha ni expiración.**
 - **Guardar como "hecho" lo que dijo el usuario** y usarlo para habilitar acciones.
 - **Memoria compartida entre tenants** o sin mecanismo de borrado.
@@ -214,7 +218,7 @@ El challenge [Memoria conversacional](/challenges/conversation-memory) practica 
 
 <KnowledgeCheck
   id="llm-agents.memory-context.q1"
-  question="¿Dónde debe vivir el dato 'promesa vigente: viernes 27/11 por $40.000'?"
+  question="¿Dónde debe vivir el dato 'devolución programada: retiro el viernes 27/11'?"
   options={[
     {
       text: "En el historial de mensajes, que el modelo puede leer.",
@@ -234,14 +238,14 @@ El challenge [Memoria conversacional](/challenges/conversation-memory) practica 
 
 <KnowledgeCheck
   id="llm-agents.memory-context.q2"
-  question="El deudor dice que pagó ayer y el sistema no registra el pago. ¿Qué hace el agente?"
+  question="El cliente dice que pagó ayer y el sistema no registra el pago. ¿Qué hace el agente?"
   options={[
     {
       text: "Le dice que no pagó, porque el sistema es la fuente de verdad.",
       explanation: "Afirma algo que no puede verificar y genera conflicto: el pago puede estar en proceso.",
     },
     {
-      text: "Le cree y marca la deuda como pagada.",
+      text: "Le cree y marca el pedido como pagado.",
       explanation: "El agente no puede alterar el estado de pagos con una afirmación no verificada.",
     },
     {
@@ -254,7 +258,7 @@ El challenge [Memoria conversacional](/challenges/conversation-memory) practica 
 
 <KnowledgeCheck
   id="llm-agents.memory-context.q3"
-  question="La memoria tiene 'cobra el día 10' (de hace 8 meses) y hoy la persona dice que ahora cobra el 15. ¿Cómo se maneja?"
+  question="La memoria tiene 'recibe paquetes sólo a la tarde' (de hace 8 meses) y hoy la persona dice que ahora sólo puede a la mañana. ¿Cómo se maneja?"
   options={[
     {
       text: "Se mantienen los dos y el modelo decide.",
@@ -265,6 +269,6 @@ El challenge [Memoria conversacional](/challenges/conversation-memory) practica 
       correct: true,
       explanation: "Correcto. Procedencia, vigencia y lo más reciente gana para preferencias declaradas.",
     },
-    { text: "Se borra toda la memoria del deudor.", explanation: "Se perdería información útil y vigente." },
+    { text: "Se borra toda la memoria del cliente.", explanation: "Se perdería información útil y vigente." },
   ]}
 />

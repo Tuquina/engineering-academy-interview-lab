@@ -7,7 +7,7 @@ import { useAiStatus } from "@/shared/lib/ai-status";
 
 /**
  * Proveedores de modelo del AI Agents Lab. Vive en el layout de `/agents` y no en los proveedores globales: el
- * proveedor local (reglas, mundo de cobranzas, herramientas) sólo se descarga cuando se abre el laboratorio.
+ * proveedor local (reglas, mundo del soporte al cliente, herramientas) sólo se descarga cuando se abre el laboratorio.
  */
 export function AgentRuntimeBoundary({ children }: { children: ReactNode }) {
   const ai = useAiStatus();

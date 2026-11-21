@@ -133,19 +133,19 @@ satura, o necesidades propias de Redis (estructuras en memoria, rate limiting de
   caption="De lo más simple a lo más robusto; se elige el mínimo que cumple las garantías necesarias."
 />
 
-En una plataforma de cobranzas típica: los **envíos de una campaña** encajan en una cola de trabajo (SQS, RabbitMQ o
-BullMQ sobre Redis) con reintentos y límites; los **eventos de dominio** (pago recibido, promesa registrada) para
-varios consumidores (notificaciones, analítica, el agente) encajan en un log de eventos o en un bus gestionado; las
-**actualizaciones en vivo del panel** encajan en Pub/Sub o WebSockets.
+En un comercio electrónico típico: la **generación de etiquetas de envío** encaja en una cola de trabajo (SQS,
+RabbitMQ o BullMQ sobre Redis) con reintentos y límites; los **eventos de dominio** (pedido pagado, envío entregado)
+para varios consumidores (notificaciones, analítica, facturación) encajan en un log de eventos o en un bus gestionado;
+el **seguimiento en vivo del repartidor** en el mapa encaja en Pub/Sub o WebSockets.
 
 ## Cómo defender la decisión
 
 Una respuesta sólida en una entrevista nombra los **criterios** y los **compromisos**:
 
-> "Los pagos y las promesas viven en PostgreSQL porque necesito transacciones y constraints para la idempotencia.
-> Uso Redis para la caché de configuración de agentes y para el rate limiting de mensajes salientes, porque son datos
-> que puedo reconstruir y necesitan latencia baja con varias réplicas. Si Redis se cae, el rate limiting se degrada a
-> un límite conservador local y la configuración se lee de la base. Los eventos de pago se publican con un outbox
+> "Los pedidos y los pagos viven en PostgreSQL porque necesito transacciones y constraints para la idempotencia.
+> Uso Redis para la caché del catálogo y para el rate limiting de los SMS de verificación, porque son datos que puedo
+> reconstruir y necesitan latencia baja con varias réplicas. Si Redis se cae, el rate limiting se degrada a un límite
+> conservador local y el catálogo se lee de la base. Los eventos de pago se publican con un outbox
 > hacia una cola gestionada, porque no se pueden perder y quiero reintentos y dead letters sin operar un cluster."
 
 ## Comparación con C# y Java
@@ -169,7 +169,7 @@ Una respuesta sólida en una entrevista nombra los **criterios** y los **comprom
 
 <KnowledgeCheck
   id="redis.tradeoffs.q1"
-  question="¿Dónde guardás el registro de que un deudor pidió no ser contactado (opt-out)?"
+  question="¿Dónde guardás el registro de que un cliente pidió no recibir más mensajes de marketing (opt-out)?"
   options={[
     {
       text: "En Redis, con TTL de un año.",
@@ -181,7 +181,7 @@ Una respuesta sólida en una entrevista nombra los **criterios** y los **comprom
       explanation: "Correcto. Perderlo tiene consecuencias legales; la caché es opcional y reconstruible.",
     },
     {
-      text: "En la memoria persistente del agente.",
+      text: "En la memoria persistente del asistente de chat.",
       explanation: "Es un dato de negocio y de cumplimiento, no una memoria conversacional.",
     },
   ]}
@@ -189,7 +189,7 @@ Una respuesta sólida en una entrevista nombra los **criterios** y los **comprom
 
 <KnowledgeCheck
   id="redis.tradeoffs.q2"
-  question="Varios servicios (notificaciones, analítica, agente) deben reaccionar a cada pago recibido, y analítica quiere reprocesar los últimos 30 días cuando cambia su lógica. ¿Qué se ajusta mejor?"
+  question="Varios servicios (notificaciones, analítica, facturación) deben reaccionar a cada pago recibido, y analítica quiere reprocesar los últimos 30 días cuando cambia su lógica. ¿Qué se ajusta mejor?"
   options={[
     { text: "Redis Pub/Sub.", explanation: "No persiste: lo que no se escuchó en vivo se pierde." },
     {

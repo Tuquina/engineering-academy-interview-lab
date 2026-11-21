@@ -1,5 +1,5 @@
 import type { ToolName } from "./agent-config";
-import type { CustomerSnapshot } from "./collections-world";
+import type { CustomerSnapshot } from "./support-world";
 
 /**
  * Formato de conversación independiente del proveedor.

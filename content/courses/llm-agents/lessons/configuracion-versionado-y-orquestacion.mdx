@@ -46,14 +46,14 @@ interviewQuestions:
   - question: "¿Cómo diseñarías la seguridad de las herramientas de un agente?"
     keyPoints:
       - "Lista explícita de herramientas permitidas por agente y por etapa de la conversación."
-      - "El contexto de autorización (tenant, deudor) lo inyecta el código, no el modelo."
+      - "El contexto de autorización (tenant, cliente) lo inyecta el código, no el modelo."
       - "Validación de argumentos, límites de negocio y rate limits por herramienta."
       - "Acciones irreversibles con confirmación humana; idempotency keys en herramientas con efectos."
   - question: "¿Por qué usar una máquina de estados para orquestar un agente?"
     keyPoints:
       - "Hace explícitas las etapas (verificación de identidad, negociación, cierre) y las transiciones válidas."
       - "Cada estado expone sólo las herramientas y las instrucciones que corresponden."
-      - "Evita saltos indebidos, como dar detalles de la deuda antes de verificar identidad."
+      - "Evita saltos indebidos, como dar detalles de una reserva antes de verificar identidad."
       - "Facilita la observabilidad, los tests y la reanudación de conversaciones largas."
 summary:
   - "La configuración de un agente es un dato: versiones inmutables, auditables y evaluadas antes de publicarse."
@@ -67,14 +67,14 @@ summary:
 
 ## ¿Qué problema resuelve?
 
-Un agente en una demo es un prompt y un loop. Una **plataforma** de agentes para decenas de empresas de cobranzas
-necesita responder preguntas que la demo no tiene:
+Un agente en una demo es un prompt y un loop. Una **plataforma** de agentes de atención para decenas de empresas
+(aerolíneas, tiendas, clínicas) necesita responder preguntas que la demo no tiene:
 
 - ¿Qué prompt, modelo y herramientas usó **esta** conversación del martes, que terminó en una queja?
-- ¿Cómo cambia el tono para un banco sin afectar a una fintech?
+- ¿Cómo cambia el tono para una aerolínea de bandera sin afectar a una low cost?
 - ¿Cómo se publica un prompt nuevo sin romper lo que funciona?
 - ¿Qué pasa cuando el proveedor del modelo está lento o caído?
-- ¿Cómo se garantiza que el agente nunca dé detalles de una deuda antes de verificar la identidad?
+- ¿Cómo se garantiza que el agente nunca dé detalles de una reserva antes de verificar la identidad?
 
 ## La configuración del agente como dato versionado
 
@@ -88,8 +88,8 @@ export const AgentConfigSchema = z.object({
   promptVariables: z.record(z.string(), z.string()), // tono, nombre comercial, horario de atención
   allowedTools: z.array(z.enum(TOOL_NAMES)),
   policies: z.object({
-    maxDiscountPercent: z.number().min(0).max(50),
-    maxPromiseDays: z.number().int().min(1).max(60),
+    maxFeeWaiverPercent: z.number().min(0).max(100), // bonificación máxima del cargo por cambio
+    maxRebookingDays: z.number().int().min(1).max(365),
     contactHours: z.object({ from: z.string(), to: z.string(), timezone: z.string() }),
   }),
   limits: z.object({
@@ -145,15 +145,15 @@ tenant multiplica el mantenimiento; la alternativa es **una plantilla base versi
 
 El riesgo que OWASP llama **agencia excesiva** aparece cuando un agente tiene más capacidad de la que necesita.
 
-| Control                         | Ejemplo                                                                                     |
-| ------------------------------- | ------------------------------------------------------------------------------------------- |
-| Lista permitida por agente      | El agente de recordatorios no tiene `offer_discount`.                                       |
-| Lista permitida por etapa       | Antes de verificar identidad, sólo `verify_identity` y `escalate_to_human`.                 |
-| Contexto inyectado              | `tenantId`, `debtorId` y `conversationId` salen de la sesión, nunca de los argumentos.      |
-| Validación y límites de negocio | Descuento ≤ `policies.maxDiscountPercent`; fecha ≤ hoy + `maxPromiseDays`.                  |
-| Idempotencia                    | `register_payment_promise` usa una clave por conversación y turno: un reintento no duplica. |
-| Rate limits por herramienta     | Máximo de mensajes salientes por deudor por día.                                            |
-| Confirmación humana             | Quitas mayores a un umbral pasan a revisión (lección de guardrails).                        |
+| Control                         | Ejemplo                                                                                             |
+| ------------------------------- | --------------------------------------------------------------------------------------------------- |
+| Lista permitida por agente      | El agente de recordatorios de check-in no tiene `waive_change_fee`.                                 |
+| Lista permitida por etapa       | Antes de verificar identidad, sólo `verify_identity` y `escalate_to_human`.                         |
+| Contexto inyectado              | `tenantId`, `passengerId` y `conversationId` salen de la sesión, nunca de los argumentos.           |
+| Validación y límites de negocio | Bonificación ≤ `policies.maxFeeWaiverPercent`; nueva fecha ≤ hoy + `maxRebookingDays`.              |
+| Idempotencia                    | `confirm_change` usa una clave por conversación y turno: un reintento no cambia el vuelo dos veces. |
+| Rate limits por herramienta     | Máximo de mensajes salientes por pasajero por día.                                                  |
+| Confirmación humana             | Reembolsos mayores a un umbral pasan a revisión (lección de guardrails).                            |
 
 ## Model routing
 
@@ -211,15 +211,15 @@ Un proveedor de modelos es una dependencia remota: puede ser lento, devolver `42
   distinto en otro.
 - Algunos proveedores ofrecen mecanismos propios: por ejemplo, la API de Anthropic tiene un parámetro para reintentar
   automáticamente con otro modelo cuando el principal rechaza una solicitud por políticas de seguridad.
-- En flujos asíncronos (campañas), la mejor degradación suele ser **reencolar** el trabajo con backoff en lugar de
+- En flujos asíncronos (avisos masivos de reprogramación de vuelos), la mejor degradación suele ser **reencolar** el trabajo con backoff en lugar de
   responder algo de menor calidad.
 - Un **circuit breaker** evita seguir llamando a un proveedor que está fallando (curso de System Design).
 
 ## Orquestación con máquinas de estado
 
 Un agente con un único prompt y todas las herramientas disponibles depende de que el modelo **elija bien** el orden
-de las cosas. En cobranzas, algunos órdenes son obligatorios: verificar la identidad antes de dar detalles, informar
-antes de negociar, confirmar antes de registrar. Una **máquina de estados** hace explícitas esas etapas:
+de las cosas. En una aerolínea, algunos órdenes son obligatorios: verificar la identidad antes de dar detalles de la
+reserva, informar las opciones antes de cambiar, confirmar antes de emitir. Una **máquina de estados** hace explícitas esas etapas:
 
 <MermaidDiagram
   caption="Cada estado define las instrucciones, las herramientas disponibles y las transiciones permitidas."
@@ -229,11 +229,11 @@ stateDiagram-v2
   greeting --> identity_check
   identity_check --> informing: identidad verificada
   identity_check --> handoff: falla 3 veces
-  informing --> negotiating: la persona quiere pagar o pide opciones
-  informing --> closing: no quiere hablar ahora
-  negotiating --> confirming: acuerdo propuesto
-  confirming --> closing: compromiso registrado
-  negotiating --> handoff: vulnerabilidad o pedido de humano
+  informing --> negotiating: quiere cambiar el vuelo o pide opciones
+  informing --> closing: sólo quería información
+  negotiating --> confirming: cambio propuesto
+  confirming --> closing: cambio emitido
+  negotiating --> handoff: caso especial o pedido de humano
   closing --> [*]
   handoff --> [*]
 `}
@@ -243,12 +243,13 @@ stateDiagram-v2
 const STAGES = {
   identity_check: {
     instructions:
-      "Verificá la identidad pidiendo los datos que indique verify_identity. No des información de la deuda.",
+      "Verificá la identidad pidiendo los datos que indique verify_identity. No des información de la reserva.",
     tools: ["verify_identity", "escalate_to_human"],
   },
   negotiating: {
-    instructions: "Ofrecé sólo las opciones de get_payment_options. Si hay acuerdo, pasá a confirmar.",
-    tools: ["get_debt_summary", "get_payment_options", "propose_agreement", "escalate_to_human"],
+    instructions:
+      "Ofrecé sólo las opciones de get_change_options. Si la persona elige una, pasá a confirmar.",
+    tools: ["get_booking_summary", "get_change_options", "propose_change", "escalate_to_human"],
   },
   // ...
 } as const satisfies Record<ConversationStage, StageDefinition>;
@@ -291,14 +292,14 @@ etapa se trabó cada conversación.
 
 <KnowledgeCheck
   id="llm-agents.agent-engineering.q2"
-  question="¿Cómo garantizás que el agente nunca dé detalles de la deuda antes de verificar la identidad?"
+  question="¿Cómo garantizás que el agente nunca dé detalles de la reserva antes de verificar la identidad?"
   options={[
     {
       text: "Con una instrucción enfática en el system prompt.",
       explanation: "Ayuda, pero no garantiza: el modelo puede no cumplirla o ser manipulado.",
     },
     {
-      text: "Con una máquina de estados donde get_debt_summary sólo está disponible después de que verify_identity tenga éxito.",
+      text: "Con una máquina de estados donde get_booking_summary sólo está disponible después de que verify_identity tenga éxito.",
       correct: true,
       explanation: "Correcto. La restricción es estructural: la herramienta no existe en ese estado.",
     },
@@ -311,14 +312,14 @@ etapa se trabó cada conversación.
 
 <KnowledgeCheck
   id="llm-agents.agent-engineering.q3"
-  question="El proveedor principal devuelve errores 529 (sobrecarga) durante 10 minutos en medio de una campaña. ¿Qué es lo más adecuado?"
+  question="El proveedor principal devuelve errores 529 (sobrecarga) durante 10 minutos en medio de un aviso masivo de reprogramaciones por mal tiempo. ¿Qué es lo más adecuado?"
   options={[
     {
       text: "Reintentar inmediatamente cada request hasta que funcione.",
       explanation: "Aumenta la carga sobre un servicio sobrecargado y no respeta backoff.",
     },
     {
-      text: "Reintentos con backoff limitados, circuit breaker y reencolar los trabajos de la campaña; fallback a otro modelo evaluado si corresponde.",
+      text: "Reintentos con backoff limitados, circuit breaker y reencolar los trabajos del aviso; fallback a otro modelo evaluado si corresponde.",
       correct: true,
       explanation: "Correcto. Degradación planificada sin empeorar la caída.",
     },

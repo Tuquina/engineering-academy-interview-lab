@@ -1,5 +1,5 @@
 import type { AgentConfig } from "../domain/agent-config";
-import { LAB_TODAY, SEED_WORLD, customerSnapshot, type CollectionsWorld } from "../domain/collections-world";
+import { LAB_TODAY, SEED_WORLD, customerSnapshot, type SupportWorld } from "../domain/support-world";
 import type { ChatMessage, ToolCallTrace } from "../domain/conversation";
 import {
   casePassed,
@@ -31,7 +31,7 @@ export interface RunCaseInput {
   readonly repetition: number;
   readonly baseSeed: number;
   readonly judge?: Judge;
-  readonly world?: CollectionsWorld;
+  readonly world?: SupportWorld;
   readonly clock?: () => number;
 }
 

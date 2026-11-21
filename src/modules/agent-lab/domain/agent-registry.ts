@@ -116,22 +116,22 @@ export function restoreDraftFrom(agent: AgentRecord, number: number): AgentRecor
 /** v1: primera versión con menos herramientas, más variabilidad y sin presentarse como IA. */
 const EXAMPLE_V1: AgentConfig = {
   ...DEFAULT_CONFIG,
-  tools: TOOL_NAMES.filter((t) => t !== "get_allowed_offers" && t !== "confirm_payment"),
+  tools: TOOL_NAMES.filter((t) => t !== "get_allowed_compensations" && t !== "confirm_payment"),
   rules: DEFAULT_CONFIG.rules.filter((r) => !r.startsWith("Presentate")),
   policies: { ...DEFAULT_CONFIG.policies, discloseAiIdentity: false, escalateOnDispute: false },
   model: { ...DEFAULT_CONFIG.model, variability: 0.5 },
 };
 
-/** v2: todas las herramientas, presentación obligatoria, escalamiento ante disputas y menos variabilidad. */
+/** v2: todas las herramientas, presentación obligatoria, escalamiento ante cargos no reconocidos y menos variabilidad. */
 const EXAMPLE_V2: AgentConfig = DEFAULT_CONFIG;
 
-export const EXAMPLE_AGENT_ID = "agent-collections";
+export const EXAMPLE_AGENT_ID = "agent-support";
 
 export function exampleAgents(): Record<string, AgentRecord> {
   const at = "2026-03-01T12:00:00.000Z";
   const agent: AgentRecord = {
     id: EXAMPLE_AGENT_ID,
-    name: "Agente de cobranzas (ejemplo)",
+    name: "Agente de atención al cliente (ejemplo)",
     createdAt: at,
     draft: EXAMPLE_V2,
     versions: [
@@ -139,7 +139,7 @@ export function exampleAgents(): Record<string, AgentRecord> {
       {
         number: 2,
         config: EXAMPLE_V2,
-        note: "Agrega ofertas y confirmación de pagos; presentación como IA; escala disputas",
+        note: "Agrega compensaciones y confirmación de pagos; presentación como IA; escala cargos no reconocidos",
         createdAt: "2026-03-03T12:00:00.000Z",
       },
     ],

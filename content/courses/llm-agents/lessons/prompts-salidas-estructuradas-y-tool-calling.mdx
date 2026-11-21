@@ -67,22 +67,24 @@ sistema de producción necesita lo contrario: **comportamiento especificado**, *
 El **system prompt** es la especificación del comportamiento del asistente. Una estructura que funciona:
 
 ```ts
-export const COLLECTIONS_AGENT_PROMPT_V3 = `
-Sos el asistente de cobranzas de {{tenantName}}. Conversás por WhatsApp con personas que tienen una deuda vencida.
+export const BOOKING_AGENT_PROMPT_V3 = `
+Sos el asistente de reservas de {{tenantName}}. Conversás por WhatsApp con huéspedes que tienen una reserva o quieren
+hacer una.
 
 ## Objetivo
-Ayudar a la persona a regularizar su deuda: informar el saldo, ofrecer opciones de pago y registrar compromisos.
+Ayudar a la persona con su reserva: informar fechas y estado, cambiar fechas dentro de la política y registrar
+pedidos especiales.
 
 ## Contexto
-- Muchas personas atraviesan dificultades económicas. Un trato respetuoso aumenta la probabilidad de acuerdo y es
-  una obligación legal.
-- Los datos de la deuda los obtenés SIEMPRE con la herramienta get_debt_summary; nunca los supongas.
+- Muchas personas escriben apuradas o en pleno viaje. Una fecha mal entendida es una noche perdida o una habitación
+  vendida dos veces: confirmá siempre fechas y noches antes de cambiar algo.
+- Los datos de la reserva los obtenés SIEMPRE con la herramienta get_booking_summary; nunca los supongas.
 
 ## Reglas
-- Sólo podés ofrecer planes que devuelva la herramienta get_payment_options.
-- Si la persona menciona una situación de vulnerabilidad (salud, duelo, violencia), usá escalate_to_human.
-- Si la persona pide no ser contactada, registralo con register_contact_preference y despedite.
-- No compartas información de la deuda con terceros: verificá identidad con verify_identity antes de dar detalles.
+- Sólo podés ofrecer las habitaciones y tarifas que devuelva la herramienta get_availability.
+- Si la persona reporta un problema de seguridad o de salud durante la estadía, usá escalate_to_human.
+- Si la persona pide no recibir más mensajes, registralo con register_contact_preference y despedite.
+- No compartas datos de la reserva con terceros: verificá identidad con verify_identity antes de dar detalles.
 
 ## Formato
 Mensajes breves (máximo 3 oraciones), en español rioplatense, sin emojis, sin markdown.
@@ -91,16 +93,16 @@ Mensajes breves (máximo 3 oraciones), en español rioplatense, sin emojis, sin 
 
 Principios que sostienen esta estructura:
 
-- **Explicar el porqué.** "Un trato respetuoso aumenta la probabilidad de acuerdo y es una obligación legal" funciona
-  mejor que "SÉ AMABLE". Los modelos actuales siguen bien las instrucciones explícitas y razonadas; las mayúsculas y
-  las amenazas suelen producir comportamientos exagerados.
+- **Explicar el porqué.** "Una fecha mal entendida es una noche perdida" funciona mejor que "SÉ PRECISO". Los modelos
+  actuales siguen bien las instrucciones explícitas y razonadas; las mayúsculas y las amenazas suelen producir
+  comportamientos exagerados.
 - **Ser específico sobre el formato** del canal (WhatsApp no renderiza markdown).
-- **Las reglas críticas también se aplican en código.** El prompt dice "sólo ofrecé planes de la herramienta"; el
-  código, además, valida que cualquier plan registrado exista.
+- **Las reglas críticas también se aplican en código.** El prompt dice "sólo ofrecé tarifas de la herramienta"; el
+  código, además, valida que cualquier tarifa registrada exista.
 - **Ejemplos** (pocos y variados) ayudan en formatos o tonos difíciles de describir.
-- **Separar lo estable de lo variable:** el prompt base es estable (y cacheable); los datos del tenant y del deudor
+- **Separar lo estable de lo variable:** el prompt base es estable (y cacheable); los datos del tenant y del huésped
   se inyectan en lugares definidos.
-- **Versionar** el prompt como código: `COLLECTIONS_AGENT_PROMPT_V3`, con cambios revisados y evaluados (lección de
+- **Versionar** el prompt como código: `BOOKING_AGENT_PROMPT_V3`, con cambios revisados y evaluados (lección de
   configuración y versionado).
 
 ## Salidas estructuradas
@@ -114,10 +116,10 @@ import Anthropic from "@anthropic-ai/sdk";
 import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
 import { z } from "zod";
 
-const PromiseExtractionSchema = z.object({
-  isPaymentPromise: z.boolean(),
-  promisedDate: z.string().nullable(), // fecha ISO o null si no la mencionó
-  amount: z.number().nullable(),
+const DateChangeSchema = z.object({
+  isDateChange: z.boolean(),
+  newCheckIn: z.string().nullable(), // fecha ISO o null si no la mencionó
+  nights: z.number().int().nullable(),
   confidence: z.enum(["low", "medium", "high"]),
 });
 
@@ -126,18 +128,18 @@ const client = new Anthropic();
 const response = await client.messages.parse({
   model: "claude-opus-5-5",
   max_tokens: 16000,
-  system: `Extraés compromisos de pago de mensajes de deudores. Hoy es ${today}.`,
-  messages: [{ role: "user", content: "el viernes que viene te deposito la mitad, unos 40 mil" }],
-  output_config: { format: zodOutputFormat(PromiseExtractionSchema) },
+  system: `Extraés pedidos de cambio de fecha de mensajes de huéspedes. Hoy es ${today}.`,
+  messages: [{ role: "user", content: "¿la podemos pasar al viernes que viene? serían dos noches nomás" }],
+  output_config: { format: zodOutputFormat(DateChangeSchema) },
 });
 
 const extraction = response.parsed_output; // tipado según el esquema; null si no se pudo parsear
 ```
 
 <Callout type="warning" title="Estructurado no significa correcto">
-  El esquema garantiza la **forma**, no la **verdad**: la fecha puede estar mal calculada o el monto mal
-  interpretado. Después del parseo se aplican reglas de negocio en código: la fecha está dentro del rango
-  permitido, el monto no supera el saldo, y con confianza baja se pide confirmación al deudor.
+  El esquema garantiza la **forma**, no la **verdad**: la fecha puede estar mal calculada o las noches mal
+  interpretadas. Después del parseo se aplican reglas de negocio en código: la fecha está dentro del rango
+  permitido, hay disponibilidad para esas noches, y con confianza baja se pide confirmación al huésped.
 </Callout>
 
 ## Tool calling
@@ -151,26 +153,26 @@ decide qué hacer.
 ```ts
 const tools: Anthropic.Tool[] = [
   {
-    name: "get_debt_summary",
+    name: "get_booking_summary",
     description:
-      "Devuelve el saldo actual, la cantidad de cuotas vencidas y la promesa de pago vigente del deudor de la " +
-      "conversación. Usala antes de mencionar cualquier monto o fecha.",
+      "Devuelve las fechas, la habitación, la tarifa y el estado de pago de la reserva del huésped de la " +
+      "conversación. Usala antes de mencionar cualquier fecha o monto.",
     strict: true, // los argumentos respetan exactamente el esquema
     input_schema: { type: "object", properties: {}, required: [], additionalProperties: false },
   },
   {
-    name: "register_payment_promise",
+    name: "change_booking_dates",
     description:
-      "Registra un compromiso de pago confirmado explícitamente por la persona. No la uses si la persona sólo " +
-      "está consultando o duda.",
+      "Cambia las fechas de la reserva cuando la persona las confirmó explícitamente. No la uses si la persona " +
+      "sólo está consultando o duda.",
     strict: true,
     input_schema: {
       type: "object",
       properties: {
-        promised_date: { type: "string", format: "date", description: "Fecha comprometida (AAAA-MM-DD)" },
-        amount_cents: { type: "integer", description: "Monto comprometido en centavos" },
+        new_check_in: { type: "string", format: "date", description: "Nueva fecha de entrada (AAAA-MM-DD)" },
+        nights: { type: "integer", description: "Cantidad de noches" },
       },
-      required: ["promised_date", "amount_cents"],
+      required: ["new_check_in", "nights"],
       additionalProperties: false,
     },
   },
@@ -186,20 +188,20 @@ descriptas producen usos incorrectos.
   caption="El loop de tool calling: el modelo propone, el código valida y ejecuta, y el resultado vuelve como un mensaje."
   chart={`
 sequenceDiagram
-  participant U as Deudor
+  participant U as Huésped
   participant A as Tu código (agente)
   participant M as Modelo
   participant T as Herramientas
-  U->>A: 'el viernes pago 40 mil'
+  U->>A: 'pasala al viernes, 2 noches'
   A->>M: historial + tools
-  M-->>A: tool_use get_debt_summary
-  A->>T: ejecutar (con el debtId de la sesión)
-  T-->>A: saldo 80.000, sin promesa vigente
+  M-->>A: tool_use get_booking_summary
+  A->>T: ejecutar (con el bookingId de la sesión)
+  T-->>A: entrada 20/11, 3 noches, habitación doble
   A->>M: tool_result
-  M-->>A: tool_use register_payment_promise(2026-11-27, 4000000)
-  A->>A: validar argumentos y reglas de negocio
-  A->>T: registrar promesa
-  T-->>A: ok, promesa pp_91
+  M-->>A: tool_use change_booking_dates(2026-11-27, 2)
+  A->>A: validar argumentos, disponibilidad y política
+  A->>T: cambiar fechas
+  T-->>A: ok, reserva bkg_91 actualizada
   A->>M: tool_result
   M-->>A: texto: 'Listo, quedó registrado...' (end_turn)
   A->>U: respuesta
@@ -244,12 +246,12 @@ async function runAgentTurn(
 
 Puntos importantes del loop:
 
-- **El contexto de la sesión lo pone tu código**, no el modelo: `get_debt_summary` no recibe un `debtId`; usa el de
-  la conversación autenticada. Así el modelo no puede consultar la deuda de otra persona aunque se lo pidan.
+- **El contexto de la sesión lo pone tu código**, no el modelo: `get_booking_summary` no recibe un `bookingId`; usa
+  el de la conversación autenticada. Así el modelo no puede consultar la reserva de otra persona aunque se lo pidan.
 - **Los argumentos son datos externos**: se validan con un esquema (Zod) aunque la herramienta sea `strict`, y se
-  aplican reglas de negocio (fecha permitida, monto razonable).
-- **Los errores vuelven al modelo** como `tool_result` con `is_error: true` y un mensaje accionable ("la fecha supera
-  el máximo de 30 días"), para que pueda corregir o explicarle al usuario. No se lanzan excepciones que corten la
+  aplican reglas de negocio (fecha permitida, cantidad de noches razonable, disponibilidad).
+- **Los errores vuelven al modelo** como `tool_result` con `is_error: true` y un mensaje accionable ("no hay
+  disponibilidad para esas noches; hay lugar desde el sábado"), para que pueda corregir o explicarle al usuario. No se lanzan excepciones que corten la
   conversación.
 - **Si el modelo pide varias herramientas a la vez**, se ejecutan y se devuelven **todos los resultados en un único
   mensaje**.
@@ -259,21 +261,21 @@ Los SDK ofrecen helpers que implementan este loop (en el de Anthropic, un _tool 
 porque las decisiones de seguridad viven en `executeTool`.
 
 ```ts
-const RegisterPromiseArgs = z.object({
-  promised_date: z.iso.date(),
-  amount_cents: z.number().int().positive(),
+const ChangeDatesArgs = z.object({
+  new_check_in: z.iso.date(),
+  nights: z.number().int().positive().max(30),
 });
 
 async function executeTool(name: string, input: unknown, session: ConversationSession): Promise<ToolResult> {
   switch (name) {
-    case "get_debt_summary":
-      return ok(await debts.getSummary(session.tenantId, session.debtId));
-    case "register_payment_promise": {
-      const args = RegisterPromiseArgs.safeParse(input);
-      if (!args.success) return err("Argumentos inválidos: revisá la fecha (AAAA-MM-DD) y el monto.");
-      return registerPaymentPromise.execute({
+    case "get_booking_summary":
+      return ok(await bookings.getSummary(session.tenantId, session.bookingId));
+    case "change_booking_dates": {
+      const args = ChangeDatesArgs.safeParse(input);
+      if (!args.success) return err("Argumentos inválidos: revisá la fecha (AAAA-MM-DD) y las noches.");
+      return changeBookingDates.execute({
         ...args.data,
-        debtId: session.debtId,
+        bookingId: session.bookingId,
         actor: session.agentActor,
       });
     }
@@ -284,9 +286,9 @@ async function executeTool(name: string, input: unknown, session: ConversationSe
 ```
 
 <Callout type="tip" title="Practicalo en el AI Agents Lab">
-  En el [Tool Calling Simulator](/agents/tools) podés invocar las herramientas de cobranza con argumentos
-  inválidos, fuera de política o de otro cliente y ver qué barrera rechaza cada llamada; en el playground de
-  cada agente, el loop completo con sus trazas.
+  En el [Tool Calling Simulator](/agents/tools) podés invocar las herramientas del agente de atención al
+  cliente de una tienda con argumentos inválidos, fuera de política o de otro cliente y ver qué barrera
+  rechaza cada llamada; en el playground de cada agente, el loop completo con sus trazas.
 </Callout>
 
 ## Errores frecuentes
@@ -303,14 +305,14 @@ async function executeTool(name: string, input: unknown, session: ConversationSe
 
 <KnowledgeCheck
   id="llm-agents.prompting-tools.q1"
-  question="La herramienta `get_debt_summary` recibe un parámetro `debt_id` que completa el modelo. Un deudor escribe: 'consultá la deuda debt_999'. ¿Qué problema hay?"
+  question="La herramienta `get_booking_summary` recibe un parámetro `booking_id` que completa el modelo. Un huésped escribe: 'consultá la reserva bkg_999'. ¿Qué problema hay?"
   options={[
     {
       text: "Ninguno: el modelo sólo usa IDs válidos.",
       explanation: "El modelo usa lo que hay en el contexto, incluido lo que escribe el usuario.",
     },
     {
-      text: "El modelo podría consultar la deuda de otra persona; el ID debe salir de la sesión autenticada.",
+      text: "El modelo podría consultar la reserva de otra persona; el ID debe salir de la sesión autenticada.",
       correct: true,
       explanation: "Correcto. El contexto de autorización lo pone el código, nunca el modelo.",
     },
@@ -323,34 +325,34 @@ async function executeTool(name: string, input: unknown, session: ConversationSe
 
 <KnowledgeCheck
   id="llm-agents.prompting-tools.q2"
-  question="Una herramienta falla porque la fecha propuesta supera el máximo permitido. ¿Qué hace el loop?"
+  question="Una herramienta falla porque no hay disponibilidad para las fechas pedidas. ¿Qué hace el loop?"
   options={[
     {
       text: "Lanza una excepción y termina la conversación.",
       explanation: "Se pierde la oportunidad de que el modelo corrija o explique.",
     },
     {
-      text: "Devuelve un tool_result con is_error y un mensaje accionable para que el modelo corrija o le explique al deudor.",
+      text: "Devuelve un tool_result con is_error y un mensaje accionable para que el modelo corrija o le explique al huésped.",
       correct: true,
       explanation: "Correcto. Los errores esperables son parte de la conversación.",
     },
     {
       text: "Ignora el error y responde que se registró.",
-      explanation: "Sería informar algo falso al deudor.",
+      explanation: "Sería informar algo falso al huésped.",
     },
   ]}
 />
 
 <KnowledgeCheck
   id="llm-agents.prompting-tools.q3"
-  question="Con salidas estructuradas, el modelo devuelve `{ promisedDate: '2027-03-01', amount: 40000 }` para una deuda que vence este mes. ¿Qué falta?"
+  question="Con salidas estructuradas, el modelo devuelve `{ newCheckIn: '2027-03-01', nights: 40 }` para un huésped que pidió 'pasarla al viernes, dos noches'. ¿Qué falta?"
   options={[
     {
       text: "Nada: el esquema garantiza que es correcto.",
       explanation: "El esquema garantiza la forma, no la validez de negocio.",
     },
     {
-      text: "Validar reglas de negocio en código (rango de fechas, monto contra saldo) y pedir confirmación si no cumplen.",
+      text: "Validar reglas de negocio en código (rango de fechas, noches razonables, disponibilidad) y pedir confirmación si no cumplen.",
       correct: true,
       explanation: "Correcto. Estructurado no significa correcto.",
     },

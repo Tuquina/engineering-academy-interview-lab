@@ -7,7 +7,7 @@ import { Card, CardDescription, CardTitle } from "@/shared/ui/card";
 import { invokeTool } from "../application/invoke-tool";
 import { exampleArgs, toolDefinitions } from "../application/tool-schemas";
 import { DEFAULT_CONFIG, TOOL_LABELS, TOOL_NAMES, type ToolName } from "../domain/agent-config";
-import { LAB_TODAY, SEED_WORLD, isIsoDate, type CollectionsWorld } from "../domain/collections-world";
+import { LAB_TODAY, SEED_WORLD, isIsoDate, type SupportWorld } from "../domain/support-world";
 import type { ToolCallTrace } from "../domain/conversation";
 import { Json, ToolCallInspector } from "./tool-call-inspector";
 
@@ -16,13 +16,13 @@ import { Json, ToolCallInspector } from "./tool-call-inspector";
  * validación, resultado, errores, estado anterior y posterior y tiempo. El mundo se conserva entre llamadas.
  */
 export function ToolSimulator() {
-  const [world, setWorld] = useState<CollectionsWorld>(SEED_WORLD);
+  const [world, setWorld] = useState<SupportWorld>(SEED_WORLD);
   const [customerId, setCustomerId] = useState("c-001");
   const [today, setToday] = useState(LAB_TODAY);
-  const [tool, setTool] = useState<ToolName>("get_debt");
+  const [tool, setTool] = useState<ToolName>("get_order");
   const [enabled, setEnabled] = useState(true);
   const [args, setArgs] = useState(() =>
-    JSON.stringify(exampleArgs("get_debt", "c-001", LAB_TODAY), null, 2),
+    JSON.stringify(exampleArgs("get_order", "c-001", LAB_TODAY), null, 2),
   );
   const [parseError, setParseError] = useState<string | null>(null);
   const [traces, setTraces] = useState<ToolCallTrace[]>([]);

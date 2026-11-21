@@ -28,11 +28,11 @@ references:
   - title: "Redis — Key eviction"
     url: "https://redis.io/docs/latest/develop/reference/eviction/"
 interviewQuestions:
-  - question: "¿Qué estructura de Redis usarías para un ranking de agentes por promesas cumplidas?"
+  - question: "¿Qué estructura de Redis usarías para el ranking en vivo de los jugadores de un juego?"
     keyPoints:
       - "Un sorted set: cada miembro tiene un score y se mantiene ordenado."
       - "ZINCRBY para sumar puntos y ZRANGE con REV o ZREVRANGE para el top N, en tiempo logarítmico."
-      - "ZRANK para la posición de un agente."
+      - "ZRANK (o ZREVRANK) para la posición de un jugador."
   - question: "¿Qué pasa cuando Redis se queda sin memoria?"
     keyPoints:
       - "Depende de maxmemory-policy: noeviction rechaza escrituras; las políticas LRU, LFU o TTL eliminan claves."
@@ -57,8 +57,8 @@ summary:
 ## ¿Qué problema resuelve?
 
 Usar Redis sólo con `SET` y `GET` de JSON desperdicia su mayor ventaja: **estructuras de datos con operaciones
-atómicas**. Un ranking de agentes, un conjunto de deudores ya contactados hoy, una ventana deslizante de requests o
-una cola de mensajes salientes tienen una estructura natural en Redis que evita leer, modificar y reescribir desde la
+atómicas**. El ranking de un juego, el conjunto de clientes que ya recibieron hoy una
+promoción, una ventana deslizante de requests o una cola de notificaciones tienen una estructura natural en Redis que evita leer, modificar y reescribir desde la
 aplicación (y las carreras que eso trae).
 
 ## Las estructuras de datos
@@ -81,8 +81,8 @@ flowchart TB
 El tipo básico: texto, números o bytes (hasta 512 MB, aunque conviene mucho menos).
 
 ```bash
-SET tenant:1:agent:7:config '{"tone":"cordial","model":"..."}' EX 300
-INCRBY campaign:91:sent 25
+SET search:flights:EZE-MAD:2026-12-20 '[{"flight":"XY123","price_cents":98000000}]' EX 120
+INCRBY views:product:42 25
 GETDEL otp:usr_7                  # leer y borrar en un paso
 ```
 
@@ -91,10 +91,10 @@ GETDEL otp:usr_7                  # leer y borrar en un paso
 Un objeto con campos; permite leer o modificar un campo sin reescribir todo:
 
 ```bash
-HSET conversation:c_88 stage negotiating last_message_at 1795070000 turns 6
-HINCRBY conversation:c_88 turns 1
-HGET conversation:c_88 stage
-HGETALL conversation:c_88
+HSET cart:usr_7 prod_42 1 prod_9 2        # carrito: producto → cantidad
+HINCRBY cart:usr_7 prod_9 1
+HGET cart:usr_7 prod_9
+HGETALL cart:usr_7
 ```
 
 ### Lists
@@ -102,10 +102,10 @@ HGETALL conversation:c_88
 Listas enlazadas: inserción y extracción en los extremos en O(1). Sirven como colas simples:
 
 ```bash
-LPUSH outbound:sms '{"to":"...","text":"..."}'     # productor
-BRPOP outbound:sms 5                               # consumidor: espera hasta 5 s si está vacía
-LRANGE recent:events:c_88 0 9                      # últimos 10 eventos
-LTRIM recent:events:c_88 0 99                      # conservar sólo los 100 más recientes
+LPUSH outbound:push '{"to":"...","text":"..."}'    # productor
+BRPOP outbound:push 5                              # consumidor: espera hasta 5 s si está vacía
+LRANGE recent:viewed:usr_7 0 9                     # últimos 10 productos vistos
+LTRIM recent:viewed:usr_7 0 99                     # conservar sólo los 100 más recientes
 ```
 
 Una lista como cola **no tiene confirmación**: si el consumidor toma un mensaje y se cae, se pierde. Para colas
@@ -116,10 +116,10 @@ confiables se usan Streams (o patrones como `LMOVE` a una lista de "en proceso")
 Colecciones de miembros **únicos**, con pertenencia en O(1):
 
 ```bash
-SADD contacted:tnt_1:2026-11-19 cus_42 cus_77
-SISMEMBER contacted:tnt_1:2026-11-19 cus_42        # 1: ya contactado hoy
-SCARD contacted:tnt_1:2026-11-19                   # cuántos
-SINTER campaign:91:targets optout:tnt_1            # intersección: objetivos que pidieron no ser contactados
+SADD promo:sent:2026-11-19 cus_42 cus_77
+SISMEMBER promo:sent:2026-11-19 cus_42             # 1: ya recibió la promoción hoy
+SCARD promo:sent:2026-11-19                        # cuántos
+SINTER promo:91:audience optout:marketing          # intersección: destinatarios que pidieron no recibir promociones
 ```
 
 ### Sorted sets
@@ -127,10 +127,10 @@ SINTER campaign:91:targets optout:tnt_1            # intersección: objetivos qu
 Miembros únicos con un **score** numérico, siempre ordenados. Son la estructura más versátil:
 
 ```bash
-ZINCRBY ranking:agents:2026-11 1 agent_7                 # sumar una promesa cumplida
-ZRANGE ranking:agents:2026-11 0 9 REV WITHSCORES         # top 10
-ZADD scheduled:reminders 1795080000 reminder_551         # score = timestamp de ejecución
-ZRANGE scheduled:reminders -inf 1795075000 BYSCORE       # los que ya vencieron
+ZINCRBY leaderboard:season:7 150 player_7              # sumar puntos de una partida
+ZRANGE leaderboard:season:7 0 9 REV WITHSCORES          # top 10
+ZADD scheduled:reminders 1795080000 appt_551            # score = timestamp: recordatorio de un turno médico
+ZRANGE scheduled:reminders -inf 1795075000 BYSCORE      # los que ya vencieron
 ZREMRANGEBYSCORE ratelimit:usr_7 0 1795069940            # quitar entradas fuera de la ventana
 ```
 
@@ -148,7 +148,7 @@ se reparten las entradas y cada una debe **confirmarse** (`XACK`); las no confir
 reasignar si un consumidor cae.
 
 ```bash
-XADD events:payments * debt_id debt_42 amount 4000000        # * = ID automático
+XADD events:payments * order_id ord_42 amount 4000000      # * = ID automático
 XGROUP CREATE events:payments notifier $ MKSTREAM
 XREADGROUP GROUP notifier worker-1 COUNT 10 BLOCK 5000 STREAMS events:payments >
 XACK events:payments notifier 1795070000000-0

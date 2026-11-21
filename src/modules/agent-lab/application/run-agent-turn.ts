@@ -1,7 +1,7 @@
 import { renderSystemPrompt, type AgentConfig } from "../domain/agent-config";
-import { findCustomer, formatDate, type CollectionsWorld, type IsoDate } from "../domain/collections-world";
+import { findCustomer, formatDate, type IsoDate, type SupportWorld } from "../domain/support-world";
 import { userText, type ChatMessage, type ContentBlock, type ToolCallTrace } from "../domain/conversation";
-import { extractFacts, factsForPrompt, promiseFact, rememberFact, type MemoryFact } from "../domain/memory";
+import { extractFacts, factsForPrompt, rememberFact, returnFact, type MemoryFact } from "../domain/memory";
 import { invokeTool, toolResultContent } from "./invoke-tool";
 import { ProviderError, type GenerateResponse, type LlmProvider } from "./llm-provider";
 import { toolDefinitions } from "./tool-schemas";
@@ -24,7 +24,7 @@ export interface RunAgentTurnInput {
   readonly fallbackProvider?: LlmProvider;
   readonly history: readonly ChatMessage[];
   readonly userMessage: string;
-  readonly world: CollectionsWorld;
+  readonly world: SupportWorld;
   readonly memory: readonly MemoryFact[];
   readonly customerId: string;
   readonly today: IsoDate;
@@ -50,7 +50,7 @@ export interface RunAgentTurnResult {
   readonly newMessages: readonly ChatMessage[];
   readonly toolCalls: readonly ToolCallTrace[];
   readonly steps: readonly StepTrace[];
-  readonly world: CollectionsWorld;
+  readonly world: SupportWorld;
   readonly memory: readonly MemoryFact[];
   /** Hechos que se enviaron al modelo como memoria de largo plazo. */
   readonly recalled: readonly MemoryFact[];
@@ -189,11 +189,11 @@ export async function runAgentTurn(input: RunAgentTurnInput): Promise<RunAgentTu
         content: toolResultContent(invoked.trace),
         isError: invoked.trace.status !== "ok",
       });
-      if (invoked.trace.status === "ok" && use.name === "register_payment_promise" && invoked.trace.result) {
-        const r = invoked.trace.result as { amount: string; date: string };
+      if (invoked.trace.status === "ok" && use.name === "schedule_return" && invoked.trace.result) {
+        const r = invoked.trace.result as { orderId: string; pickupDate: string };
         memory = rememberFact(
           memory,
-          promiseFact(factIdGenerator(memory)(), customerId, today, r.date, r.amount),
+          returnFact(factIdGenerator(memory)(), customerId, today, r.pickupDate, r.orderId),
         );
       }
     }

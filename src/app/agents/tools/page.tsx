@@ -17,9 +17,9 @@ export default function ToolSimulatorPage() {
       <header className="mb-5">
         <h1 className="text-foreground text-2xl font-bold tracking-tight">Tool Calling Simulator</h1>
         <p className="text-muted mt-1 max-w-3xl">
-          Invocá las ocho herramientas del agente de cobranzas como lo haría un modelo. Las herramientas son
-          simuladas sobre datos ficticios, pero las validaciones y reglas de negocio son las mismas que usa el
-          agente.
+          Invocá las ocho herramientas del agente de atención al cliente como lo haría un modelo. Las
+          herramientas son simuladas sobre datos ficticios, pero las validaciones y reglas de negocio son las
+          mismas que usa el agente.
         </p>
       </header>
       <ToolSimulator />

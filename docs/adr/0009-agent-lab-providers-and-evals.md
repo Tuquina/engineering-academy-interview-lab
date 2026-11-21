@@ -22,9 +22,11 @@ Las reglas que condicionan el diseño:
   (`text`, `tool_use`, `tool_result`). El loop (`runAgentTurn`) vive en la capa de aplicación: arma el contexto,
   aplica timeout, reintentos con backoff y fallback, valida y ejecuta herramientas y registra trazas. Así la misma
   lógica, con sus límites, funciona con el proveedor local o con uno real.
-- Las herramientas son **funciones puras** sobre un mundo de cobranzas ficticio (`CollectionsWorld`). Cada llamada
+- Las herramientas son **funciones puras** sobre un mundo ficticio de atención al cliente de un comercio electrónico (`SupportWorld`: pedidos, pagos,
+  devoluciones, reclamos). Hasta noviembre de 2026 el mundo era de cobranzas; se cambió para no concentrar los
+  ejemplos de la plataforma en un solo dominio (`docs/plans/dominios-variados.md`). Cada llamada
   pasa por tres barreras, en orden: herramienta habilitada para el agente → esquema Zod de los argumentos → reglas de
-  negocio y políticas (plazo de promesa, horario, disputas, cliente de la sesión). La traza guarda argumentos,
+  negocio y políticas (plazo de devolución y de retiro, horario, cargos no reconocidos, cliente de la sesión). La traza guarda argumentos,
   validación, resultado, error, estado anterior y posterior, cambios y tiempo.
 - El mundo y el loop corren en el **navegador**: los datos son ficticios y no hace falta un servidor para practicar.
 

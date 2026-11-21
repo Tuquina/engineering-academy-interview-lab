@@ -77,19 +77,20 @@ lección cubre los patrones y, sobre todo, **sus límites**.
 El patrón más común: la aplicación consulta la caché; si no está, va a la fuente y la guarda.
 
 ```ts
-export async function getAgentConfig(tenantId: string, agentId: string): Promise<AgentConfig> {
-  const key = `tenant:${tenantId}:agent:${agentId}:config:v3`; // tenant y versión del formato en la clave
+// Ficha de un hotel en un sitio de reservas: se lee mucho más de lo que se modifica.
+export async function getHotelPage(chainId: string, hotelId: string): Promise<HotelPage> {
+  const key = `chain:${chainId}:hotel:${hotelId}:page:v3`; // cadena y versión del formato en la clave
   const cached = await redis.get(key);
-  if (cached) return AgentConfigSchema.parse(JSON.parse(cached)); // validar también lo que viene de la caché
+  if (cached) return HotelPageSchema.parse(JSON.parse(cached)); // validar también lo que viene de la caché
 
-  const config = await agentConfigRepository.getPublished(tenantId, agentId); // fuente de verdad
-  await redis.set(key, JSON.stringify(config), { EX: 300 + Math.floor(Math.random() * 60) }); // TTL con jitter
-  return config;
+  const page = await hotelRepository.getPage(chainId, hotelId); // fuente de verdad
+  await redis.set(key, JSON.stringify(page), { EX: 300 + Math.floor(Math.random() * 60) }); // TTL con jitter
+  return page;
 }
 
-export async function publishAgentConfig(tenantId: string, agentId: string, config: AgentConfig) {
-  await agentConfigRepository.publish(tenantId, agentId, config);
-  await redis.del(`tenant:${tenantId}:agent:${agentId}:config:v3`); // invalidar después de escribir
+export async function updateHotel(chainId: string, hotelId: string, changes: HotelChanges) {
+  await hotelRepository.update(chainId, hotelId, changes);
+  await redis.del(`chain:${chainId}:hotel:${hotelId}:page:v3`); // invalidar después de escribir
 }
 ```
 
@@ -124,8 +125,9 @@ sequenceDiagram
 
 Se combina casi siempre **borrar al escribir + TTL** como red de seguridad. Se **borra** en lugar de escribir el
 valor nuevo para reducir carreras entre escrituras concurrentes. Y se decide **qué tan viejo puede estar** cada dato:
-la configuración de un agente puede tolerar minutos; el saldo de una deuda, nada (no se cachea, o se cachea con
-invalidación precisa).
+la descripción y las fotos de un hotel pueden tolerar minutos; la disponibilidad al confirmar una reserva o el saldo
+de una billetera, nada
+(no se cachea, o se cachea con invalidación precisa).
 
 ## Cache stampede
 
@@ -163,7 +165,7 @@ Con varias réplicas, el contador debe estar en un **almacén compartido**. Redi
 operaciones son atómicas y rápidas.
 
 ```ts
-// Ventana fija: máximo `limit` envíos por deudor por hora
+// Ventana fija: máximo `limit` SMS de verificación por usuario por hora
 export async function allowFixedWindow(key: string, limit: number, windowSeconds: number): Promise<boolean> {
   const windowKey = `${key}:${Math.floor(Date.now() / 1000 / windowSeconds)}`;
   const [count] = await redis.multi().incr(windowKey).expire(windowKey, windowSeconds).exec();
@@ -211,7 +213,7 @@ base** dentro de la misma transacción (curso de PostgreSQL). Redis complementa;
 
 ## Locks distribuidos
 
-Un lock evita que dos procesos hagan la misma tarea a la vez (procesar la misma conversación, correr el mismo job):
+Un lock evita que dos procesos hagan la misma tarea a la vez (liquidar dos veces el mismo viaje, correr el mismo job nocturno):
 
 ```ts
 import { randomUUID } from "node:crypto";
@@ -297,7 +299,7 @@ export async function withLock<T>(
 
 <KnowledgeCheck
   id="redis.patterns.q1"
-  question="La configuración de agentes se cachea con TTL de 300 s exactos. Cada 5 minutos la base recibe un pico de cientos de consultas iguales. ¿Qué pasa y qué hacés?"
+  question="La ficha de un hotel muy visitado se cachea con TTL de 300 s exactos. Cada 5 minutos la base recibe un pico de cientos de consultas iguales. ¿Qué pasa y qué hacés?"
   options={[
     {
       text: "Es normal: subir el tamaño de la base.",
