@@ -27,7 +27,7 @@ references:
   - title: "OWASP — API Security Top 10 (2023)"
     url: "https://owasp.org/API-Security/editions/2023/en/0x11-t10/"
 interviewQuestions:
-  - question: "¿Qué modelo de tenancy elegirías para una plataforma de agentes de cobranzas?"
+  - question: "¿Qué modelo de tenancy elegirías para un SaaS de turnos e historias clínicas usado por cientos de clínicas?"
     keyPoints:
       - "Por defecto, base compartida con tenant_id en cada tabla, filtros obligatorios y Row Level Security: bajo costo y operación simple."
       - "Base o esquema dedicado para clientes con requisitos regulatorios, residencia de datos o volumen muy grande (modelo híbrido)."
@@ -50,11 +50,12 @@ summary:
 
 ## ¿Qué problema resuelve?
 
-Una plataforma de agentes de cobranzas atiende a decenas de empresas (bancos, fintechs, retailers) que **compiten
-entre sí** y confían a la plataforma datos personales y financieros de sus clientes. El requisito número uno es que
-**ninguna empresa pueda ver datos de otra bajo ninguna circunstancia**. Y además: que la campaña gigante de un banco
-no deje sin servicio a una fintech chica, que cada cliente tenga su configuración y que se pueda saber cuánto cuesta
-atender a cada uno. Este es el diseño de una **plataforma multi-tenant**.
+Un SaaS de turnos e historias clínicas atiende a cientos de clínicas y consultorios que **compiten entre sí** y le
+confían datos de salud de sus pacientes. El requisito número uno es que **ninguna clínica pueda ver datos de otra bajo
+ninguna circunstancia**. Y además: que la carga masiva de turnos de una red hospitalaria no deje sin servicio a un
+consultorio chico, que cada clínica tenga su configuración y que se pueda saber cuánto cuesta atender a cada una. El
+mismo problema aparece en un SaaS para escuelas (alumnos y calificaciones de cada institución) o en una plataforma de
+tiendas online (catálogo y pedidos de cada comercio). Este es el diseño de una **plataforma multi-tenant**.
 
 ## Modelos de tenancy
 
@@ -97,10 +98,10 @@ requieren (y lo pagan). Para eso, el código debe **resolver la conexión a part
 
 Los lugares donde más se olvida el tenant:
 
-- **Claves de caché** (`agent:config:42` en lugar de `tenant:7:agent:42:config`).
+- **Claves de caché** (`patient:42` en lugar de `tenant:7:patient:42`).
 - **Mensajes de colas** y eventos sin `tenantId`, procesados por workers que no lo verifican.
 - **Archivos** en almacenamiento de objetos con rutas o permisos compartidos.
-- **Índices vectoriales y RAG** sin filtro por tenant (el agente cita la política de otra empresa).
+- **Índices vectoriales y RAG** sin filtro por tenant (el asistente cita el protocolo de otra clínica).
 - **Logs y herramientas internas** (un panel de soporte que permite buscar en todos los tenants sin auditoría).
 - **Jobs de mantenimiento** que recorren datos de todos los tenants.
 
@@ -114,7 +115,7 @@ En recursos compartidos, un tenant con mucha actividad puede degradar a todos.
 | Recurso compartido         | Mecanismo de aislamiento                                                                 |
 | -------------------------- | ---------------------------------------------------------------------------------------- |
 | API                        | Rate limiting por tenant (y por plan)                                                    |
-| Workers de campañas        | Colas o particiones por tenant; concurrencia máxima por tenant; reparto justo            |
+| Workers de recordatorios   | Colas o particiones por tenant; concurrencia máxima por tenant; reparto justo            |
 | Cuota del proveedor de LLM | Presupuesto de tokens y concurrencia por tenant                                          |
 | Base de datos              | Límites de consultas pesadas, réplicas para reportes, base dedicada para los más grandes |
 | Proveedores de mensajería  | Rate limits por tenant y por número emisor                                               |
@@ -125,7 +126,7 @@ lugar de FIFO global.
 
 ## Identidad y autorización
 
-- **Usuarios de cada tenant** (operadores, supervisores, administradores): roles por tenant; un mismo usuario podría
+- **Usuarios de cada tenant** (médicos, recepción, administradores): roles por tenant; un mismo usuario podría
   pertenecer a varios tenants con roles distintos.
 - **Usuarios de la plataforma** (soporte interno): acceso a datos de clientes **excepcional, justificado, temporal y
   auditado**.
@@ -135,7 +136,7 @@ lugar de FIFO global.
 
 ## Seguridad de APIs para clientes
 
-Los clientes integran sus sistemas (CRM, core bancario) con la plataforma:
+Los clientes integran sus sistemas (laboratorios, prepagas, facturación) con la plataforma:
 
 | Aspecto            | Práctica                                                                                 |
 | ------------------ | ---------------------------------------------------------------------------------------- |
@@ -151,7 +152,7 @@ es el error más grave posible.
 
 ## Configuración por tenant
 
-Cada cliente configura sus agentes, plantillas, horarios, políticas de negociación y canales. Buenas prácticas:
+Cada clínica configura sus agendas, plantillas de recordatorio, horarios, políticas de cancelación y canales. Buenas prácticas:
 configuración **versionada y validada con esquemas**, cambios **auditados**, valores por defecto de la plataforma con
 **overrides** acotados por tenant, y **feature flags por tenant** para habilitar funcionalidades de forma gradual.
 
@@ -161,7 +162,7 @@ El tenant es una **dimensión de primera clase**:
 
 - Métricas de latencia, errores y uso **por tenant** (con cuidado de la cardinalidad en el sistema de métricas).
 - Logs y trazas con `tenantId` para investigar incidentes de un cliente.
-- **Costo por tenant:** tokens de LLM, mensajes enviados, almacenamiento, cómputo de campañas. Es la base del pricing,
+- **Costo por tenant:** tokens de LLM, mensajes enviados, almacenamiento, cómputo de recordatorios. Es la base del pricing,
   de la detección de abusos y de la rentabilidad de cada cliente.
 - SLOs por tier de cliente cuando los contratos lo exigen.
 
@@ -182,19 +183,19 @@ todos estos elementos.
 
 <KnowledgeCheck
   id="system-design.multi-tenant.q1"
-  question="Una plataforma con 300 tenants medianos y 2 bancos con requisitos de residencia de datos. ¿Qué modelo de tenancy es razonable?"
+  question="Un SaaS con 300 clínicas medianas y 2 redes hospitalarias con requisitos de residencia de datos. ¿Qué modelo de tenancy es razonable?"
   options={[
     {
       text: "Base dedicada para los 302 tenants.",
       explanation: "Multiplica la operación sin necesidad para la mayoría.",
     },
     {
-      text: "Híbrido: base compartida con tenant_id y RLS para la mayoría, y bases dedicadas en la región requerida para los bancos.",
+      text: "Híbrido: base compartida con tenant_id y RLS para la mayoría, y bases dedicadas en la región requerida para las redes hospitalarias.",
       correct: true,
       explanation: "Correcto. Se paga aislamiento físico sólo donde un requisito lo exige.",
     },
     {
-      text: "Todo compartido, incluidos los bancos.",
+      text: "Todo compartido, incluidas las redes hospitalarias.",
       explanation: "No cumple la residencia de datos que exigen.",
     },
   ]}
@@ -202,7 +203,7 @@ todos estos elementos.
 
 <KnowledgeCheck
   id="system-design.multi-tenant.q2"
-  question="La campaña de un tenant encola 400.000 trabajos y los demás tenants esperan horas. ¿Qué cambiás?"
+  question="La carga masiva de recordatorios de un tenant encola 400.000 trabajos y los demás tenants esperan horas. ¿Qué cambiás?"
   options={[
     {
       text: "Más workers.",
@@ -214,7 +215,7 @@ todos estos elementos.
       explanation: "Correcto. Es la mitigación del noisy neighbor en el procesamiento asíncrono.",
     },
     {
-      text: "Prohibir campañas grandes.",
+      text: "Prohibir cargas grandes.",
       explanation: "Limita el negocio en lugar de diseñar el aislamiento.",
     },
   ]}
@@ -222,7 +223,7 @@ todos estos elementos.
 
 <KnowledgeCheck
   id="system-design.multi-tenant.q3"
-  question="El agente de un tenant cita una política de pagos de otra empresa cliente. ¿Dónde está el fallo más probable?"
+  question="El asistente de una clínica cita el protocolo de cancelaciones de otra clínica cliente. ¿Dónde está el fallo más probable?"
   options={[
     { text: "En el modelo de lenguaje.", explanation: "El modelo usa lo que recibe en el contexto." },
     {

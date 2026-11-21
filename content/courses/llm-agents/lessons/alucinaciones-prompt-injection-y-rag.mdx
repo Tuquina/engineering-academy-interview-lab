@@ -65,15 +65,15 @@ políticas, contratos y preguntas frecuentes que no entran (ni conviene meter) e
 ## Alucinaciones
 
 Un LLM genera texto **plausible** según los patrones que aprendió; no verifica hechos contra una fuente. Cuando no
-tiene la información, puede completarla con algo que "suena bien": un interés del 3 % mensual, una ley que no existe,
-un plazo inventado.
+tiene la información, puede completarla con algo que "suena bien": una comisión del 1 % por transferencia que la billetera no cobra, una
+ley que no existe, un plazo de acreditación inventado.
 
 | Mitigación                                     | Cómo                                                                             |
 | ---------------------------------------------- | -------------------------------------------------------------------------------- |
 | Dar los datos en lugar de esperar que los sepa | Herramientas para datos de negocio; RAG para políticas y documentos              |
 | Permitir explícitamente decir "no sé"          | "Si la información no está en las fuentes, decí que lo vas a consultar y escalá" |
 | Pedir citas                                    | Respuestas apoyadas en fragmentos identificables de las fuentes                  |
-| Validar en código                              | Montos, fechas y planes se comparan con el sistema antes de mostrarse            |
+| Validar en código                              | Montos, comisiones y fechas se comparan con el sistema antes de mostrarse        |
 | Medir                                          | Evaluaciones de _groundedness_ (fidelidad a las fuentes) en el módulo de evals   |
 
 ## Prompt injection
@@ -145,7 +145,7 @@ fragmento relevante y se le da como contexto.
   chart={`
 flowchart TB
   subgraph IDX["Indexación"]
-    D1["Documentos del tenant<br/>políticas, FAQ, contratos"] --> D2["Chunking<br/>fragmentos con contexto"]
+    D1["Documentos del tenant<br/>comisiones, límites de transferencia, FAQ"] --> D2["Chunking<br/>fragmentos con contexto"]
     D2 --> D3["Embeddings"]
     D3 --> D4["Índice vectorial<br/>+ metadatos: tenant, fuente, vigencia"]
   end
@@ -171,7 +171,7 @@ SELECT id, source_title, content, 1 - (embedding <=> $1) AS similarity
 
 ### Decisiones que definen la calidad
 
-- **Chunking:** fragmentos demasiado chicos pierden contexto ("el plazo es de 30 días", ¿plazo de qué?); demasiado
+- **Chunking:** fragmentos demasiado chicos pierden contexto ("el plazo es de 30 días", ¿plazo de qué: de un reembolso, de una transferencia, de un reclamo?); demasiado
   grandes diluyen la relevancia. Se divide por estructura (secciones) y se agrega contexto al fragmento (título del
   documento y sección). Anthropic publicó una técnica, _contextual retrieval_, que antepone a cada fragmento una
   breve descripción generada de su contexto.

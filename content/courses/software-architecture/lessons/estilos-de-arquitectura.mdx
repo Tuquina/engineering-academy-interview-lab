@@ -101,9 +101,9 @@ flowchart LR
   Q["Consumidor de cola<br/>adaptador de entrada"] --> UC
   T["Tests"] --> UC
   UC --> DOM["Dominio<br/>entidades y reglas"]
-  UC --> PO["Puertos de salida<br/>DebtRepository, LlmClient, Notifier"]
-  PG["PostgresDebtRepository"] -.->|"implementa"| PO
-  AN["AnthropicLlmClient"] -.->|"implementa"| PO
+  UC --> PO["Puertos de salida<br/>ShipmentRepository, CarrierClient, Notifier"]
+  PG["PostgresShipmentRepository"] -.->|"implementa"| PO
+  AN["CorreoRapidoCarrierClient"] -.->|"implementa"| PO
   SMS["SmsNotifier"] -.->|"implementa"| PO
 `}
 />
@@ -162,7 +162,7 @@ dimensión.
     { title: "Fachada o proxy", detail: "Todas las requests pasan por un punto que decide a dónde ir." },
     {
       title: "Extraer una funcionalidad",
-      detail: "El sistema nuevo implementa una parte (por ejemplo, promesas de pago).",
+      detail: "El sistema nuevo implementa una parte (por ejemplo, el cálculo de tarifas de envío).",
     },
     {
       title: "Anti-Corruption Layer",
@@ -182,8 +182,8 @@ dimensión.
 - **Strangler Fig:** en lugar de una reescritura completa (que suele fracasar), se reemplaza funcionalidad por
   funcionalidad detrás de una fachada.
 - **Anti-Corruption Layer:** una capa de traducción entre el modelo del sistema legado (o de un proveedor externo) y el
-  modelo propio, para que sus conceptos y nombres no se filtren. En una plataforma de cobranzas, la integración con el
-  CRM de cada cliente es un caso típico.
+  modelo propio, para que sus conceptos y nombres no se filtren. En una plataforma logística, la integración con el
+  sistema de cada transportista es un caso típico.
 
 ## Comparación con C# y Java
 
@@ -210,7 +210,7 @@ barrera, los límites se verifican con **herramientas o tests de arquitectura**,
 
 <KnowledgeCheck
   id="software-architecture.architecture-styles.q1"
-  question="En una arquitectura hexagonal, ¿quién define la interfaz `DebtRepository`?"
+  question="En una arquitectura hexagonal, ¿quién define la interfaz `ShipmentRepository`?"
   options={[
     {
       text: "El adaptador de PostgreSQL.",
@@ -250,7 +250,7 @@ barrera, los límites se verifican con **herramientas o tests de arquitectura**,
 
 <KnowledgeCheck
   id="software-architecture.architecture-styles.q3"
-  question="Hay que reemplazar un sistema legado de gestión de deudas que sigue en uso. ¿Cuál es el enfoque más seguro?"
+  question="Hay que reemplazar un sistema legado de gestión de envíos que sigue en uso. ¿Cuál es el enfoque más seguro?"
   options={[
     {
       text: "Reescribir todo y cambiar en un solo corte.",

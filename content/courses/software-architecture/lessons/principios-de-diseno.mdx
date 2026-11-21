@@ -31,7 +31,7 @@ references:
 interviewQuestions:
   - question: "Explicá los principios SOLID con ejemplos."
     keyPoints:
-      - "S: una razón para cambiar por módulo (separar cálculo de cuotas de envío de notificaciones)."
+      - "S: una razón para cambiar por módulo (separar el cálculo de disponibilidad de una agenda del envío de recordatorios)."
       - "O: extender comportamiento sin modificar lo existente (estrategias de canal nuevas)."
       - "L: un subtipo debe poder reemplazar al tipo base sin romper contratos."
       - "I: interfaces chicas y específicas; D: depender de abstracciones definidas por el núcleo."
@@ -40,7 +40,7 @@ interviewQuestions:
       - "Un grupo de entidades y value objects que se modifica como una unidad y protege sus invariantes."
       - "Tiene una raíz por la que se accede; desde afuera se referencia por ID."
       - "Una transacción modifica un solo agregado; la consistencia entre agregados es eventual (eventos)."
-      - "Ejemplo: Debt con sus promesas de pago; la regla de una sola promesa activa vive en el agregado."
+      - "Ejemplo: Schedule (la agenda de un profesional) con sus turnos; la regla de no superponer turnos vive en el agregado."
   - question: "¿Cuándo aplicar DRY puede ser un error?"
     keyPoints:
       - "Cuando se unifica código que se parece por casualidad pero representa conceptos distintos."
@@ -58,21 +58,21 @@ summary:
 
 ## ¿Qué problema resuelve?
 
-Un sistema de cobranzas cambia todo el tiempo: reglas de negociación por cliente, nuevos canales, nuevas normativas,
-nuevos proveedores de pagos y de modelos. Los principios de diseño existen para que **esos cambios sean baratos y
-localizados**: que agregar WhatsApp no obligue a tocar el cálculo de cuotas, y que cambiar el proveedor de LLM no
-toque las reglas de negocio. Esta lección presenta los principios clásicos **con criterio**: cuándo ayudan y cuándo
+El sistema de turnos de una red de clínicas cambia todo el tiempo: reglas de agenda por profesional, nuevos canales de
+recordatorio, nuevas normativas, nuevas prepagas y proveedores de pagos. Los principios de diseño existen para que
+**esos cambios sean baratos y localizados**: que agregar WhatsApp no obligue a tocar el cálculo de disponibilidad, y
+que cambiar el proveedor de SMS no toque las reglas de la agenda. Esta lección presenta los principios clásicos **con criterio**: cuándo ayudan y cuándo
 se convierten en ceremonia.
 
 ## SOLID
 
-| Principio                 | Idea                                                            | Ejemplo en cobranzas                                                                |
-| ------------------------- | --------------------------------------------------------------- | ----------------------------------------------------------------------------------- |
-| **S**ingle Responsibility | Un módulo tiene una sola razón para cambiar                     | El cálculo de un plan de cuotas no sabe nada de cómo se envía un mensaje            |
-| **O**pen/Closed           | Abierto a extensión, cerrado a modificación                     | Agregar un canal (RCS) implementando `Notifier`, sin tocar el orquestador           |
-| **L**iskov Substitution   | Un subtipo puede reemplazar al tipo base sin romper el contrato | Un `Notifier` que "a veces no envía y no avisa" rompe a quien confía en el contrato |
-| **I**nterface Segregation | Interfaces chicas y específicas                                 | `DebtReader` y `DebtWriter` en lugar de un `DebtService` con 30 métodos             |
-| **D**ependency Inversion  | Los módulos de alto nivel dependen de abstracciones             | El caso de uso depende de `PaymentGateway`, no del SDK del proveedor                |
+| Principio                 | Idea                                                            | Ejemplo en una red de clínicas                                                          |
+| ------------------------- | --------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| **S**ingle Responsibility | Un módulo tiene una sola razón para cambiar                     | El cálculo de disponibilidad de la agenda no sabe nada de cómo se envía un recordatorio |
+| **O**pen/Closed           | Abierto a extensión, cerrado a modificación                     | Agregar un canal (RCS) implementando `Notifier`, sin tocar el orquestador               |
+| **L**iskov Substitution   | Un subtipo puede reemplazar al tipo base sin romper el contrato | Un `Notifier` que "a veces no envía y no avisa" rompe a quien confía en el contrato     |
+| **I**nterface Segregation | Interfaces chicas y específicas                                 | `ScheduleReader` y `ScheduleWriter` en lugar de un `ScheduleService` con 30 métodos     |
+| **D**ependency Inversion  | Los módulos de alto nivel dependen de abstracciones             | El caso de uso depende de `PaymentGateway`, no del SDK del proveedor                    |
 
 ```ts
 // Open/Closed + Dependency Inversion: el orquestador depende de una abstracción
@@ -98,8 +98,8 @@ sin beneficio. La pregunta útil es "¿esto va a cambiar por razones distintas?"
 ## DRY, KISS y YAGNI
 
 - **DRY** (_Don't Repeat Yourself_): cada **conocimiento** del sistema tiene una única representación. La regla de
-  "monto mínimo de cuota" vive en un solo lugar. Ojo: DRY trata de **conocimiento**, no de texto. Dos funciones que
-  se parecen pero representan conceptos distintos (un recordatorio de pago y un aviso legal) no deben unificarse: van
+  "duración mínima de un turno" vive en un solo lugar. Ojo: DRY trata de **conocimiento**, no de texto. Dos funciones que
+  se parecen pero representan conceptos distintos (un recordatorio de turno y un aviso legal de consentimiento) no deben unificarse: van
   a cambiar por motivos distintos. **La duplicación es más barata que la abstracción equivocada.**
 - **KISS** (_Keep It Simple_): la solución más simple que cumple los requisitos. Un `switch` claro puede ser mejor que
   una jerarquía de estrategias.
@@ -121,9 +121,9 @@ flowchart LR
     Y <--> U
   end
   subgraph GOOD["Alta cohesión, bajo acoplamiento"]
-    P["payments<br/>pagos y conciliación"] --> D["debts<br/>API pública"]
+    P["payments<br/>copagos y conciliación"] --> D["appointments<br/>API pública"]
     N["notifications<br/>canales y plantillas"] --> D
-    A["agents<br/>conversación"] --> D
+    A["patients<br/>historia y datos"] --> D
     A --> N
   end
 `}
@@ -159,12 +159,12 @@ todavía más natural que en C# o Java.
 - **Composition root**: el único lugar donde se crean las implementaciones concretas y se conectan.
 
 ```ts
-// infrastructure/composition/collections.ts: el único lugar que conoce las implementaciones
-export function createCollectionsModule(deps: { db: Database; smsClient: SmsClient; clock: Clock }) {
-  const debts = new PostgresDebtRepository(deps.db);
+// infrastructure/composition/appointments.ts: el único lugar que conoce las implementaciones
+export function createAppointmentsModule(deps: { db: Database; smsClient: SmsClient; clock: Clock }) {
+  const schedules = new PostgresScheduleRepository(deps.db);
   const notifier = withRetry(new SmsNotifier(deps.smsClient), { maxAttempts: 3 });
   return {
-    registerPromise: new RegisterPaymentPromise(debts, deps.clock),
+    bookAppointment: new BookAppointment(schedules, deps.clock),
     dispatchReminder: new ReminderDispatcher(new Map([["sms", notifier]])),
   };
 }
@@ -205,36 +205,38 @@ HTTP, la lógica está mal ubicada.
 
 **DDD** propone que la estructura del software refleje el **dominio** del negocio, trabajando con los expertos.
 
-| Concepto          | Qué es                                                                  | Ejemplo en cobranzas                                    |
-| ----------------- | ----------------------------------------------------------------------- | ------------------------------------------------------- |
-| Lenguaje ubicuo   | Los mismos términos en el código y en las conversaciones con el negocio | "Promesa de pago", "quita", "cartera", "mora"           |
-| Bounded context   | Un límite dentro del cual un modelo y su lenguaje son consistentes      | "Deuda" en Cobranzas no es lo mismo que en Contabilidad |
-| Entidad           | Objeto con identidad que persiste en el tiempo                          | `Debt`, `Customer`                                      |
-| Value object      | Objeto definido por sus valores, inmutable                              | `Money`, `DateRange`, `PhoneNumber`                     |
-| Agregado          | Grupo que se modifica como unidad y protege invariantes, con una raíz   | `Debt` con sus `PaymentPromise`                         |
-| Evento de dominio | Algo relevante que ocurrió                                              | `PaymentPromiseRegistered`, `PaymentReceived`           |
+| Concepto          | Qué es                                                                  | Ejemplo en una red de clínicas                              |
+| ----------------- | ----------------------------------------------------------------------- | ----------------------------------------------------------- |
+| Lenguaje ubicuo   | Los mismos términos en el código y en las conversaciones con el negocio | "Turno", "sobreturno", "agenda", "prestación"               |
+| Bounded context   | Un límite dentro del cual un modelo y su lenguaje son consistentes      | "Paciente" en Turnos no es lo mismo que en Facturación      |
+| Entidad           | Objeto con identidad que persiste en el tiempo                          | `Appointment`, `Patient`                                    |
+| Value object      | Objeto definido por sus valores, inmutable                              | `Money`, `DateRange`, `PhoneNumber`                         |
+| Agregado          | Grupo que se modifica como unidad y protege invariantes, con una raíz   | `Schedule` (agenda de un profesional) con sus `Appointment` |
+| Evento de dominio | Algo relevante que ocurrió                                              | `AppointmentBooked`, `AppointmentCancelled`                 |
 
 ```ts
-/** Agregado Debt: la regla 'una sola promesa activa' vive acá, no en el handler ni en el repositorio. */
-export class Debt {
+/** Agregado Schedule: la regla 'no hay dos turnos superpuestos' vive acá, no en el handler ni en el repositorio. */
+export class Schedule {
   private constructor(
-    readonly id: DebtId,
-    private balance: Money,
-    private promises: PaymentPromise[],
+    readonly id: ScheduleId,
+    private readonly workingHours: WorkingHours,
+    private appointments: Appointment[],
   ) {}
 
-  registerPromise(promise: NewPromise, today: LocalDate): Result<DomainEvent, PromiseError> {
-    if (this.promises.some((p) => p.isActive())) return err({ kind: "active_promise_exists" });
-    if (promise.amount.greaterThan(this.balance)) return err({ kind: "amount_exceeds_balance" });
-    if (promise.date.isBefore(today)) return err({ kind: "date_in_past" });
-    this.promises.push(PaymentPromise.create(promise));
-    return ok({ type: "PaymentPromiseRegistered", debtId: this.id, ...promise });
+  book(request: NewAppointment, now: Instant): Result<DomainEvent, BookingError> {
+    if (request.slot.startsBefore(now)) return err({ kind: "slot_in_past" });
+    if (!this.workingHours.contains(request.slot)) return err({ kind: "outside_working_hours" });
+    if (this.appointments.some((a) => a.isActive() && a.slot.overlaps(request.slot))) {
+      return err({ kind: "slot_taken" });
+    }
+    this.appointments.push(Appointment.create(request));
+    return ok({ type: "AppointmentBooked", scheduleId: this.id, ...request });
   }
 }
 ```
 
 Regla clave de los agregados: **una transacción modifica un solo agregado**; la consistencia entre agregados
-(registrar un pago y actualizar las métricas de la campaña) se logra con **eventos**, de forma eventual.
+(cobrar el copago y actualizar las estadísticas de ocupación) se logra con **eventos**, de forma eventual.
 
 ## Comparación con C# y Java
 
@@ -279,7 +281,7 @@ Regla clave de los agregados: **una transacción modifica un solo agregado**; la
 
 <KnowledgeCheck
   id="software-architecture.principles.q2"
-  question="El texto de un recordatorio de pago y el de un aviso legal se parecen mucho. ¿Los unificás en una sola función?"
+  question="El texto de un recordatorio de turno y el de un aviso legal se parecen mucho. ¿Los unificás en una sola función?"
   options={[
     {
       text: "Sí, DRY lo exige.",
@@ -299,14 +301,14 @@ Regla clave de los agregados: **una transacción modifica un solo agregado**; la
 
 <KnowledgeCheck
   id="software-architecture.principles.q3"
-  question="¿Dónde debería vivir la regla 'una deuda tiene a lo sumo una promesa activa'?"
+  question="¿Dónde debería vivir la regla 'la agenda de un profesional no tiene dos turnos superpuestos'?"
   options={[
     {
       text: "En el handler HTTP.",
       explanation: "Otros puntos de entrada (el agente, un worker) la saltearían.",
     },
     {
-      text: "En el agregado Debt (y como constraint en la base como red de seguridad).",
+      text: "En el agregado Schedule (y como constraint de exclusión en la base como red de seguridad).",
       correct: true,
       explanation: "Correcto. El agregado protege sus invariantes; la base lo garantiza ante concurrencia.",
     },

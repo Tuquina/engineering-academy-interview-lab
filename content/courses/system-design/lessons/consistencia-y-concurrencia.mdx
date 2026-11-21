@@ -2,7 +2,7 @@
 id: system-design.consistency
 moduleId: system-design.consistency
 title: "Consistencia en sistemas distribuidos: CAP, consistencia fuerte y eventual, idempotencia, carreras y locks"
-description: "Cómo razonar sobre datos que viven en varios lugares: el teorema CAP y PACELC sin mitos, modelos de consistencia (fuerte, eventual, read-your-writes), dónde necesita consistencia fuerte una plataforma de cobranzas y dónde no, idempotencia de punta a punta, race conditions entre servicios y locks distribuidos con sus límites."
+description: "Cómo razonar sobre datos que viven en varios lugares: el teorema CAP y PACELC sin mitos, modelos de consistencia (fuerte, eventual, read-your-writes), dónde necesita consistencia fuerte un sistema de reservas y dónde no, idempotencia de punta a punta, race conditions entre servicios y locks distribuidos con sus límites."
 difficulty: advanced
 order: 1
 objectives:
@@ -34,9 +34,9 @@ interviewQuestions:
       - "Sin partición, no hay que elegir entre C y A; PACELC agrega que en ese caso se elige entre latencia y consistencia."
       - "No es 'elegir 2 de 3' en general: las particiones no son opcionales."
       - "La elección se hace por operación: un pago necesita consistencia; un contador de vistas tolera eventualidad."
-  - question: "¿Qué datos de una plataforma de cobranzas necesitan consistencia fuerte?"
+  - question: "¿Qué datos de un sistema de reservas de hotel necesitan consistencia fuerte?"
     keyPoints:
-      - "Saldos, pagos aplicados, promesas vigentes, acuerdos, opt-outs y consentimiento."
+      - "Disponibilidad al confirmar, reservas confirmadas, pagos aplicados, cancelaciones y consentimientos."
       - "Métricas, dashboards, búsquedas y resúmenes toleran consistencia eventual."
       - "La consistencia fuerte se concentra en una base transaccional; lo demás se deriva por eventos."
   - question: "¿Cómo garantizás que un pago no se aplique dos veces de punta a punta?"
@@ -57,8 +57,9 @@ summary:
 ## ¿Qué problema resuelve?
 
 En cuanto los datos viven en más de un lugar (una base y su réplica, una caché, otro servicio, el sistema del
-proveedor de pagos), aparecen preguntas incómodas: el operador ve el saldo viejo porque leyó de una réplica; el agente
-dice que no hay promesa porque el evento todavía no llegó; dos servicios aplican el mismo pago. Esta lección da el
+proveedor de pagos), aparecen preguntas incómodas: el recepcionista no ve una reserva recién hecha porque leyó de una
+réplica; el sitio dice que la habitación está libre porque el evento todavía no llegó; dos servicios aplican el mismo
+pago. Esta lección da el
 vocabulario y las herramientas para decidir **qué consistencia necesita cada dato** y cómo garantizarla.
 
 ## CAP y PACELC sin mitos
@@ -92,12 +93,12 @@ flowchart TD
 
 ## Modelos de consistencia
 
-| Modelo               | Garantía                                                | Ejemplo                                              |
-| -------------------- | ------------------------------------------------------- | ---------------------------------------------------- |
-| **Fuerte (lineal)**  | Toda lectura ve la última escritura confirmada          | Leer el saldo del primario dentro de una transacción |
-| **Read-your-writes** | Quien escribió ve su propio cambio                      | El operador registra una promesa y la ve al recargar |
-| **Monotonic reads**  | Nunca se "vuelve atrás" en el tiempo entre lecturas     | No ver un pago y después dejar de verlo              |
-| **Eventual**         | Si no hay escrituras nuevas, todas las copias convergen | El dashboard refleja el pago unos segundos después   |
+| Modelo               | Garantía                                                | Ejemplo                                                            |
+| -------------------- | ------------------------------------------------------- | ------------------------------------------------------------------ |
+| **Fuerte (lineal)**  | Toda lectura ve la última escritura confirmada          | Leer la disponibilidad del primario dentro de una transacción      |
+| **Read-your-writes** | Quien escribió ve su propio cambio                      | El recepcionista registra una reserva y la ve al recargar          |
+| **Monotonic reads**  | Nunca se "vuelve atrás" en el tiempo entre lecturas     | No ver un pago y después dejar de verlo                            |
+| **Eventual**         | Si no hay escrituras nuevas, todas las copias convergen | El dashboard de ocupación refleja la reserva unos segundos después |
 
 **Read-your-writes** es el que más se olvida: si después de escribir en el primario se lee de una réplica con lag, el
 usuario no ve lo que acaba de hacer. Se resuelve leyendo del primario durante un tiempo después de escribir, o
@@ -105,13 +106,13 @@ pasando una versión mínima esperada.
 
 ## ¿Qué necesita consistencia fuerte?
 
-| Necesita consistencia fuerte                       | Tolera consistencia eventual      |
-| -------------------------------------------------- | --------------------------------- |
-| Saldo y pagos aplicados                            | Dashboards y métricas de campañas |
-| Promesa vigente y acuerdos de pago                 | Búsqueda de deudores              |
-| Opt-outs y consentimientos (cumplimiento)          | Resúmenes de conversaciones       |
-| Límites de envío por deudor (si son legales)       | Rankings de agentes               |
-| Configuración publicada de un agente (por versión) | Analítica y reportes              |
+| Necesita consistencia fuerte                   | Tolera consistencia eventual |
+| ---------------------------------------------- | ---------------------------- |
+| Disponibilidad al confirmar una reserva        | Dashboards de ocupación      |
+| Reservas confirmadas y pagos aplicados         | Búsqueda de hoteles          |
+| Cancelaciones y consentimientos (cumplimiento) | Reseñas y puntajes           |
+| Cupo de habitaciones de una tarifa promocional | Rankings de destinos         |
+| Precio confirmado al huésped                   | Analítica y reportes         |
 
 El patrón habitual: **la consistencia fuerte se concentra en una base transaccional** (fuente de verdad) y todo lo
 demás se **deriva** por eventos, con consistencia eventual y la capacidad de reconstruirse.
@@ -143,7 +144,7 @@ vez). La idempotencia tiene que existir en **cada salto**:
 />
 
 El último salto suele olvidarse: si tu worker llama a la API del proveedor de mensajería, hace timeout y reintenta, el
-deudor puede recibir dos mensajes. Muchos proveedores aceptan una clave de idempotencia o un ID de cliente para
+huésped puede recibir dos mensajes. Muchos proveedores aceptan una clave de idempotencia o un ID de cliente para
 deduplicar; si no, se registra el intento antes de llamar y se reconcilia con el estado del proveedor.
 
 ## Race conditions entre servicios
@@ -151,12 +152,12 @@ deduplicar; si no, se registra el intento antes de llamar y se reconcilia con el
 Las carreras de la lección de concurrencia (dos requests que leen y escriben el mismo dato) se agravan entre
 servicios, porque no hay una transacción común. Herramientas, de la más robusta a la menos:
 
-| Herramienta                                 | Cuándo                                                                                                     |
-| ------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| **Un solo dueño del dato**                  | Cada dato lo escribe un único servicio; los demás le piden cambios                                         |
-| **Constraints y operaciones condicionales** | `UPDATE ... WHERE version = $v`, índices únicos, `ON CONFLICT`                                             |
-| **Serializar por clave**                    | Una cola particionada por deudor: los eventos del mismo deudor se procesan en orden por un solo consumidor |
-| **Lock distribuido**                        | Coordinación de eficiencia (no duplicar trabajo), con fencing si importa la corrección                     |
+| Herramienta                                 | Cuándo                                                                                                         |
+| ------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| **Un solo dueño del dato**                  | Cada dato lo escribe un único servicio; los demás le piden cambios                                             |
+| **Constraints y operaciones condicionales** | `UPDATE ... WHERE version = $v`, índices únicos, `ON CONFLICT`                                                 |
+| **Serializar por clave**                    | Una cola particionada por reserva: los eventos de la misma reserva se procesan en orden por un solo consumidor |
+| **Lock distribuido**                        | Coordinación de eficiencia (no duplicar trabajo), con fencing si importa la corrección                         |
 
 <Callout type="warning" title="Los locks distribuidos no garantizan exclusión mutua por sí solos">
   Un lock con expiración puede vencer mientras su dueño sigue trabajando (pausa de GC, red lenta), y otro
@@ -182,7 +183,7 @@ desaparecen las carreras entre turnos de la misma conversación sin locks.
 
 <KnowledgeCheck
   id="system-design.consistency.q1"
-  question="Un operador registra una promesa de pago y, al recargar, no la ve; unos segundos después aparece. ¿Qué falta?"
+  question="Un recepcionista registra una reserva y, al recargar, no la ve; unos segundos después aparece. ¿Qué falta?"
   options={[
     {
       text: "Consistencia fuerte en todo el sistema.",
@@ -194,7 +195,7 @@ desaparecen las carreras entre turnos de la misma conversación sin locks.
       explanation: "Correcto. Probablemente lee de una réplica con lag de replicación.",
     },
     {
-      text: "Un índice en la tabla de promesas.",
+      text: "Un índice en la tabla de reservas.",
       explanation: "No es un problema de velocidad de consulta sino de qué copia se lee.",
     },
   ]}
@@ -223,7 +224,7 @@ desaparecen las carreras entre turnos de la misma conversación sin locks.
 
 <KnowledgeCheck
   id="system-design.consistency.q3"
-  question="Dos mensajes del mismo deudor llegan casi juntos y dos workers los procesan en paralelo, generando respuestas contradictorias del agente. ¿Qué diseño lo evita sin locks?"
+  question="Dos mensajes del mismo huésped llegan casi juntos y dos workers los procesan en paralelo, generando respuestas contradictorias del asistente. ¿Qué diseño lo evita sin locks?"
   options={[
     { text: "Más workers.", explanation: "Aumenta la probabilidad de procesamiento paralelo." },
     {
@@ -231,6 +232,6 @@ desaparecen las carreras entre turnos de la misma conversación sin locks.
       correct: true,
       explanation: "Correcto. El orden por clave elimina la carrera sin coordinación distribuida.",
     },
-    { text: "Ignorar el segundo mensaje.", explanation: "Se perdería información del deudor." },
+    { text: "Ignorar el segundo mensaje.", explanation: "Se perdería información del huésped." },
   ]}
 />

@@ -42,8 +42,8 @@ references:
 interviewQuestions:
   - question: "¿Cómo diseñarías el envío de 2 millones de mensajes diarios respetando los límites de los proveedores?"
     keyPoints:
-      - "La campaña genera trabajos en una cola en lugar de enviar en línea."
-      - "Workers con concurrencia limitada y rate limiting por proveedor, tenant y deudor."
+      - "El envío masivo genera trabajos en una cola en lugar de enviar en línea."
+      - "Workers con concurrencia limitada y rate limiting por proveedor, tenant y destinatario."
       - "Reintentos con backoff para errores transitorios, idempotencia por mensaje y DLQ para los que fallan siempre."
       - "Ventanas horarias legales, priorización y métricas de backlog con alertas."
   - question: "¿Qué es backpressure y cómo lo aplicarías?"
@@ -70,8 +70,8 @@ summary:
 
 ## ¿Qué problema resuelve?
 
-A las 9:00 arranca una campaña de 500.000 deudores. Al mismo tiempo, el proveedor de WhatsApp empieza a responder con
-errores y el modelo de lenguaje se pone lento. Un sistema frágil responde a esto con reintentos en cascada, colas que
+A las 9:00 una tienda online empieza a avisar a 500.000 clientes que arrancó su Black Friday. Al mismo tiempo, el
+proveedor de WhatsApp empieza a responder con errores y el modelo de lenguaje del asistente de ventas se pone lento. Un sistema frágil responde a esto con reintentos en cascada, colas que
 crecen sin control, la base saturada y, a las 9:20, todo caído. Un sistema resiliente **absorbe el pico, contiene la
 falla y se recupera solo**. Esta lección reúne los mecanismos.
 
@@ -85,8 +85,8 @@ falla y se recupera solo**. Esta lección reúne los mecanismos.
 | Fallas                | Se propagan en cadena            | Se aíslan y reintentan                              |
 | Complejidad           | Menor                            | Consistencia eventual, idempotencia, observabilidad |
 
-Regla práctica: **síncrono cuando el usuario necesita la respuesta ya** (consultar el saldo), **asíncrono para todo
-lo que puede esperar** (enviar la campaña, recalcular métricas, notificar a otros módulos).
+Regla práctica: **síncrono cuando el usuario necesita la respuesta ya** (consultar el estado de un pedido), **asíncrono para todo
+lo que puede esperar** (enviar avisos masivos, recalcular métricas, notificar a otros módulos).
 
 ## Colas y sus garantías
 
@@ -94,7 +94,7 @@ lo que puede esperar** (enviar la campaña, recalcular métricas, notificar a ot
   caption="Una cola de trabajos con reintentos y dead letter queue."
   chart={`
 flowchart LR
-  P["Productor<br/>orquestador de campaña"] --> Q["Cola de envíos"]
+  P["Productor<br/>programador de avisos"] --> Q["Cola de envíos"]
   Q --> W1["Worker 1"]
   Q --> W2["Worker 2"]
   W1 -->|"éxito: ack"| OK["Registro del resultado"]
@@ -115,7 +115,7 @@ Conceptos que aparecen en cualquier cola (SQS, RabbitMQ, BullMQ, Streams):
   por conversación).
 - **Dead letter queue:** después de N intentos, el mensaje se aparta para no bloquear ni consumir recursos para
   siempre. Una DLQ necesita **alertas y un proceso de reprocesamiento**.
-- **Retrasos y prioridades:** programar un recordatorio para dentro de 2 días, priorizar respuestas a deudores sobre
+- **Retrasos y prioridades:** programar un recordatorio para dentro de 2 días, priorizar respuestas a clientes sobre
   envíos masivos.
 
 ## Reintentos y circuit breakers
@@ -143,7 +143,7 @@ vacíe. **Backpressure** es que el componente saturado **frene a quien le envía
   steps={[
     { title: "Límites", detail: "Colas acotadas y concurrencia máxima por worker y por dependencia." },
     { title: "Señal hacia atrás", detail: "429 o 503 con Retry-After; el productor reduce el ritmo." },
-    { title: "Prioridades", detail: "Respuestas a deudores antes que envíos masivos.", tone: "runtime" },
+    { title: "Prioridades", detail: "Respuestas a clientes antes que envíos masivos.", tone: "runtime" },
     {
       title: "Load shedding",
       detail: "Si no alcanza, descartar o diferir lo menos importante.",
@@ -164,7 +164,7 @@ explora estas dinámicas.
 | -------------------- | ---------------------------------------------------------------- |
 | Borde (API gateway)  | Proteger la plataforma de abuso y clientes defectuosos           |
 | Por tenant           | Que un cliente no consuma la capacidad de todos (noisy neighbor) |
-| Por deudor           | Límites legales y de buena práctica de contactos por día         |
+| Por destinatario     | Límites legales y de buena práctica de mensajes por día          |
 | Hacia cada proveedor | Respetar sus cuotas (mensajería, LLM, pagos)                     |
 
 ## Webhooks confiables
@@ -234,7 +234,7 @@ regulatorios. Y un plan de recuperación **que nunca se probó no es un plan**: 
 
 <KnowledgeCheck
   id="system-design.messaging-resilience.q2"
-  question="La edad del mensaje más viejo de la cola crece de forma sostenida durante una campaña. ¿Qué indica?"
+  question="La edad del mensaje más viejo de la cola crece de forma sostenida durante un envío masivo. ¿Qué indica?"
   options={[
     {
       text: "Que todo funciona: la cola está absorbiendo el pico.",

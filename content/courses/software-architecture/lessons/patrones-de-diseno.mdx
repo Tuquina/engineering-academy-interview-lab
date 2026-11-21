@@ -2,13 +2,13 @@
 id: software-architecture.design-patterns
 moduleId: software-architecture.design-patterns
 title: "Patrones de diseño en TypeScript: creacionales, estructurales y de comportamiento"
-description: "Un recorrido por los patrones de diseño clásicos con ejemplos en TypeScript y del dominio de cobranzas: Factory, Builder, Adapter, Decorator, Facade, Proxy, Composite, Strategy, Observer, Mediator, Command, State, Template Method, Chain of Responsibility, Repository, Specification y Unit of Work. Para cada uno: qué problema resuelve y cuándo no usarlo."
+description: "Un recorrido por los patrones de diseño clásicos con ejemplos en TypeScript de varios dominios (comercio, viajes, pagos, logística, agentes): Factory, Builder, Adapter, Decorator, Facade, Proxy, Composite, Strategy, Observer, Mediator, Command, State, Template Method, Chain of Responsibility, Repository, Specification y Unit of Work. Para cada uno: qué problema resuelve y cuándo no usarlo."
 difficulty: intermediate
 order: 1
 objectives:
   - "Reconocer los patrones creacionales, estructurales y de comportamiento y el problema que resuelve cada uno."
   - "Implementarlos de forma idiomática en TypeScript, muchas veces con funciones en lugar de clases."
-  - "Elegir el patrón adecuado para problemas típicos de un backend de cobranzas."
+  - "Elegir el patrón adecuado para problemas típicos de un backend."
   - "Evitar aplicar patrones donde una solución más simple alcanza."
 prerequisites: ["software-architecture.principles"]
 estimatedMinutes: 50
@@ -25,10 +25,10 @@ references:
   - title: "Patterns.dev — Design patterns for JavaScript"
     url: "https://www.patterns.dev/"
 interviewQuestions:
-  - question: "¿Qué patrón usarías para que cada tenant tenga su propia política de negociación?"
+  - question: "¿Qué patrón usarías para que cada ciudad de una app de viajes tenga su propia política de tarifas?"
     keyPoints:
-      - "Strategy: una interfaz NegotiationPolicy con una implementación por tipo de política."
-      - "Se selecciona según la configuración del tenant, sin condicionales dispersos."
+      - "Strategy: una interfaz FarePolicy con una implementación por tipo de política."
+      - "Se selecciona según la configuración de la ciudad, sin condicionales dispersos."
       - "En TypeScript puede ser simplemente una función o un objeto con la misma forma."
       - "Una Factory o un registro elige la estrategia a partir de la configuración."
   - question: "¿Cuál es la diferencia entre Adapter, Decorator, Facade y Proxy?"
@@ -103,8 +103,8 @@ opcionales o para datos de prueba:
 ```ts
 const config = AgentConfigBuilder.forTenant("tnt_1")
   .withModel("claude-opus-5-5")
-  .withTools(["get_debt_summary", "register_payment_promise"])
-  .withPolicy({ maxDiscountPercent: 15 })
+  .withTools(["get_order", "schedule_return"])
+  .withPolicy({ maxCouponPercent: 15 })
   .build(); // valida con el esquema y devuelve un objeto inmutable
 ```
 
@@ -113,13 +113,13 @@ En TypeScript, un objeto literal con un esquema (Zod) muchas veces reemplaza al 
 
 ## Estructurales
 
-| Patrón        | Qué hace                                                | Ejemplo                                                     |
-| ------------- | ------------------------------------------------------- | ----------------------------------------------------------- |
-| **Adapter**   | Convierte una interfaz en otra                          | El SDK del proveedor de pagos adaptado a `PaymentGateway`   |
-| **Decorator** | Agrega comportamiento con la misma interfaz             | `withRetry`, `withAudit`, `withCache` sobre un `Notifier`   |
-| **Facade**    | Interfaz simple sobre un subsistema complejo            | `CollectionsFacade.startCampaign()` coordina varios módulos |
-| **Proxy**     | Controla el acceso al objeto real                       | Carga perezosa, control de permisos, caché transparente     |
-| **Composite** | Trata grupos y elementos individuales de la misma forma | Reglas de elegibilidad compuestas por reglas simples        |
+| Patrón        | Qué hace                                                | Ejemplo                                                    |
+| ------------- | ------------------------------------------------------- | ---------------------------------------------------------- |
+| **Adapter**   | Convierte una interfaz en otra                          | El SDK del proveedor de pagos adaptado a `PaymentGateway`  |
+| **Decorator** | Agrega comportamiento con la misma interfaz             | `withRetry`, `withAudit`, `withCache` sobre un `Notifier`  |
+| **Facade**    | Interfaz simple sobre un subsistema complejo            | `CheckoutFacade.placeOrder()` coordina stock, pago y envío |
+| **Proxy**     | Controla el acceso al objeto real                       | Carga perezosa, control de permisos, caché transparente    |
+| **Composite** | Trata grupos y elementos individuales de la misma forma | Reglas de elegibilidad compuestas por reglas simples       |
 
 ```ts
 // Adapter: el dominio habla con su puerto; el adaptador traduce al proveedor
@@ -130,7 +130,7 @@ export class AcmePaymentsAdapter implements PaymentGateway {
     const response = await this.client.checkout.sessions.create({
       amount: request.amount.cents,
       currency: request.amount.currency.toLowerCase(),
-      metadata: { debt_id: request.debtId },
+      metadata: { order_id: request.orderId },
     });
     return { url: response.url, expiresAt: new Date(response.expires_at * 1000) };
   }
@@ -149,22 +149,21 @@ export function withRetry(notifier: Notifier, options: RetryOptions): Notifier {
 
 ### Strategy
 
-Encapsula **algoritmos intercambiables** detrás de una misma interfaz. El ejemplo típico: políticas de negociación por
-tenant.
+Encapsula **algoritmos intercambiables** detrás de una misma interfaz. El ejemplo típico: la política de tarifas de una app
+de viajes, distinta en cada ciudad.
 
 ```ts
-type NegotiationPolicy = (debt: Debt, profile: DebtorProfile) => PaymentOption[];
+type FarePolicy = (trip: TripQuote, demand: DemandLevel) => Money;
 
-const POLICIES: Record<PolicyKind, NegotiationPolicy> = {
-  conservative: (debt) => [fullPayment(debt), installments(debt, 3)],
-  flexible: (debt, profile) => [
-    fullPayment(debt),
-    installments(debt, profile.hardship ? 12 : 6),
-    discount(debt, 0.1),
-  ],
+const POLICIES: Record<FarePolicyKind, FarePolicy> = {
+  flat: (trip) => baseFare(trip).plus(perKm(trip)),
+  dynamic: (trip, demand) =>
+    baseFare(trip)
+      .plus(perKm(trip))
+      .times(demand === "high" ? 1.5 : 1),
 };
 
-const options = POLICIES[tenant.policyKind](debt, profile);
+const fare = POLICIES[city.farePolicy](trip, demand);
 ```
 
 En TypeScript, una estrategia suele ser **una función**: no hace falta una clase por algoritmo.
@@ -179,12 +178,13 @@ En TypeScript, una estrategia suele ser **una función**: no hace falta una clas
 ### Command
 
 Representa una **acción como un objeto**: se puede encolar, registrar, reintentar o deshacer. Las acciones de un
-agente (`RegisterPromiseCommand`), los trabajos de una cola y los mensajes de un bus son commands.
+agente (`ScheduleReturnCommand`), los trabajos de una cola y los mensajes de un bus son commands.
 
 ### State
 
 Cambia el comportamiento según el **estado** interno, con transiciones explícitas. Las conversaciones del agente (la
-máquina de estados del curso de agentes) y el ciclo de vida de una deuda son casos de State. En TypeScript se modela
+máquina de estados del curso de agentes) y el ciclo de vida de un pedido (pagado, preparado,
+despachado, entregado) son casos de State. En TypeScript se modela
 muy bien con **discriminated unions** y funciones de transición.
 
 ### Template Method y Chain of Responsibility
@@ -208,16 +208,16 @@ export function runGuardrails(chain: readonly Guardrail[], message: OutboundMess
 
 ## Patrones de acceso a datos
 
-| Patrón            | Qué hace                                                                                        |
-| ----------------- | ----------------------------------------------------------------------------------------------- |
-| **Repository**    | Colección en memoria aparente de agregados: `findById`, `save`. Oculta la persistencia.         |
-| **Specification** | Encapsula un criterio de selección reutilizable y combinable ("deudas elegibles para campaña"). |
-| **Unit of Work**  | Agrupa los cambios de una operación y los confirma juntos (una transacción).                    |
+| Patrón            | Qué hace                                                                                                 |
+| ----------------- | -------------------------------------------------------------------------------------------------------- |
+| **Repository**    | Colección en memoria aparente de agregados: `findById`, `save`. Oculta la persistencia.                  |
+| **Specification** | Encapsula un criterio de selección reutilizable y combinable ("pedidos elegibles para envío en el día"). |
+| **Unit of Work**  | Agrupa los cambios de una operación y los confirma juntos (una transacción).                             |
 
 ```ts
-export interface DebtRepository {
-  findById(tenantId: TenantId, id: DebtId): Promise<Debt | undefined>;
-  save(tenantId: TenantId, debt: Debt): Promise<void>;
+export interface OrderRepository {
+  findById(tenantId: TenantId, id: OrderId): Promise<Order | undefined>;
+  save(tenantId: TenantId, order: Order): Promise<void>;
 }
 
 // Specification como función componible
@@ -227,7 +227,7 @@ const and =
   (item) =>
     specs.every((spec) => spec(item));
 
-const eligibleForCampaign = and<Debt>(isOverdueMoreThan(30), notOptedOut, hasNoActivePromise);
+const eligibleForSameDay = and<Order>(isPaid, weighsLessThanKg(5), isInSameDayZone);
 ```
 
 El repositorio es por **agregado**, no por tabla. Un ORM ya implementa Unit of Work (EF Core con `SaveChanges`,

@@ -25,11 +25,13 @@ const DOMAINS = {
     /\b(mensaje|mensajes|chat|notificaci[oó]n|notificaciones|plantilla)\b|\b(notification|notifier|template)\w*/gi,
   contenido:
     /\b(post|posts|feed|seguidor|seguidores|comentario|comentarios|video|videos)\b|\b(follower|feed)\w*/gi,
-  saas: /\b(tenant|tenants|organizaci[oó]n|suscripci[oó]n|suscripciones|factura|facturas)\b|\b(tenant|organization|subscription|invoice)\w*/gi,
+  // "tenant" no cuenta: multi-tenancy es un concepto técnico que aparece en cualquier dominio (y es el tema de la
+  // lección de plataformas multi-tenant), no un dominio de negocio.
+  saas: /\b(organizaci[oó]n|suscripci[oó]n|suscripciones|factura|facturas)\b|\b(organization|subscription|invoice)\w*/gi,
   educación:
     /\b(inscripci[oó]n|inscripciones|alumno|alumnos|calificaci[oó]n|certificado|estudiante|estudiantes|materia|materias)\b|\b(student|enrollment|grade|assignment|exam)\w*/gi,
   salud:
-    /\b(paciente|pacientes|historia cl[ií]nica|m[eé]dico|m[eé]dica|consultorio|turno m[eé]dico)\b|\b(patient|appointment|consultation)\w*/gi,
+    /\b(paciente|pacientes|historia cl[ií]nica|historias cl[ií]nicas|cl[ií]nica|cl[ií]nicas|hospital|hospitales|m[eé]dico|m[eé]dica|consultorio|turno m[eé]dico)\b|\b(patient|appointment|consultation)\w*/gi,
   movilidad:
     /\b(viaje|viajes|conductor|conductores|flota|pasajero|pasajeros)\b|\b(trip|driver|passenger|fare)\w*/gi,
   iot: /\b(sensor|sensores|dispositivo|dispositivos|telemetr[ií]a)\b|\b(sensor|telemetry|reading)\w*/gi,

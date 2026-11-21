@@ -118,7 +118,9 @@ rotar entre cursos.
 2. Reescritura lección por lección.
 3. **Reporte de distribución**: un script (`scripts/domain-report.mjs`, ejecutado en Docker) cuenta por lección y
    por curso los términos de cada dominio y marca los cursos que no cumplen las reglas (menos de 5 dominios o uno por
-   encima del ~30 %). El reporte se adjunta al cerrar el lote.
+   encima del ~30 %). El reporte se adjunta al cerrar el lote. Desde el lote 6, la palabra "tenant" no cuenta como dominio
+   SaaS: es el concepto técnico de multi-tenancy (y el tema de una lección de System Design), presente en cualquier
+   dominio. SaaS se detecta por suscripciones, facturas y organizaciones.
 4. Verificación (abajo), commit y push.
 
 ## Orden de trabajo (por lotes, cada uno con commit y push)

@@ -2,7 +2,7 @@
   "id": "system-design",
   "slug": "system-design",
   "title": "System Design para entrevistas",
-  "description": "Escalabilidad, consistencia, mensajería y resiliencia aplicadas a escenarios reales de cobranzas y plataformas de agentes.",
+  "description": "Escalabilidad, consistencia, mensajería y resiliencia aplicadas a escenarios reales: turnos médicos, comercio, reservas, pagos, logística y plataformas multi-tenant.",
   "areaId": "system-design",
   "difficulty": "advanced",
   "order": 1,

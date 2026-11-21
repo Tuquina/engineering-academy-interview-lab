@@ -67,15 +67,16 @@ arquitecturas.
 ## Qué es arquitectura (y qué no)
 
 Una definición útil, popularizada por Martin Fowler: la arquitectura son **las decisiones importantes**, y "importante"
-suele significar **difícil de cambiar después**. Ejemplos en una plataforma de cobranzas:
+suele significar **difícil de cambiar después**. Ejemplos en una plataforma de venta de entradas
+para recitales:
 
-| Decisión arquitectónica                            | Decisión de diseño local               |
-| -------------------------------------------------- | -------------------------------------- |
-| Monolito modular o microservicios                  | Nombre de una función                  |
-| Base compartida o base por tenant                  | Estructura de un componente de React   |
-| Comunicación síncrona o por eventos entre módulos  | Algoritmo para formatear montos        |
-| Dónde vive la lógica del agente y cómo se versiona | Un helper de fechas                    |
-| Proveedor de nube y modelo de despliegue           | Orden de los parámetros de una función |
+| Decisión arquitectónica                           | Decisión de diseño local               |
+| ------------------------------------------------- | -------------------------------------- |
+| Monolito modular o microservicios                 | Nombre de una función                  |
+| Base compartida o base por organizador            | Estructura de un componente de React   |
+| Comunicación síncrona o por eventos entre módulos | Algoritmo para formatear montos        |
+| Cómo se retienen los asientos durante el pago     | Un helper de fechas                    |
+| Proveedor de nube y modelo de despliegue          | Orden de los parámetros de una función |
 
 La arquitectura **no** es un diagrama inicial que se congela: evoluciona con el producto, el equipo y lo que se
 aprende en producción.
@@ -84,16 +85,16 @@ aprende en producción.
 
 Las decisiones se comparan con **atributos de calidad** (también llamados requisitos no funcionales):
 
-| Atributo       | Pregunta concreta en cobranzas                                           |
-| -------------- | ------------------------------------------------------------------------ |
-| Disponibilidad | ¿Qué pasa con las campañas si cae el proveedor de LLM?                   |
-| Rendimiento    | ¿El agente responde en menos de 3 segundos por WhatsApp?                 |
-| Escalabilidad  | ¿Soportamos 20 veces más conversaciones en fin de mes?                   |
-| Seguridad      | ¿Un tenant puede ver datos de otro bajo algún fallo?                     |
-| Mantenibilidad | ¿Un equipo puede cambiar las reglas de negociación sin romper los pagos? |
-| Observabilidad | ¿Podemos explicar por qué el agente dijo algo?                           |
-| Costo          | ¿Cuánto cuesta una conversación y una promesa lograda?                   |
-| Cumplimiento   | ¿Respetamos horarios de contacto y retención de datos?                   |
+| Atributo       | Pregunta concreta en una plataforma de entradas                                   |
+| -------------- | --------------------------------------------------------------------------------- |
+| Disponibilidad | ¿Qué pasa con la venta si cae el proveedor de pagos?                              |
+| Rendimiento    | ¿El mapa de asientos carga en menos de un segundo?                                |
+| Escalabilidad  | ¿Soportamos 50 veces más tráfico en el minuto en que abre la venta de un recital? |
+| Seguridad      | ¿Un organizador puede ver datos de compradores de otro bajo algún fallo?          |
+| Mantenibilidad | ¿Un equipo puede cambiar las reglas de precios sin romper los pagos?              |
+| Observabilidad | ¿Podemos explicar por qué se liberó el asiento que alguien tenía retenido?        |
+| Costo          | ¿Cuánto cuesta en infraestructura cada entrada vendida?                           |
+| Cumplimiento   | ¿Respetamos la normativa de devoluciones y la retención de datos?                 |
 
 Un atributo sólo sirve si se vuelve **medible**: "alta disponibilidad" no ayuda a decidir; "99,9 % mensual para
 recibir webhooks de pagos" sí.
@@ -112,7 +113,7 @@ flowchart LR
 />
 
 Una respuesta arquitectónica madura **nombra lo que se pierde**. "Uso microservicios porque escalan" es una respuesta
-débil; "uso un monolito modular porque el equipo es chico y las transacciones entre deudas y pagos son críticas;
+débil; "uso un monolito modular porque el equipo es chico y las transacciones entre asientos y pagos son críticas;
 acepto escalar todo junto, y dejo los límites de módulos claros para extraer un servicio si los datos lo justifican"
 es una respuesta fuerte. El comparador de arquitecturas de la plataforma (`/patterns/compare`) presenta estos
 compromisos dimensión por dimensión.
@@ -167,13 +168,17 @@ El **modelo C4** propone dibujar un sistema en cuatro niveles de zoom, cada uno 
   steps={[
     {
       title: "1. Contexto",
-      detail: "El sistema, sus usuarios y los sistemas externos (CRM del cliente, proveedor de pagos, LLM).",
+      detail:
+        "El sistema, sus usuarios y los sistemas externos (organizadores, proveedor de pagos, servicio de emails).",
     },
     {
       title: "2. Contenedores",
       detail: "Aplicaciones y almacenes: web Next.js, API, workers, PostgreSQL, Redis, cola.",
     },
-    { title: "3. Componentes", detail: "Módulos dentro de un contenedor: agentes, campañas, pagos, evals." },
+    {
+      title: "3. Componentes",
+      detail: "Módulos dentro de un contenedor: eventos, asientos, pagos, entradas.",
+    },
     { title: "4. Código", detail: "Clases y funciones; rara vez se dibuja a mano.", tone: "runtime" },
   ]}
   caption="Cada nivel responde preguntas distintas; en una entrevista, los niveles 1 y 2 suelen alcanzar."

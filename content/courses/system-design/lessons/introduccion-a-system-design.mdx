@@ -34,7 +34,7 @@ interviewQuestions:
       - "Profundizar en las partes críticas, identificar cuellos de botella y fallas, y explicar los compromisos."
   - question: "¿Qué diferencia hay entre requerimientos funcionales y no funcionales?"
     keyPoints:
-      - "Funcionales: qué hace el sistema (registrar promesas, enviar recordatorios, recibir pagos)."
+      - "Funcionales: qué hace el sistema (agendar turnos, enviar recordatorios, cobrar copagos)."
       - "No funcionales: cómo debe comportarse (latencia, disponibilidad, consistencia, seguridad, costo, cumplimiento)."
       - "Los no funcionales son los que más condicionan la arquitectura."
 summary:
@@ -49,9 +49,9 @@ summary:
 ## Qué vas a aprender en este curso
 
 System Design es la parte de la entrevista donde se evalúa si podés **diseñar un sistema completo**: desde los
-requerimientos hasta cómo se comporta cuando algo falla. Para una plataforma de agentes de cobranzas, las preguntas
-típicas son "diseñá un orquestador de campañas masivas", "diseñá la recepción confiable de webhooks de pagos" o
-"diseñá una plataforma multi-tenant de agentes".
+requerimientos hasta cómo se comporta cuando algo falla. Algunas preguntas típicas: "diseñá un sistema de
+recordatorios de turnos para una red de clínicas", "diseñá la recepción confiable de webhooks de pagos", "diseñá un
+acortador de URLs" o "diseñá una plataforma multi-tenant".
 
 | Módulo                         | Qué vas a poder hacer                                                                             |
 | ------------------------------ | ------------------------------------------------------------------------------------------------- |
@@ -94,15 +94,15 @@ Lo importante es el orden: **no se dibujan componentes antes de saber qué se ne
 
 ## Requerimientos funcionales y no funcionales
 
-| Tipo               | Pregunta           | Ejemplo para un orquestador de campañas                                                                    |
-| ------------------ | ------------------ | ---------------------------------------------------------------------------------------------------------- |
-| **Funcionales**    | ¿Qué hace?         | Crear campañas con segmentos; enviar por SMS, WhatsApp y voz; registrar resultados; pausar                 |
-| **No funcionales** | ¿Cómo se comporta? | 2 millones de contactos por día; respetar horarios legales; no duplicar envíos; costo por contacto acotado |
-| **Restricciones**  | ¿Qué está dado?    | Límites de los proveedores; normativa por país; equipo de 6 personas                                       |
+| Tipo               | Pregunta           | Ejemplo para un sistema de recordatorios de turnos médicos                                                                      |
+| ------------------ | ------------------ | ------------------------------------------------------------------------------------------------------------------------------- |
+| **Funcionales**    | ¿Qué hace?         | Programar recordatorios por turno; enviar por SMS, WhatsApp y email; registrar confirmaciones; pausar los envíos de una clínica |
+| **No funcionales** | ¿Cómo se comporta? | 2 millones de recordatorios por día; respetar horarios de envío; no duplicar mensajes; costo por recordatorio acotado           |
+| **Restricciones**  | ¿Qué está dado?    | Límites de los proveedores; normativa de datos de salud; equipo de 6 personas                                                   |
 
 Preguntas aclaratorias que valen oro (porque cambian el diseño):
 
-- ¿Cuál es la escala hoy y en un año? ¿Hay picos (fin de mes, campañas masivas)?
+- ¿Cuál es la escala hoy y en un año? ¿Hay picos (lunes a la mañana, campañas de vacunación)?
 - ¿Qué pasa si se envía un mensaje dos veces? ¿Y si no se envía?
 - ¿Qué latencia es aceptable? ¿El usuario espera la respuesta?
 - ¿Cuántos tenants? ¿Requisitos de aislamiento o de residencia de datos?
@@ -114,13 +114,13 @@ Las estimaciones no buscan precisión: buscan saber **si el problema es de miles
 presión.
 
 ```text
-Contactos por día:              2.000.000
+Recordatorios por día:          2.000.000
 Ventana horaria permitida:      10 horas = 36.000 s
 Envíos promedio por segundo:    2.000.000 / 36.000 ≈ 55 por segundo
-Pico (inicio de campaña, ×5):   ≈ 280 por segundo
+Pico (lunes a las 9, ×5):       ≈ 280 por segundo
 Respuestas entrantes (20 %):    400.000 conversaciones por día
 Llamadas al LLM (6 por conversación): 2,4 millones por día ≈ 67 por segundo en la ventana
-Almacenamiento de mensajes (1 KB, 3 por contacto): ≈ 6 GB por día ≈ 2 TB por año
+Almacenamiento de mensajes (1 KB, 3 por recordatorio): ≈ 6 GB por día ≈ 2 TB por año
 ```
 
 Ya con esto se ven decisiones: 280 envíos por segundo **no** es un problema para la base, pero sí para los **límites
@@ -177,7 +177,7 @@ En el canvas del Studio están los 14 componentes más comunes, cada uno con sus
 
 <KnowledgeCheck
   id="system-design.introduction.q1"
-  question="Te piden diseñar un orquestador de campañas. ¿Qué hacés primero?"
+  question="Te piden diseñar un sistema de recordatorios de turnos. ¿Qué hacés primero?"
   options={[
     {
       text: "Dibujar los microservicios principales.",
@@ -197,14 +197,14 @@ En el canvas del Studio están los 14 componentes más comunes, cada uno con sus
 
 <KnowledgeCheck
   id="system-design.introduction.q2"
-  question="Con 2 millones de contactos por día en una ventana de 10 horas, ¿qué orden de magnitud de envíos por segundo esperás en promedio?"
+  question="Con 2 millones de recordatorios por día en una ventana de 10 horas, ¿qué orden de magnitud de envíos por segundo esperás en promedio?"
   options={[
     { text: "Unos 5", explanation: "Es un orden de magnitud menos: 2.000.000 / 36.000 ≈ 55." },
     {
       text: "Unos 55, con picos varias veces mayores",
       correct: true,
       explanation:
-        "Correcto. Y los picos al iniciar campañas condicionan el rate limiting hacia los proveedores.",
+        "Correcto. Y los picos de los lunes a la mañana condicionan el rate limiting hacia los proveedores.",
     },
     { text: "Unos 5.000", explanation: "Sería el caso si todo se enviara en unos pocos minutos." },
   ]}
@@ -214,13 +214,16 @@ En el canvas del Studio están los 14 componentes más comunes, cada uno con sus
   id="system-design.introduction.q3"
   question="¿Cuál es un requerimiento no funcional?"
   options={[
-    { text: "Permitir pausar una campaña.", explanation: "Es una capacidad del sistema: funcional." },
     {
-      text: "Un mismo contacto no debe recibir el mismo mensaje dos veces, incluso ante reintentos.",
+      text: "Permitir pausar los envíos de una clínica.",
+      explanation: "Es una capacidad del sistema: funcional.",
+    },
+    {
+      text: "Un mismo paciente no debe recibir el mismo recordatorio dos veces, incluso ante reintentos.",
       correct: true,
       explanation:
         "Correcto. Es una garantía de comportamiento que condiciona la arquitectura (idempotencia).",
     },
-    { text: "Registrar el resultado de cada contacto.", explanation: "Es una función del sistema." },
+    { text: "Registrar si el paciente confirmó el turno.", explanation: "Es una función del sistema." },
   ]}
 />

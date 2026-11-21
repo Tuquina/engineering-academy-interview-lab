@@ -47,7 +47,7 @@ interviewQuestions:
       - "Una secuencia de transacciones locales en distintos servicios o módulos, coordinada por eventos o por un orquestador."
       - "Si un paso falla, se ejecutan compensaciones de los pasos anteriores (no hay rollback global)."
       - "Orquestada: un coordinador central decide; coreografiada: cada participante reacciona a eventos."
-      - "Ejemplo: acuerdo de pago que reserva el plan, genera el link de pago y notifica; si falla el link, se libera el plan."
+      - "Ejemplo: reservar un viaje reserva el vuelo, después el hotel y cobra; si no hay hotel, se cancela el vuelo."
   - question: "¿Qué es CQRS y cuándo vale la pena?"
     keyPoints:
       - "Separar el modelo de escritura (comandos, invariantes) del de lectura (consultas optimizadas)."
@@ -73,9 +73,9 @@ summary:
 
 ## ¿Qué problema resuelve?
 
-Una plataforma de cobranzas reacciona a eventos todo el tiempo: llega un pago, vence una promesa, el deudor responde,
-un proveedor de mensajería confirma la entrega. Varios módulos tienen que enterarse (detener recordatorios, actualizar
-el agente, recalcular métricas, notificar al cliente) sin que el que registra el pago los conozca a todos. Y cuando
+Un comercio electrónico reacciona a eventos todo el tiempo: llega un pago, se despacha un pedido, el transportista
+confirma la entrega, un cliente pide una devolución. Varios módulos tienen que enterarse (preparar el pedido,
+facturar, recalcular métricas, notificar al cliente) sin que el que registra el pago los conozca a todos. Y cuando
 algo falla (un proveedor caído, un consumidor con un bug), el resto del sistema tiene que seguir funcionando. Los
 patrones de esta lección resuelven esos problemas.
 
@@ -84,17 +84,17 @@ patrones de esta lección resuelven esos problemas.
 | Concepto    | Qué es                                     | Ejemplo           | Quién decide                       |
 | ----------- | ------------------------------------------ | ----------------- | ---------------------------------- |
 | **Evento**  | Algo que **ocurrió**, en pasado, inmutable | `PaymentReceived` | Los consumidores deciden qué hacer |
-| **Comando** | Un pedido de que algo **ocurra**           | `SendReminder`    | El emisor espera un efecto         |
+| **Comando** | Un pedido de que algo **ocurra**           | `ShipOrder`       | El emisor espera un efecto         |
 
 <MermaidDiagram
   caption="El módulo de pagos publica un hecho; cada consumidor reacciona sin que pagos los conozca."
   chart={`
 flowchart LR
   PAY["Pagos<br/>registra el pago"] -->|"PaymentReceived"| BUS["Bus o broker de eventos"]
-  BUS --> REM["Recordatorios<br/>cancela los pendientes"]
-  BUS --> AG["Agentes<br/>actualiza el estado del deudor"]
-  BUS --> AN["Analítica<br/>recupero por campaña"]
-  BUS --> NT["Notificaciones<br/>confirma al deudor"]
+  BUS --> REM["Depósito<br/>prepara el pedido"]
+  BUS --> AG["Facturación<br/>emite la factura"]
+  BUS --> AN["Analítica<br/>ventas por categoría"]
+  BUS --> NT["Notificaciones<br/>confirma al cliente"]
 `}
 />
 
@@ -108,11 +108,11 @@ para duplicados y desorden.
 En lugar de guardar el **estado actual**, se guarda la **secuencia de eventos**, y el estado se **deriva** de ellos:
 
 ```text
-DebtCreated(amount: 150.000)
-PaymentPromiseRegistered(date: 2026-11-27, amount: 40.000)
-PaymentReceived(amount: 40.000)
-DiscountApplied(percent: 10)
-→ estado actual: saldo 99.000, sin promesa vigente
+WalletOpened(owner: usr_42)
+MoneyDeposited(amount: 150.000)
+TransferSent(to: usr_77, amount: 40.000)
+FeeCharged(amount: 1.500)
+→ estado actual: saldo 108.500
 ```
 
 | Ventajas                                          | Costos                                                           |
@@ -121,7 +121,7 @@ DiscountApplied(percent: 10)
 | Reconstruir el estado a cualquier fecha           | Evolucionar el esquema de eventos viejos (versionado, upcasting) |
 | Nuevas proyecciones a partir de la historia       | Consultas requieren proyecciones (CQRS casi siempre)             |
 
-Es potente para dominios donde **la historia es el negocio** (cuentas, deudas, acuerdos), pero es una decisión costosa
+Es potente para dominios donde **la historia es el negocio** (cuentas, billeteras, libros contables), pero es una decisión costosa
 de revertir. Una alternativa más liviana: estado actual en tablas **más** una tabla de eventos de auditoría.
 
 ## CQRS
@@ -131,10 +131,10 @@ de revertir. Una alternativa más liviana: estado actual en tablas **más** una 
 
 <FlowDiagram
   steps={[
-    { title: "Comando", detail: "RegisterPaymentPromise llega al modelo de escritura." },
+    { title: "Comando", detail: "PlaceOrder llega al modelo de escritura." },
     {
       title: "Agregado",
-      detail: "Valida invariantes y persiste; emite PaymentPromiseRegistered.",
+      detail: "Valida invariantes (stock, precio vigente) y persiste; emite OrderPlaced.",
       tone: "runtime",
     },
     {
@@ -151,7 +151,7 @@ de revertir. Una alternativa más liviana: estado actual en tablas **más** una 
 />
 
 Vale la pena cuando lecturas y escrituras tienen necesidades **muy distintas** (dashboards sobre millones de
-conversaciones frente a escrituras con reglas complejas). En muchos sistemas, una versión liviana alcanza: consultas de
+pedidos frente a escrituras con reglas complejas). En muchos sistemas, una versión liviana alcanza: consultas de
 lectura directas con SQL optimizado o vistas materializadas, sin un segundo modelo completo. La Pattern Library tiene
 el patrón [CQRS](/patterns/cqrs).
 
@@ -161,20 +161,20 @@ Cuando un proceso abarca varios servicios o módulos con sus propias transaccion
 **saga** es una secuencia de transacciones locales con **compensaciones**:
 
 <MermaidDiagram
-  caption="Saga orquestada para formalizar un acuerdo de pago, con compensaciones si un paso falla."
+  caption="Saga orquestada para reservar un viaje (vuelo y hotel), con compensaciones si un paso falla."
   chart={`
 sequenceDiagram
   participant O as Orquestador
-  participant P as Planes de pago
-  participant L as Links de pago
+  participant V as Vuelos
+  participant H as Hoteles
   participant N as Notificaciones
-  O->>P: reservar plan de 6 cuotas
-  P-->>O: plan reservado
-  O->>L: generar link de la primera cuota
-  L-->>O: error del proveedor
-  O->>P: compensar: liberar plan
-  P-->>O: plan liberado
-  O->>N: avisar al deudor que se reintentará
+  O->>V: reservar el vuelo
+  V-->>O: vuelo reservado
+  O->>H: reservar el hotel
+  H-->>O: sin disponibilidad
+  O->>V: compensar: cancelar el vuelo
+  V-->>O: vuelo cancelado
+  O->>N: avisar al viajero y ofrecer otras fechas
 `}
 />
 
@@ -204,8 +204,8 @@ export async function handlePaymentReceived(message: PaymentReceivedMessage): Pr
     );
     if (fresh.rowCount === 0) return; // ya procesado: ignorar el duplicado
     await client.query(
-      "UPDATE reminders SET status = 'cancelled' WHERE debt_id = $1 AND status = 'scheduled'",
-      [message.debtId],
+      "UPDATE payment_reminders SET status = 'cancelled' WHERE order_id = $1 AND status = 'scheduled'",
+      [message.orderId],
     );
   });
 }
@@ -237,8 +237,9 @@ stateDiagram-v2
 `}
 />
 
-Un ejemplo de bulkhead en cobranzas: cada tenant tiene un límite de conversaciones concurrentes con el LLM, para que
-la campaña masiva de un cliente no deje sin capacidad a los demás (el problema del _noisy neighbor_). Los simuladores
+Un ejemplo de bulkhead en una plataforma de email marketing multi-tenant: cada tienda tiene un límite de envíos
+concurrentes al proveedor de email, para que el envío masivo de Black Friday de un cliente no deje sin capacidad a los
+demás (el problema del _noisy neighbor_). Los simuladores
 de [Circuit breaker](/system-design/simulators/circuit-breaker) y
 [Retry y backoff](/system-design/simulators/retry-backoff) muestran estos comportamientos.
 
@@ -294,27 +295,27 @@ de [Circuit breaker](/system-design/simulators/circuit-breaker) y
 
 <KnowledgeCheck
   id="software-architecture.distributed-patterns.q2"
-  question="Formalizar un acuerdo reserva un plan, genera un link de pago y notifica. Si falla el link, ¿qué hace una saga?"
+  question="Reservar un viaje reserva el vuelo, después el hotel y cobra. Si no hay hotel, ¿qué hace una saga?"
   options={[
     {
       text: "Un rollback de la transacción global.",
       explanation: "No hay transacción global entre módulos o servicios.",
     },
     {
-      text: "Ejecuta compensaciones de los pasos ya hechos, como liberar el plan reservado.",
+      text: "Ejecuta compensaciones de los pasos ya hechos, como cancelar el vuelo reservado.",
       correct: true,
       explanation: "Correcto. Las compensaciones son acciones de negocio que deshacen el efecto.",
     },
     {
       text: "Ignora el error y notifica igual.",
-      explanation: "Dejaría al deudor con un acuerdo sin forma de pago.",
+      explanation: "Dejaría al viajero con un vuelo pago y sin alojamiento.",
     },
   ]}
 />
 
 <KnowledgeCheck
   id="software-architecture.distributed-patterns.q3"
-  question="La campaña masiva de un tenant consume toda la concurrencia disponible hacia el LLM y los demás tenants quedan sin respuesta. ¿Qué patrón falta?"
+  question="El envío masivo de Black Friday de un tenant consume toda la concurrencia disponible hacia el proveedor de email y los demás tenants quedan sin enviar. ¿Qué patrón falta?"
   options={[
     { text: "Event sourcing", explanation: "No limita el uso de recursos." },
     {
