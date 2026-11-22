@@ -33,15 +33,15 @@ relatedLessons: ["typescript.runtime-vs-type-system", "typescript.promises-task-
 ## Contexto
 
 El proveedor de pagos notifica cada pago con un webhook y garantiza entrega **al menos una vez**: si no recibe
-un 2xx a tiempo, reenvía, y a veces envía el mismo evento dos veces en paralelo. Aplicar un pago dos veces deja una
-deuda con saldo negativo y un cliente que recibe mensajes incorrectos del agente.
+un 2xx a tiempo, reenvía, y a veces envía el mismo evento dos veces en paralelo. Aplicar un pago dos veces marca como
+pagado de más un pedido de una tienda, dispara un reembolso que no corresponde y le manda al cliente dos confirmaciones.
 
 ## Qué tenés que implementar
 
 ```ts
 export interface PaymentEvent {
   eventId: string;
-  debtId: string;
+  orderId: string;
   amountCents: number; // entero > 0
 }
 
@@ -51,7 +51,7 @@ export interface EventStore {
 }
 
 export interface Ledger {
-  applyPayment(debtId: string, amountCents: number): Promise<void>;
+  applyPayment(orderId: string, amountCents: number): Promise<void>;
 }
 
 export type WebhookResponse =

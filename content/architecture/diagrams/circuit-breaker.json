@@ -12,7 +12,7 @@
       "column": 0,
       "row": 1,
       "responsibility": "Necesita enviar mensajes por el proveedor. Debe seguir respondiendo aunque el proveedor esté caído.",
-      "examples": ["sendMessage(debtor, template)"]
+      "examples": ["sendMessage(customer, template)"]
     },
     {
       "id": "breaker",

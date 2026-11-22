@@ -21,15 +21,15 @@
       "column": 1,
       "row": 1,
       "responsibility": "Retiene eventos y los entrega a cada suscripción. La entrega típica es al menos una vez: puede haber duplicados.",
-      "examples": ["Topic de Kafka particionado por debtId", "SNS con una cola SQS por consumidor"]
+      "examples": ["Topic de Kafka particionado por orderId", "SNS con una cola SQS por consumidor"]
     },
     {
       "id": "ledger",
-      "label": "Proyección de saldo",
+      "label": "Proyección de ventas",
       "kind": "worker",
       "column": 2,
       "row": 0,
-      "responsibility": "Actualiza la vista de saldos. Es idempotente: registra el eventId procesado en la misma transacción.",
+      "responsibility": "Actualiza la vista de ventas por día y por categoría. Es idempotente: registra el eventId procesado en la misma transacción.",
       "examples": ["INSERT INTO processed_events ... ON CONFLICT DO NOTHING"]
     },
     {
@@ -38,17 +38,17 @@
       "kind": "worker",
       "column": 2,
       "row": 1,
-      "responsibility": "Envía el comprobante al deudor. Un duplicado aquí se nota (dos mensajes), por eso deduplica por eventId.",
+      "responsibility": "Envía el comprobante al cliente. Un duplicado aquí se nota (dos mensajes), por eso deduplica por eventId.",
       "examples": ["Worker con deduplicación en Redis con TTL"]
     },
     {
-      "id": "campaigns",
-      "label": "Campañas",
+      "id": "reminders",
+      "label": "Recordatorios de pago",
       "kind": "worker",
       "column": 2,
       "row": 2,
-      "responsibility": "Cancela contactos programados para quien ya pagó.",
-      "examples": ["Consumidor que marca contactos como cancelados"]
+      "responsibility": "Cancela los recordatorios de pago pendiente de ese pedido.",
+      "examples": ["Consumidor que marca recordatorios como cancelados"]
     },
     {
       "id": "dlq",
@@ -73,7 +73,7 @@
     { "id": "v-producer-topic", "from": "producer", "to": "topic", "kind": "async", "label": "publica" },
     { "id": "v-topic-ledger", "from": "topic", "to": "ledger", "kind": "async" },
     { "id": "v-topic-notifier", "from": "topic", "to": "notifier", "kind": "async" },
-    { "id": "v-topic-campaigns", "from": "topic", "to": "campaigns", "kind": "async" },
+    { "id": "v-topic-reminders", "from": "topic", "to": "reminders", "kind": "async" },
     {
       "id": "v-notifier-dlq",
       "from": "notifier",
@@ -91,15 +91,15 @@
     },
     {
       "title": "2. Cada consumidor avanza a su ritmo",
-      "description": "Si Notificaciones está caído, Saldos y Campañas siguen procesando; cuando vuelve, consume lo acumulado.",
+      "description": "Si Notificaciones está caído, Ventas y Recordatorios siguen procesando; cuando vuelve, consume lo acumulado.",
       "highlight": [
         "topic",
         "ledger",
         "notifier",
-        "campaigns",
+        "reminders",
         "v-topic-ledger",
         "v-topic-notifier",
-        "v-topic-campaigns"
+        "v-topic-reminders"
       ]
     },
     {

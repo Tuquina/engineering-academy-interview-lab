@@ -2,7 +2,7 @@
 id: challenge.react-use-effect
 kind: react
 title: "Corregir un useEffect problemático"
-summary: "Un componente que carga deudas muestra datos de otro cliente: dependencias, carreras y limpieza."
+summary: "Un componente que carga pedidos muestra datos de otro cliente: dependencias, carreras y limpieza."
 difficulty: intermediate
 durationMinutes: 30
 technologies: ["react", "typescript"]
@@ -11,10 +11,10 @@ skills: ["corregir un bug", "React hooks", "concurrencia"]
 interviewType: live-coding
 order: 12
 constraints:
-  - "Mantené la API del componente: props `customerId` y `fetchDebts`."
+  - "Mantené la API del componente: props `customerId` y `fetchOrders`."
   - "No agregues librerías de data fetching: el objetivo es entender el efecto."
 acceptanceCriteria:
-  - "Muestra las deudas del cliente indicado."
+  - "Muestra los pedidos del cliente indicado."
   - "Vuelve a cargar cuando cambia `customerId`."
   - "Una respuesta lenta de un cliente anterior nunca reemplaza a la del cliente actual."
   - "Muestra «Cargando…» mientras espera los datos del cliente actual."
@@ -31,15 +31,15 @@ relatedLessons: []
 
 ## Contexto
 
-En el panel de operadores, al pasar rápido de un cliente a otro, a veces se ven **las deudas del cliente anterior**.
+En el panel de atención al cliente de una tienda, al pasar rápido de un cliente a otro, a veces se ven **los pedidos del cliente anterior**.
 El componente vive en `App.tsx`; el preview incluye una API falsa en la que "Ana" responde lento y "Bruno" rápido,
 para reproducir el problema: elegí Ana y enseguida Bruno.
 
 ## Qué tenés que hacer
 
-Corregí `CustomerDebts` para que:
+Corregí `CustomerOrders` para que:
 
-1. Cargue las deudas cuando se monta **y cada vez que cambia `customerId`**.
+1. Cargue los pedidos cuando se monta **y cada vez que cambia `customerId`**.
 2. Ignore respuestas de un `customerId` anterior (condición de carrera).
 3. Muestre «Cargando…» mientras espera.
 

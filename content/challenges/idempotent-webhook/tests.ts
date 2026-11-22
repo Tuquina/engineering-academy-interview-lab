@@ -20,20 +20,20 @@ function ledgerSpy(): Ledger & { applied: Array<[string, number]> } {
   const applied: Array<[string, number]> = [];
   return {
     applied,
-    async applyPayment(debtId, amountCents) {
+    async applyPayment(orderId, amountCents) {
       await sleep(10);
-      applied.push([debtId, amountCents]);
+      applied.push([orderId, amountCents]);
     },
   };
 }
 
-const event = { eventId: "evt_1", debtId: "debt_1", amountCents: 150000 };
+const event = { eventId: "evt_1", orderId: "ord_1", amountCents: 150000 };
 
 test("procesa un evento válido", async () => {
   const ledger = ledgerSpy();
   const handle = createPaymentWebhookHandler({ store: memoryStore(), ledger });
   expect(await handle(event)).toEqual({ status: 200, body: { processed: true } });
-  expect(ledger.applied).toEqual([["debt_1", 150000]]);
+  expect(ledger.applied).toEqual([["ord_1", 150000]]);
 });
 
 test("un reenvío posterior no aplica el pago de nuevo", async () => {
@@ -49,7 +49,7 @@ test(
   async () => {
     const ledger = ledgerSpy();
     const handle = createPaymentWebhookHandler({ store: memoryStore(), ledger });
-    const response = await handle({ eventId: "evt_2", debtId: "debt_1", amountCents: "1500" });
+    const response = await handle({ eventId: "evt_2", orderId: "ord_1", amountCents: "1500" });
     expect(response.status).toBe(400);
     expect(ledger.applied).toHaveLength(0);
   },

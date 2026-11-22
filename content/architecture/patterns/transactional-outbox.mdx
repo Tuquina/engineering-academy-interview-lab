@@ -34,7 +34,7 @@ interviewQuestions:
   - question: "¿Qué problema resuelve el patrón Outbox?"
     answer: "La escritura doble: no se puede actualizar una base y publicar en un broker de forma atómica. Outbox convierte la publicación en una escritura más dentro de la transacción local, y un relay publica después. El resultado es entrega al menos una vez, que con consumidores idempotentes se vuelve efecto exactamente una vez."
   - question: "¿Cómo escalás el relay a varias réplicas sin duplicar trabajo?"
-    answer: "Con SELECT ... FOR UPDATE SKIP LOCKED sobre lotes de eventos pendientes: cada réplica toma filas distintas. Si el orden por entidad importa, se particiona por clave (por ejemplo, debtId) y cada partición la procesa un único relay a la vez."
+    answer: "Con SELECT ... FOR UPDATE SKIP LOCKED sobre lotes de eventos pendientes: cada réplica toma filas distintas. Si el orden por entidad importa, se particiona por clave (por ejemplo, subscriptionId) y cada partición la procesa un único relay a la vez."
   - question: "¿Qué es el patrón Inbox?"
     answer: "Es el complemento del lado del consumidor: una tabla con los IDs de eventos ya procesados. El consumidor inserta el ID en la misma transacción que su efecto; si el ID ya existe, descarta el evento. Así un duplicado no produce un segundo efecto."
 diagrams: ["transactional-outbox", "event-driven"]
@@ -45,9 +45,10 @@ tags: ["outbox", "inbox", "eventos", "idempotencia", "dual write"]
 
 ## Motivación
 
-Cuando se registra un pago, el servicio de campañas debe cancelar los contactos programados para ese deudor. Si el
-evento `PaymentRegistered` se pierde, la persona que ya pagó sigue recibiendo mensajes de cobranza: un problema
-legal y reputacional, no sólo técnico.
+En un SaaS, cuando se registra el pago de la renovación de una suscripción, el servicio de avisos debe cancelar los
+recordatorios de "tu suscripción vence" programados para ese cliente. Si el evento `PaymentRegistered` se pierde,
+el cliente que ya pagó sigue recibiendo avisos de que va a perder el acceso: un problema de confianza y de soporte,
+no sólo técnico.
 
 ## Ejemplo incorrecto
 
@@ -72,7 +73,7 @@ export async function registerPayment(db: Db, payment: NewPayment) {
     await tx.insert(outbox).values({
       id: crypto.randomUUID(),
       type: "PaymentRegistered",
-      aggregateId: payment.debtId,
+      aggregateId: payment.subscriptionId,
       payload: payment,
     });
   });
@@ -102,8 +103,8 @@ export async function onPaymentRegistered(db: Db, message: { eventId: string; pa
     const inserted = await tx.execute(sql`
       INSERT INTO inbox (event_id) VALUES (${message.eventId}) ON CONFLICT DO NOTHING RETURNING event_id`);
     if (inserted.length === 0) return; // duplicado: ya se procesó
-    await tx.execute(sql`UPDATE scheduled_contacts SET status = 'cancelled'
-                         WHERE debt_id = ${message.payload.debtId} AND status = 'pending'`);
+    await tx.execute(sql`UPDATE scheduled_notices SET status = 'cancelled'
+                         WHERE subscription_id = ${message.payload.subscriptionId} AND status = 'pending'`);
   });
 }
 ```

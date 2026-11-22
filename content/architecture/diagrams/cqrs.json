@@ -7,12 +7,12 @@
   "nodes": [
     {
       "id": "ui",
-      "label": "Panel de operadores",
+      "label": "Panel de soporte",
       "kind": "ui",
       "column": 0,
       "row": 1,
-      "responsibility": "Envía comandos (registrar promesa de pago) y hace consultas (bandeja priorizada de deudores).",
-      "examples": ["Formulario de promesa", "Tabla paginada con filtros"]
+      "responsibility": "Envía comandos (asignar un ticket) y hace consultas (bandeja priorizada de tickets).",
+      "examples": ["Botón Tomar ticket", "Tabla paginada con filtros"]
     },
     {
       "id": "write-side",
@@ -35,13 +35,13 @@
     },
     {
       "id": "aggregate",
-      "label": "Agregado Debt",
+      "label": "Agregado Ticket",
       "kind": "domain",
       "column": 2,
       "row": 0,
       "parent": "write-side",
-      "responsibility": "Invariantes: no más de una promesa activa, monto no mayor al saldo.",
-      "examples": ["debt.promise(amount, dueDate)"]
+      "responsibility": "Invariantes: un ticket tiene a lo sumo un agente asignado y uno cerrado no se reasigna.",
+      "examples": ["ticket.assignTo(agentId)"]
     },
     {
       "id": "write-db",
@@ -51,7 +51,7 @@
       "row": 0,
       "parent": "write-side",
       "responsibility": "Modelo normalizado con restricciones. En la misma transacción se registra el evento a publicar.",
-      "examples": ["Tablas debts, promises + outbox"]
+      "examples": ["Tablas tickets, messages + outbox"]
     },
     {
       "id": "projector",
@@ -60,7 +60,7 @@
       "column": 4,
       "row": 1,
       "responsibility": "Consume eventos y actualiza la vista de lectura. Debe ser idempotente y tolerar eventos repetidos.",
-      "examples": ["Worker que actualiza debtor_inbox"]
+      "examples": ["Worker que actualiza support_inbox"]
     },
     {
       "id": "read-side",
@@ -88,8 +88,8 @@
       "column": 3,
       "row": 2,
       "parent": "read-side",
-      "responsibility": "Una fila por deudor con todo lo que muestra la bandeja. Puede vivir en la misma base o en otra tecnología.",
-      "examples": ["Tabla debtor_inbox", "Índice de búsqueda"]
+      "responsibility": "Una fila por ticket con todo lo que muestra la bandeja. Puede vivir en la misma base o en otra tecnología.",
+      "examples": ["Tabla support_inbox", "Índice de búsqueda"]
     }
   ],
   "edges": [
@@ -139,7 +139,7 @@
     },
     {
       "title": "4. El costo: consistencia eventual",
-      "description": "Durante unos instantes la vista puede no reflejar la promesa recién registrada. La interfaz debe manejarlo (por ejemplo, mostrando el resultado del comando sin esperar a la vista).",
+      "description": "Durante unos instantes la vista puede no reflejar la asignación recién hecha. La interfaz debe manejarlo (por ejemplo, mostrando el resultado del comando sin esperar a la vista).",
       "highlight": ["projector", "q-db-projector"]
     }
   ]

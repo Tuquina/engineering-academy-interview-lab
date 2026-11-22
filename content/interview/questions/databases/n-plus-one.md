@@ -21,14 +21,14 @@ relatedLessons: []
 relatedPatterns: ["repository"]
 ---
 
-El problema **N+1** ocurre cuando se obtiene una lista (1 consulta: 50 deudores) y luego, por cada elemento, otra
-consulta (50 consultas para las deudas de cada uno). Cada consulta es rápida, pero la latencia de red y la carga
+El problema **N+1** ocurre cuando se obtiene una lista (1 consulta: 50 clientes) y luego, por cada elemento, otra
+consulta (50 consultas para los pedidos de cada uno). Cada consulta es rápida, pero la latencia de red y la carga
 sobre la base se multiplican con N.
 
 Aparece típicamente con **carga perezosa** de relaciones en ORMs o con un `await` dentro de un `for`.
 
 Se resuelve trayendo los datos relacionados en **una o pocas consultas**: un `JOIN` (o la carga ansiosa del ORM), o
-una consulta por lote `SELECT ... WHERE debtor_id = ANY($1)` y agrupando en memoria. En APIs GraphQL, un DataLoader
+una consulta por lote `SELECT ... WHERE customer_id = ANY($1)` y agrupando en memoria. En APIs GraphQL, un DataLoader
 agrupa automáticamente las cargas de un mismo tick.
 
 Se **detecta** contando consultas por request en logs o APM, o con tests que verifican la cantidad de consultas.

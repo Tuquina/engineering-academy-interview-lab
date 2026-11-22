@@ -60,8 +60,8 @@ rubric:
 
 ## Contexto
 
-La plataforma expone una API pública para que cada empresa cliente (tenant) cargue deudas y consulte el estado de las
-gestiones. Un tenant integró mal un cron y envía miles de requests por minuto: degrada la API para todos.
+La plataforma expone una API pública para que cada comercio (tenant) cargue su catálogo y consulte el estado de sus
+pedidos. Un tenant integró mal un cron y envía miles de requests por minuto: degrada la API para todos.
 
 ## Lo que se pide
 
@@ -77,4 +77,4 @@ Diseñá la política de **rate limiting** de la API:
 
 - 200 tenants; los más grandes hacen picos de 50 requests/segundo legítimas.
 - Plan básico: 10 req/s sostenidas con ráfagas de 20. Plan enterprise: 100 req/s con ráfagas de 200.
-- La carga masiva de deudas (`POST /debts:batch`) es 50 veces más costosa que una consulta.
+- La carga masiva de productos (`POST /products:batch`) es 50 veces más costosa que una consulta.

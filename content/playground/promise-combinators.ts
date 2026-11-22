@@ -7,7 +7,7 @@ const delay = <T>(ms: number, value: T, fail = false) =>
   );
 
 async function main() {
-  const tasks = () => [delay(30, "deuda"), delay(10, "historial", true), delay(20, "propuestas")];
+  const tasks = () => [delay(30, "reserva"), delay(10, "clima", true), delay(20, "tarifas")];
 
   try {
     console.log("all:", await Promise.all(tasks()));

@@ -54,8 +54,8 @@
     },
     {
       "id": "llm.memory-types",
-      "front": "Memoria conversacional vs estado de negocio: ¿dónde debe vivir una promesa de pago?",
-      "back": "En el estado estructurado del negocio (base de datos, con fecha y monto), no sólo en el historial de chat. El agente la consulta con una herramienta; la conversación es contexto, no fuente de verdad.",
+      "front": "Memoria conversacional vs estado de negocio: ¿dónde debe vivir una reserva con seña pendiente?",
+      "back": "En el estado estructurado del negocio (base de datos, con fecha y monto de la seña), no sólo en el historial de chat. El agente la consulta con una herramienta; la conversación es contexto, no fuente de verdad.",
       "difficulty": "intermediate",
       "tags": ["agentes", "memoria"],
       "lessonId": null

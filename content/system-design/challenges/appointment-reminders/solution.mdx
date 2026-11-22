@@ -1,0 +1,76 @@
+## Separar planificar de ejecutar
+
+- **Planificador** (cada 15 minutos): para cada regla de recordatorio activa, selecciona los turnos que **podrían**
+  recordarse en la próxima franja, elige canal y prioridad, y crea `scheduled_reminders` con
+  `UNIQUE (appointment_id, rule_id)`: aunque el planificador corra dos veces, no duplica.
+- **Ejecutor:** workers toman recordatorios cuyo `not_before` llegó y **revalidan todas las políticas y el estado del
+  turno en el momento del envío**: entre planificar y enviar, el paciente pudo cancelar, reprogramar o recibir otro
+  mensaje.
+
+## Políticas como reglas componibles
+
+```ts
+type Decision = { allowed: true } | { allowed: false; reason: string };
+type Policy = (ctx: ReminderContext) => Decision;
+
+const policies: Policy[] = [
+  withinLocalWindow,
+  appointmentStillBooked,
+  underFrequencyCap,
+  channelAllowed,
+  notOptedOut,
+];
+
+function evaluate(ctx: ReminderContext): Decision {
+  for (const policy of policies) {
+    const decision = policy(ctx);
+    if (!decision.allowed) return decision;
+  }
+  return { allowed: true };
+}
+```
+
+Las reglas y sus parámetros (ventanas, máximos, canales) son **configuración versionada por clínica**, combinada con
+un piso regulatorio que la clínica no puede relajar. Cada decisión se registra con su motivo (`reminder_decisions`):
+explicable ante un reclamo.
+
+## Ventanas horarias
+
+Cada paciente tiene una zona horaria IANA (por ejemplo, `America/Argentina/Buenos_Aires`). La ventana se evalúa
+convirtiendo `now()` a la hora local del paciente, con un calendario de feriados por país. Nunca con offsets fijos:
+los cambios de horario rompen los cálculos.
+
+## Frecuencia sin condiciones de carrera
+
+Dos workers pueden intentar enviar al mismo paciente recordatorios de clínicas distintas al mismo tiempo. El chequeo
+y el registro deben ser atómicos:
+
+```sql
+BEGIN;
+SELECT 1 FROM patients WHERE id = $1 FOR UPDATE;               -- serializa por paciente
+SELECT count(*) FROM sent_messages WHERE patient_id = $1 AND sent_at > now() - interval '7 days';
+-- si está por debajo del máximo:
+INSERT INTO sent_messages (patient_id, appointment_id, channel, status) VALUES (...);
+COMMIT;
+```
+
+El lock es corto y por paciente, así que no limita el paralelismo global.
+
+## Capacidad y proveedores
+
+- Los envíos permitidos van a una **cola por proveedor** con **rate limiting** (token bucket) según su cuota.
+- El planificador **distribuye** `not_before` a lo largo de la ventana en lugar de concentrar todo a las 9:00.
+- Si un proveedor falla, un **circuit breaker** pausa ese canal y el recordatorio se reprograma o pasa al canal
+  alternativo si la política lo permite.
+
+## Estados de un recordatorio
+
+`scheduled → validating → sent | skipped(reason) | failed → retry_scheduled`. Las transiciones se modelan
+explícitamente (patrón State) y el envío es idempotente por la clave del recordatorio.
+
+## Compromisos
+
+- Revalidar antes de enviar cuesta una consulta extra por recordatorio, pero es la única forma de respetar
+  cancelaciones y reprogramaciones recientes.
+- El lock por paciente serializa sólo a ese paciente; a esta escala es más simple y seguro que contadores en Redis,
+  que agregarían un segundo sistema a mantener consistente con el registro de mensajes enviados.

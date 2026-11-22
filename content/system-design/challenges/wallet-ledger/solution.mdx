@@ -1,0 +1,72 @@
+## Ingesta: aceptar rápido, procesar después
+
+- **API de movimientos:** valida el esquema, inserta el movimiento en `inbound_movements` con
+  `UNIQUE (partner_id, external_id)` y responde `202`. Si el ID ya existe, responde `200` con el resultado anterior:
+  el reintento del socio es inofensivo. La inserción y el mensaje a la cola van por **outbox** para no perder
+  movimientos.
+- **Archivos:** se suben a object storage con una URL firmada; un job los procesa por **lotes de 1.000 filas**,
+  guarda el avance (`import_jobs.last_row`) y es reanudable. Las filas inválidas se reportan al socio sin frenar el
+  resto.
+
+## Modelo de datos: ledger de doble entrada
+
+```sql
+accounts (id, owner_id, currency, kind, ...)                      -- cuentas de personas y cuentas internas
+journal_entries (id, source_movement_id UNIQUE, description, created_at)       -- un asiento por movimiento
+postings (id, entry_id, account_id, amount_cents, ...)            -- append-only; las de un asiento suman 0
+account_balances (account_id PRIMARY KEY, balance_cents, version) -- derivado de postings
+```
+
+Cada movimiento es un **asiento** con al menos dos imputaciones que **suman cero**: una transferencia recibida
+acredita la cuenta de la persona y debita la cuenta interna del banco socio. Aplicar dos veces el mismo movimiento
+choca contra `source_movement_id UNIQUE`. El ledger es, además, la auditoría: un error no se corrige editando, se
+corrige con un **asiento de ajuste** que lo revierte.
+
+## Débitos sin saldo negativo
+
+Un pago con QR debita la cuenta de la persona. Para que dos pagos simultáneos no dejen el saldo negativo, el débito y
+la actualización del saldo van en la misma transacción con una operación condicional:
+
+```sql
+UPDATE account_balances
+   SET balance_cents = balance_cents - $2, version = version + 1
+ WHERE account_id = $1 AND balance_cents >= $2
+RETURNING balance_cents;  -- 0 filas = saldo insuficiente: se rechaza el pago
+```
+
+## Procesamiento
+
+- Workers stateless consumen la cola con **entrega al menos una vez** y son idempotentes por `source_movement_id`.
+- Los errores transitorios se reintentan con **backoff exponencial y jitter**; tras N intentos, el mensaje va a una
+  **DLQ** con alerta y herramienta de reproceso.
+- **Aislamiento entre socios:** una cola (o grupo de mensajes) por socio y concurrencia máxima por socio. El archivo
+  de 200.000 filas de un socio no retrasa los pagos con QR en tiempo real, que van en una cola prioritaria.
+
+## Conciliación diaria
+
+- Cada socio entrega un reporte de cierre. Un job lo compara con los asientos del día por `external_id` y monto.
+- Las diferencias se clasifican: **faltantes** (el socio informa algo que no se registró), **sobrantes** (registrado
+  sin respaldo del socio) y **montos distintos**.
+- Cada diferencia abre un caso con su evidencia; si corresponde corregir, se registra un asiento de ajuste con el caso
+  como motivo. Nunca se edita un asiento existente.
+
+## Fallos y observabilidad
+
+| Falla                               | Comportamiento                                                          |
+| ----------------------------------- | ----------------------------------------------------------------------- |
+| Worker cae a mitad de un movimiento | El mensaje se reentrega; la idempotencia evita doble efecto.            |
+| Base lenta                          | La cola absorbe; el lag crece y dispara alerta antes de afectar la API. |
+| Socio caído al consultar un estado  | Circuit breaker y reintento posterior; no bloquea la ingesta del resto. |
+| Movimiento venenoso                 | Va a la DLQ tras N intentos; alerta y reproceso tras corregir.          |
+
+Métricas: lag por cola y por socio, antigüedad del mensaje más viejo, tamaño de la DLQ, tasa de duplicados
+descartados y diferencias de conciliación por socio. Cada movimiento lleva un `trace_id` desde la API hasta el ledger.
+
+## Compromisos
+
+- **Asíncrono vs inmediato:** una transferencia puede tardar segundos en verse en la app; a cambio, la API no se
+  degrada con los picos. Para pagos con QR, la cola prioritaria y el débito transaccional acotan esa demora.
+- **Ledger vs actualizar el saldo:** más filas y una tabla derivada, pero auditoría, conciliación y corrección de
+  errores sin perder historia.
+- **Una base transaccional como fuente de verdad** del ledger; las vistas de lectura (movimientos para la app,
+  reportes) se derivan y pueden reconstruirse.

@@ -10,7 +10,7 @@ functionalRequirements:
   - "Cada empresa configura sus agentes: prompt, tono, modelo, herramientas habilitadas y políticas de contacto."
   - "Las configuraciones se versionan: borrador, publicación y rollback a una versión anterior."
   - "Cada conversación usa una versión concreta y se puede reconstruir qué configuración tomó cada decisión."
-  - "Las herramientas del agente (consultar deuda, registrar promesa, ofrecer plan) actúan sólo sobre datos del tenant."
+  - "Las herramientas del agente (consultar pedidos, programar devoluciones, ofrecer compensaciones) actúan sólo sobre datos del tenant."
   - "Los operadores de cada empresa ven conversaciones y métricas sólo de su empresa."
 nonFunctionalRequirements:
   - "Aislamiento estricto de datos entre tenants; algunos clientes son bancos con requisitos de auditoría."
@@ -29,7 +29,7 @@ clarifyingQuestions:
   - question: "¿Los cambios deben aplicarse a conversaciones en curso?"
     why: "Si no, cada conversación queda fijada a una versión; si sí, hay que definir en qué momento cambia."
   - question: "¿Qué pasa si el proveedor de LLM falla o limita el tráfico?"
-    why: "Determina fallback de modelo, colas, límites por tenant y qué ve el deudor."
+    why: "Determina fallback de modelo, colas, límites por tenant y qué ve el cliente final."
   - question: "¿Se necesita borrar todos los datos de un tenant al terminar el contrato?"
     why: "Impacta en el modelo de aislamiento y en dónde viven trazas y backups."
 checklist:
@@ -75,7 +75,7 @@ relatedPatterns: ["state", "strategy", "circuit-breaker"]
 relatedSimulations: ["rate-limiting", "circuit-breaker"]
 ---
 
-La plataforma permite que cada empresa (tenant) configure agentes de IA que conversan con sus deudores: prompt,
+La plataforma permite que cada empresa (tenant) configure agentes de IA que conversan con sus clientes: prompt,
 tono, herramientas habilitadas, políticas (horarios, frecuencia de contacto) y modelo de LLM.
 
 Hoy la configuración se edita "en caliente": un cambio mal hecho afecta de inmediato a miles de conversaciones, no

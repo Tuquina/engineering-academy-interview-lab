@@ -1,12 +1,12 @@
 export type MemoryEvent =
-  | { type: "promise-made"; at: string; dueDate: string; amountCents: number }
-  | { type: "promise-cancelled"; at: string }
+  | { type: "hold-created"; at: string; dueDate: string; amountCents: number }
+  | { type: "hold-cancelled"; at: string }
   | { type: "payment-received"; at: string; amountCents: number }
   | { type: "contact-attempt"; at: string }
-  | { type: "dispute-opened"; at: string };
+  | { type: "complaint-opened"; at: string };
 
 export type ContactDecision =
-  | { action: "contact"; strategy: "standard" | "promise-reminder" | "broken-promise"; reason: string }
+  | { action: "contact"; strategy: "standard" | "deposit-reminder" | "deposit-overdue"; reason: string }
   | { action: "wait"; reason: string }
   | { action: "do-not-contact"; reason: string };
 
@@ -21,9 +21,9 @@ export function addDays(day: string, days: number): string {
  * Decide si el agente debe contactar al cliente hoy, a partir de los eventos registrados.
  */
 export function decideNextContact(events: readonly MemoryEvent[], today: string): ContactDecision {
-  // Versión ingenua: si alguna vez hubo una promesa, espera; si no, contacta.
-  const hasPromise = events.some((e) => e.type === "promise-made");
-  return hasPromise
-    ? { action: "wait", reason: "Tiene una promesa de pago" }
-    : { action: "contact", strategy: "standard", reason: "Sin promesas registradas" };
+  // Versión ingenua: si alguna vez hubo una reserva retenida, espera; si no, contacta.
+  const hasHold = events.some((e) => e.type === "hold-created");
+  return hasHold
+    ? { action: "wait", reason: "Tiene una reserva retenida" }
+    : { action: "contact", strategy: "standard", reason: "Sin reservas retenidas" };
 }

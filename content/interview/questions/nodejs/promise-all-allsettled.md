@@ -22,7 +22,7 @@ relatedLessons: ["typescript.promises-task-completablefuture"]
 
 `Promise.all` recibe varias promesas y se resuelve con un array de resultados cuando **todas** se cumplen; si
 **una** rechaza, rechaza de inmediato con ese error (fail fast). Es lo adecuado cuando el paso siguiente necesita
-todos los resultados, por ejemplo cargar la deuda y el historial del deudor para armar una respuesta.
+todos los resultados, por ejemplo cargar el pedido y el estado del envío para armar la pantalla de seguimiento.
 
 `Promise.allSettled` espera a que todas terminen y devuelve, para cada una, `{ status: "fulfilled", value }` o
 `{ status: "rejected", reason }`. Sirve cuando los fallos parciales son aceptables: enviar 50 notificaciones y

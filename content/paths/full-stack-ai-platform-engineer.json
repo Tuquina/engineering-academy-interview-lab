@@ -62,7 +62,7 @@
       "description": "Patrones, arquitectura hexagonal, event-driven y diseño de sistemas multi-tenant.",
       "goals": [
         "Defender una arquitectura explicando sus compromisos",
-        "Diseñar un sistema de cobranzas masivas resiliente"
+        "Diseñar un ledger de pagos resiliente y un orquestador de recordatorios"
       ],
       "items": [
         { "kind": "course", "courseId": "software-architecture" },

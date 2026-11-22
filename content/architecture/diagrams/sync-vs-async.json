@@ -1,7 +1,7 @@
 {
   "id": "sync-vs-async",
   "title": "Comunicación síncrona y asíncrona",
-  "description": "El mismo caso (procesar un archivo de deudas de un tenant) resuelto con una llamada síncrona que espera el resultado y con una cola que responde de inmediato y procesa en segundo plano.",
+  "description": "El mismo caso (procesar el archivo de catálogo de un vendedor) resuelto con una llamada síncrona que espera el resultado y con una cola que responde de inmediato y procesa en segundo plano.",
   "kind": "sequence-flow",
   "tags": ["síncrono", "asíncrono", "colas", "202 accepted"],
   "nodes": [

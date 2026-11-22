@@ -24,7 +24,7 @@ relatedPatterns: ["transactional-outbox"]
 ---
 
 Una operación es **idempotente** si ejecutarla varias veces deja el sistema igual que ejecutarla una sola vez.
-`PUT /debts/42` con el mismo cuerpo, o `DELETE`, lo son por definición; un `POST /payments` no: dos llamadas
+`PUT /products/42` con el mismo cuerpo, o `DELETE`, lo son por definición; un `POST /payments` no: dos llamadas
 registrarían dos pagos.
 
 Importa porque **los reintentos son inevitables**: si la respuesta se pierde por un timeout, el cliente no sabe si

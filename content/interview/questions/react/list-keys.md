@@ -21,7 +21,7 @@ relatedLessons: []
 ---
 
 React usa `key` para **asociar cada elemento de una lista con su instancia entre renders**. Con keys estables
-(el ID del deudor, de la deuda), React sabe qué elemento se movió, cuál es nuevo y cuál se eliminó, y conserva el
+(el ID del producto, del pedido), React sabe qué elemento se movió, cuál es nuevo y cuál se eliminó, y conserva el
 estado interno de cada componente.
 
 Si se usa el **índice**, al insertar un elemento al principio o reordenar, los índices se corren: React reutiliza
@@ -30,4 +30,4 @@ acordeón abierto) aparece en la fila equivocada. El índice sólo es aceptable 
 reordenan ni filtran.
 
 Como `key` define la identidad, **cambiarla a propósito** desmonta y vuelve a montar el componente: es la forma
-idiomática de reiniciar el estado de un formulario al pasar de un deudor a otro.
+idiomática de reiniciar el estado de un formulario al pasar de un cliente a otro.

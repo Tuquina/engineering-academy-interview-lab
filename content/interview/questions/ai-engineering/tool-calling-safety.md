@@ -15,21 +15,21 @@ expectedPoints:
     point: "Tools idempotentes y auditadas (quién, qué argumentos, resultado)."
 followUps:
   - "¿Cómo mitigarías un prompt injection que intenta llamar a una tool no permitida?"
-  - "¿Qué acciones requerirían confirmación humana en cobranzas?"
+  - "¿Qué acciones requerirían confirmación humana en un asistente de una billetera virtual?"
 commonMistakes:
   - "Confiar en el prompt ('no hagas X') como único control."
-  - "Aceptar un tenantId o un debtId arbitrario desde los argumentos del modelo."
+  - "Aceptar un tenantId o un accountId arbitrario desde los argumentos del modelo."
 relatedLessons: []
 ---
 
 El principio es que **el modelo propone y el servidor decide**. Toda salida del modelo es input no confiable.
 
-- **Validación:** los argumentos se validan con un esquema (tipos, rangos) y con reglas de negocio (el monto de la
-  promesa no supera el saldo).
-- **Autorización por contexto:** la tool se ejecuta con el tenant y el deudor **de la conversación**, obtenidos de
+- **Validación:** los argumentos se validan con un esquema (tipos, rangos) y con reglas de negocio (el monto de un
+  reintegro no supera lo cobrado).
+- **Autorización por contexto:** la tool se ejecuta con el tenant y el usuario **de la conversación**, obtenidos de
   la sesión, no con IDs que aparezcan en los argumentos: así un prompt injection no puede apuntar a datos de otro.
 - **Mínimo privilegio:** cada versión del agente habilita sólo las tools que necesita, y las acciones sensibles
-  (condonar deuda, cambiar datos de contacto) requieren confirmación humana.
+  (acreditar un reintegro, cambiar datos de contacto) requieren confirmación humana.
 - **Idempotencia y auditoría:** cada tool call tiene un ID; reintentar no duplica efectos, y queda registrado qué se
   llamó, con qué argumentos y qué devolvió.
 

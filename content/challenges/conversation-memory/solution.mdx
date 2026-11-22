@@ -4,10 +4,11 @@ La decisión es una **función pura de los eventos y la fecha**: fácil de teste
 construye en tres pasos:
 
 1. **Ordenar** una copia de los eventos por fecha. Desde ahí, "la información más reciente" es simplemente la última
-   (resuelve datos contradictorios: una promesa renegociada reemplaza a la anterior).
-2. **Reglas que bloquean primero:** una disputa abierta suspende toda gestión; un contacto hoy respeta la frecuencia.
-3. **Estado de la promesa vigente:** cumplida (pagos desde la promesa ≥ monto), vigente, víspera (recordatorio),
-   día del vencimiento (esperar) o incumplida.
+   (resuelve datos contradictorios: una reserva rehecha reemplaza a la anterior).
+2. **Reglas que bloquean primero:** un reclamo abierto suspende los avisos automáticos; un contacto hoy respeta la
+   frecuencia.
+3. **Estado de la reserva retenida:** seña pagada (pagos desde la reserva ≥ monto), vigente, víspera (recordatorio),
+   día del vencimiento (esperar) o vencida.
 
 Cada rama devuelve un **motivo**: el orquestador lo registra y el equipo puede auditar por qué el agente contactó (o no).
 
@@ -19,14 +20,15 @@ O(n log n) por el ordenamiento; O(n) el resto.
 
 - La **conversación** (lo que dijo el cliente) es contexto para el modelo, pero no es una fuente confiable: puede
   resumirse, truncarse o interpretarse mal.
-- El **estado de negocio** (promesas con fecha y monto, pagos) vive en la base de datos y se consulta con herramientas.
+- El **estado de negocio** (reservas retenidas con fecha y monto de seña, pagos) vive en la base de datos y se consulta
+  con herramientas.
 - El **historial de eventos** permite reconstruir el estado y explicar decisiones pasadas.
 
-Si el cliente dice "ya pagué" pero el pago no aparece, se registra un evento propio (por ejemplo, "pago informado
-sin confirmar") con una espera acotada antes de volver a gestionar, en lugar de confiar o ignorar lo dicho.
+Si el huésped dice "ya pagué la seña" pero el pago no aparece, se registra un evento propio (por ejemplo, "pago informado
+sin confirmar") con una espera acotada antes de volver a avisar, en lugar de confiar o ignorar lo dicho.
 
 ## Extensiones
 
 - Ventanas horarias y feriados por país.
 - Reglas parametrizables por tenant (configuración versionada) en lugar de constantes en el código.
-- Tolerancia de unos días antes de considerar una promesa incumplida.
+- Tolerancia de unas horas antes de liberar la habitación por seña vencida.

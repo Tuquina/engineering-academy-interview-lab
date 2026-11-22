@@ -11,8 +11,8 @@
       "kind": "actor",
       "column": 0,
       "row": 1,
-      "responsibility": "Panel web, app móvil o integraciones de tenants.",
-      "examples": ["Panel de operadores", "API de un tenant"]
+      "responsibility": "App del pasajero, app del conductor o integraciones de empresas.",
+      "examples": ["App del pasajero", "App del conductor"]
     },
     {
       "id": "gateway",
@@ -24,12 +24,12 @@
       "examples": ["Gateway gestionado", "Backend for Frontend del panel"]
     },
     {
-      "id": "debts-svc",
-      "label": "Servicio de deudas",
+      "id": "trips-svc",
+      "label": "Servicio de viajes",
       "kind": "service",
       "column": 2,
       "row": 0,
-      "responsibility": "Dueño del ciclo de vida de las deudas. Se despliega y escala de forma independiente.",
+      "responsibility": "Dueño del ciclo de vida de los viajes (pedido, asignación, en curso, finalizado). Se despliega y escala de forma independiente.",
       "examples": ["Node.js con su propio pipeline"]
     },
     {
@@ -43,20 +43,20 @@
     },
     {
       "id": "contact-svc",
-      "label": "Servicio de contactos",
+      "label": "Servicio de notificaciones",
       "kind": "service",
       "column": 2,
       "row": 2,
-      "responsibility": "Envía mensajes por canal y respeta ventanas horarias. Escala con el volumen de campañas.",
+      "responsibility": "Envía avisos push, SMS y email al pasajero y al conductor. Escala con el volumen de viajes.",
       "examples": ["Workers que consumen una cola de envíos"]
     },
     {
-      "id": "debts-db",
-      "label": "DB deudas",
+      "id": "trips-db",
+      "label": "DB viajes",
       "kind": "database",
       "column": 3,
       "row": 0,
-      "responsibility": "Base exclusiva del servicio de deudas: nadie más la consulta directamente.",
+      "responsibility": "Base exclusiva del servicio de viajes: nadie más la consulta directamente.",
       "examples": ["PostgreSQL"]
     },
     {
@@ -89,9 +89,9 @@
   ],
   "edges": [
     { "id": "s-client-gateway", "from": "client", "to": "gateway", "kind": "sync" },
-    { "id": "s-gateway-debts", "from": "gateway", "to": "debts-svc", "kind": "sync" },
+    { "id": "s-gateway-trips", "from": "gateway", "to": "trips-svc", "kind": "sync" },
     { "id": "s-gateway-payments", "from": "gateway", "to": "payments-svc", "kind": "sync" },
-    { "id": "s-debts-db", "from": "debts-svc", "to": "debts-db", "kind": "sync" },
+    { "id": "s-trips-db", "from": "trips-svc", "to": "trips-db", "kind": "sync" },
     { "id": "s-payments-db", "from": "payments-svc", "to": "payments-db", "kind": "sync" },
     {
       "id": "s-payments-broker",
@@ -118,11 +118,11 @@
     {
       "title": "2. Cada servicio es dueño de su base",
       "description": "Permite desplegar y cambiar el esquema sin coordinar con otros equipos. A cambio, no hay JOINs ni transacciones entre servicios.",
-      "highlight": ["debts-svc", "debts-db", "payments-svc", "payments-db", "s-debts-db", "s-payments-db"]
+      "highlight": ["trips-svc", "trips-db", "payments-svc", "payments-db", "s-trips-db", "s-payments-db"]
     },
     {
       "title": "3. Los hechos viajan por el broker",
-      "description": "El servicio de contactos se entera del pago por un evento. La consistencia entre servicios es eventual: durante un momento puede enviarse un mensaje a alguien que ya pagó, y el diseño debe tolerarlo.",
+      "description": "El servicio de notificaciones se entera del pago del viaje por un evento. La consistencia entre servicios es eventual: durante un momento el recibo puede no estar listo, y el diseño debe tolerarlo.",
       "highlight": ["payments-svc", "broker", "contact-svc", "s-payments-broker", "s-broker-contact"]
     },
     {

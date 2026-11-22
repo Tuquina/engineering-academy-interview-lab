@@ -35,8 +35,8 @@ function describe(value: string | number | Date): string {
 }
 
 // Type predicate: el compilador confía en la condición.
-function isDebt(value: unknown): value is Debt {
-  return typeof value === "object" && value !== null && "amountCents" in value;
+function isOrder(value: unknown): value is Order {
+  return typeof value === "object" && value !== null && "totalCents" in value;
 }
 ```
 
@@ -82,12 +82,12 @@ function handle(event: PaymentEvent): string {
 
 ```ts
 type Brand<T, B extends string> = T & { readonly __brand: B };
-type DebtId = Brand<string, "DebtId">;
+type OrderId = Brand<string, "OrderId">;
 type CustomerId = Brand<string, "CustomerId">;
 
-const toDebtId = (raw: string): DebtId => {
-  if (!raw.startsWith("debt_")) throw new Error("DebtId inválido");
-  return raw as DebtId; // única aserción, justificada por la validación previa
+const toOrderId = (raw: string): OrderId => {
+  if (!raw.startsWith("ord_")) throw new Error("OrderId inválido");
+  return raw as OrderId; // única aserción, justificada por la validación previa
 };
 ```
 
@@ -97,7 +97,7 @@ const toDebtId = (raw: string): DebtId => {
 import { z } from "zod";
 
 const PaymentSchema = z.object({
-  debtId: z.string().startsWith("debt_"),
+  orderId: z.string().startsWith("ord_"),
   amountCents: z.number().int().positive(),
   paidAt: z.iso.datetime(),
 });

@@ -1,28 +1,28 @@
 import { useEffect, useState } from "react";
 
-export interface Debt {
+export interface Order {
   id: string;
   label: string;
 }
 
-export interface CustomerDebtsProps {
+export interface CustomerOrdersProps {
   customerId: string;
-  fetchDebts: (customerId: string) => Promise<Debt[]>;
+  fetchOrders: (customerId: string) => Promise<Order[]>;
 }
 
-/** Lista las deudas de un cliente. */
-export function CustomerDebts({ customerId, fetchDebts }: CustomerDebtsProps) {
-  const [debts, setDebts] = useState<Debt[] | null>(null);
+/** Lista los pedidos de un cliente. */
+export function CustomerOrders({ customerId, fetchOrders }: CustomerOrdersProps) {
+  const [orders, setOrders] = useState<Order[] | null>(null);
 
   useEffect(() => {
-    fetchDebts(customerId).then(setDebts);
+    fetchOrders(customerId).then(setOrders);
   }, []);
 
-  if (!debts) return <p>Cargando…</p>;
+  if (!orders) return <p>Cargando…</p>;
   return (
     <ul>
-      {debts.map((debt) => (
-        <li key={debt.id}>{debt.label}</li>
+      {orders.map((order) => (
+        <li key={order.id}>{order.label}</li>
       ))}
     </ul>
   );
@@ -31,10 +31,10 @@ export function CustomerDebts({ customerId, fetchDebts }: CustomerDebtsProps) {
 const DELAYS: Record<string, number> = { ana: 1500, bruno: 300 };
 
 /** API falsa para el preview: Ana responde lento y Bruno rápido. */
-function fakeFetchDebts(customerId: string): Promise<Debt[]> {
+function fakeFetchOrders(customerId: string): Promise<Order[]> {
   return new Promise((resolve) =>
     setTimeout(
-      () => resolve([{ id: `${customerId}-1`, label: `Deuda de ${customerId}` }]),
+      () => resolve([{ id: `${customerId}-1`, label: `Pedido de ${customerId}` }]),
       DELAYS[customerId] ?? 500,
     ),
   );
@@ -47,7 +47,7 @@ export default function App() {
       <p>Cliente seleccionado: {customerId}</p>
       <button onClick={() => setCustomerId("ana")}>Ana (lenta)</button>{" "}
       <button onClick={() => setCustomerId("bruno")}>Bruno (rápido)</button>
-      <CustomerDebts customerId={customerId} fetchDebts={fakeFetchDebts} />
+      <CustomerOrders customerId={customerId} fetchOrders={fakeFetchOrders} />
     </main>
   );
 }

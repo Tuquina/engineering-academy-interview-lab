@@ -1,6 +1,6 @@
 export interface PaymentEvent {
   eventId: string;
-  debtId: string;
+  orderId: string;
   amountCents: number;
 }
 
@@ -10,7 +10,7 @@ export interface EventStore {
 }
 
 export interface Ledger {
-  applyPayment(debtId: string, amountCents: number): Promise<void>;
+  applyPayment(orderId: string, amountCents: number): Promise<void>;
 }
 
 export type WebhookResponse =
@@ -26,7 +26,7 @@ export function createPaymentWebhookHandler(deps: { store: EventStore; ledger: L
   return async (payload: unknown): Promise<WebhookResponse> => {
     // Confía en el payload y no deduplica: cada reenvío aplica el pago otra vez.
     const event = payload as PaymentEvent;
-    await deps.ledger.applyPayment(event.debtId, event.amountCents);
+    await deps.ledger.applyPayment(event.orderId, event.amountCents);
     await deps.store.markProcessed(event.eventId);
     return { status: 200, body: { processed: true } };
   };

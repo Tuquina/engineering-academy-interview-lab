@@ -111,7 +111,7 @@ describe("casos clásicos de System Design", () => {
 describe("desafíos de arquitectura", () => {
   it("incluye los cuatro desafíos de la especificación", () => {
     expect(challenges.map((c) => c.slug).sort()).toEqual(
-      ["campaign-orchestrator", "mass-collections", "multi-tenant-agents", "reliable-webhooks"].sort(),
+      ["appointment-reminders", "wallet-ledger", "multi-tenant-agents", "reliable-webhooks"].sort(),
     );
   });
 

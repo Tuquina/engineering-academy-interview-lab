@@ -30,7 +30,7 @@ interviewQuestions:
   - question: "¿Cómo evitarías que dos procesos cambien el estado de la misma entidad a la vez?"
     answer: "Con concurrencia optimista: una columna version y un UPDATE ... WHERE id = $1 AND version = $2. Si no actualiza filas, otro proceso cambió el estado y hay que recargar y reevaluar la transición. También se puede usar SELECT ... FOR UPDATE si la transición es corta."
   - question: "¿Por qué una unión discriminada y no una clase con un campo status?"
-    answer: "Porque cada variante declara exactamente qué datos tiene. Una promesa 'cumplida' tiene la fecha de pago y una 'incumplida' no: con un único tipo, esos campos serían opcionales en todos los estados y habría que validarlos a mano en cada uso."
+    answer: "Porque cada variante declara exactamente qué datos tiene. Una reserva 'confirmada' tiene la fecha de pago y una 'vencida' no: con un único tipo, esos campos serían opcionales en todos los estados y habría que validarlos a mano en cada uso."
 diagrams: []
 related: ["strategy"]
 relatedLessons: ["typescript.runtime-vs-type-system"]
@@ -39,79 +39,79 @@ tags: ["state", "máquina de estados", "uniones discriminadas"]
 
 ## Motivación
 
-Una promesa de pago tiene un ciclo de vida: se registra activa; puede cumplirse (llegó el pago), incumplirse (pasó
-la fecha sin pago suficiente) o cancelarse (el deudor la reemplazó). Una promesa cumplida no puede volver a estar
-activa y una cancelada no puede cumplirse.
+Una reserva de hotel tiene un ciclo de vida: se crea pendiente, con la habitación retenida hasta una hora límite;
+puede confirmarse (llegó el pago), vencer (pasó la hora límite sin pago) o cancelarse (la persona desistió). Una
+reserva confirmada no puede volver a estar pendiente y una cancelada no puede confirmarse.
 
 ## Ejemplo incorrecto
 
 ```ts
-interface PaymentPromise {
+interface Booking {
   id: string;
   amountCents: number;
-  dueDate: string;
-  isFulfilled: boolean;
-  isBroken: boolean;
+  holdUntil: string;
+  isConfirmed: boolean;
+  isExpired: boolean;
   isCancelled: boolean;
   paidAt?: string;
   cancelReason?: string;
 }
 
 // En algún job:
-promise.isBroken = new Date(promise.dueDate) < new Date();
+booking.isExpired = new Date(booking.holdUntil) < new Date();
 // En el webhook de pagos:
-promise.isFulfilled = true;
-promise.paidAt = new Date().toISOString();
+booking.isConfirmed = true;
+booking.paidAt = new Date().toISOString();
 ```
 
-Nada impide una promesa `isFulfilled && isBroken`, ni que el job marque como incumplida una promesa cancelada.
+Nada impide una reserva `isConfirmed && isExpired`, ni que el job marque como vencida una reserva cancelada.
 
 ## Implementación correcta
 
 ```ts
-export type PaymentPromise =
-  | { status: "active"; id: string; amountCents: number; dueDate: string }
-  | { status: "fulfilled"; id: string; amountCents: number; dueDate: string; paidAt: string }
-  | { status: "broken"; id: string; amountCents: number; dueDate: string; detectedAt: string }
-  | { status: "cancelled"; id: string; amountCents: number; dueDate: string; reason: string };
+export type Booking =
+  | { status: "pending"; id: string; amountCents: number; holdUntil: string }
+  | { status: "confirmed"; id: string; amountCents: number; holdUntil: string; paidAt: string }
+  | { status: "expired"; id: string; amountCents: number; holdUntil: string; detectedAt: string }
+  | { status: "cancelled"; id: string; amountCents: number; holdUntil: string; reason: string };
 
-export type PromiseEvent =
+export type BookingEvent =
   | { type: "payment-received"; at: string }
-  | { type: "due-date-passed"; at: string }
+  | { type: "hold-expired"; at: string }
   | { type: "cancelled"; reason: string };
 
 export class InvalidTransition extends Error {}
 
 /** Única forma de cambiar el estado: pura, exhaustiva y fácil de probar como tabla. */
-export function transition(promise: PaymentPromise, event: PromiseEvent): PaymentPromise {
-  if (promise.status !== "active") {
-    throw new InvalidTransition(`No se puede aplicar ${event.type} a una promesa ${promise.status}`);
+export function transition(booking: Booking, event: BookingEvent): Booking {
+  if (booking.status !== "pending") {
+    throw new InvalidTransition(`No se puede aplicar ${event.type} a una reserva ${booking.status}`);
   }
-  const { id, amountCents, dueDate } = promise;
+  const { id, amountCents, holdUntil } = booking;
   switch (event.type) {
     case "payment-received":
-      return { status: "fulfilled", id, amountCents, dueDate, paidAt: event.at };
-    case "due-date-passed":
-      return { status: "broken", id, amountCents, dueDate, detectedAt: event.at };
+      return { status: "confirmed", id, amountCents, holdUntil, paidAt: event.at };
+    case "hold-expired":
+      return { status: "expired", id, amountCents, holdUntil, detectedAt: event.at };
     case "cancelled":
-      return { status: "cancelled", id, amountCents, dueDate, reason: event.reason };
+      return { status: "cancelled", id, amountCents, holdUntil, reason: event.reason };
   }
 }
 ```
 
-`paidAt` sólo existe en promesas cumplidas, y TypeScript obliga a verificar el estado antes de leerlo.
+`paidAt` sólo existe en reservas confirmadas, y TypeScript obliga a verificar el estado antes de leerlo.
 
 ## Ejercicio
 
-El negocio agrega un período de gracia: una promesa vencida pasa primero a `grace` durante 2 días; si llega el
-pago en ese lapso se considera cumplida, si no, incumplida. ¿Qué cambia?
+El negocio agrega un período de gracia: como la pasarela a veces tarda en confirmar, una reserva cuya retención venció
+pasa primero a `grace` durante 15 minutos; si llega el pago en ese lapso se confirma, si no, vence. ¿Qué cambia?
 
 <Reveal>
 
-Se agrega la variante `{ status: "grace"; ...; graceUntil: string }`. La transición `due-date-passed` desde
-`active` ahora lleva a `grace`; desde `grace`, `payment-received` lleva a `fulfilled` y un nuevo evento
-`grace-expired` lleva a `broken`. La guarda inicial deja de ser "sólo desde active" y pasa a validar por estado
-(un `switch` sobre `promise.status` con otro anidado por evento). Los tests de tabla agregan las filas nuevas y
-siguen verificando que las transiciones inválidas lancen error.
+Se agrega la variante `{ status: "grace"; ...; graceUntil: string }`. La transición `hold-expired` desde `pending`
+ahora lleva a `grace`; desde `grace`, `payment-received` lleva a `confirmed` y un nuevo evento `grace-expired` lleva
+a `expired`. La guarda inicial deja de ser "sólo desde pending" y pasa a validar por estado (un `switch` sobre
+`booking.status` con otro anidado por evento). Los tests de tabla agregan las filas nuevas y siguen verificando que
+las transiciones inválidas lancen error. Mientras la reserva está en `grace`, la habitación sigue retenida.
 
 </Reveal>

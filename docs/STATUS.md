@@ -117,7 +117,7 @@ en [guides/adding-exercises.md](guides/adding-exercises.md).
 - **Challenges (módulo `challenges`, `/challenges`):** 12 desafíos con filtros por tipo, tecnología, dificultad y tipo
   de entrevista; pistas progresivas, solución de referencia explicada y preguntas de seguimiento.
   - 8 de código: debounce, throttle, retry con backoff, concurrency limiter, Result type, webhook idempotente,
-    carrera en un cobro, memoria de un agente de cobranzas.
+    carrera en un cobro, memoria de un agente de reservas (seña pendiente).
   - 1 de React (Sandpack + Jest + Testing Library): corregir un `useEffect` problemático.
   - 1 de SQL (envíos demorados).
   - 2 de diseño con rúbrica y autoevaluación: rate limiting y agentes multi-tenant.
@@ -175,8 +175,9 @@ Decisiones en [ADR-0007](adr/0007-architecture-studio-and-interview-arena.md); f
     escalado horizontal, reintentos con backoff y jitter, cache hit/miss y stampede, rate limiting (ventana fija,
     deslizante y token bucket), caída de un servicio y circuit breaker, colas (duplicados, desorden y acumulación).
     Cada uno declara sus simplificaciones y cómo se observa en infraestructura real.
-  - **4 desafíos de arquitectura** (§15.4): cobranzas masivas, plataforma multi-tenant de agentes, webhooks
-    confiables y orquestador de campañas. Requerimientos funcionales y no funcionales, datos de escala, preguntas
+  - **4 desafíos de arquitectura** (§15.4): ledger de una billetera virtual (antes "cobranzas masivas"), orquestador de recordatorios de
+    turnos médicos (antes "orquestador de campañas"), plataforma multi-tenant de agentes, webhooks
+    confiables. Requerimientos funcionales y no funcionales, datos de escala, preguntas
     aclaratorias, espacio de diseño en 8 fases (con el canvas en la fase de componentes), checklist, rúbrica de
     autoevaluación y diseño de referencia.
 - **Interview Arena (`/interview`, módulo `interviews`):** 7 modos (Quick, Technical Deep Dive, Live Coding con

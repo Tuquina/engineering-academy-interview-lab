@@ -20,8 +20,8 @@
       "kind": "actor",
       "column": 0,
       "row": 1,
-      "responsibility": "Inicia la interacción. Podría ser el panel de operadores, otra API o un test E2E.",
-      "examples": ["Panel de operadores", "Webhook de una pasarela"]
+      "responsibility": "Inicia la interacción. Podría ser la caja del local, otra API o un test E2E.",
+      "examples": ["Caja del local", "Webhook de una pasarela"]
     },
     {
       "id": "http",
@@ -56,13 +56,13 @@
     },
     {
       "id": "domain",
-      "label": "Dominio: Debt, Payment",
+      "label": "Dominio: Order, Payment",
       "kind": "domain",
       "column": 3,
       "row": 1,
       "parent": "core",
-      "responsibility": "Reglas de negocio puras: imputar un pago a cuotas, rechazar montos inválidos, calcular saldo. Sin dependencias de infraestructura.",
-      "examples": ["debt.applyPayment(amount)", "Value object Money en centavos"]
+      "responsibility": "Reglas de negocio puras: acreditar un pago a un pedido, rechazar montos inválidos, detectar pagos parciales. Sin dependencias de infraestructura.",
+      "examples": ["order.applyPayment(amount)", "Value object Money en centavos"]
     },
     {
       "id": "repo-port",
@@ -72,7 +72,7 @@
       "row": 2,
       "parent": "core",
       "responsibility": "Interfaz definida por la aplicación según lo que necesita (no según lo que ofrece la base).",
-      "examples": ["interface PaymentRepository { findDebt(id); save(debt) }"]
+      "examples": ["interface OrderRepository { findById(id); save(order) }"]
     },
     {
       "id": "notify-port",
@@ -81,8 +81,8 @@
       "column": 3,
       "row": 0,
       "parent": "core",
-      "responsibility": "Contrato para avisar al deudor, sin saber si el canal es WhatsApp, email o SMS.",
-      "examples": ["interface Notifier { paymentConfirmed(debtorId, amount) }"]
+      "responsibility": "Contrato para avisar al cliente, sin saber si el canal es WhatsApp, email o SMS.",
+      "examples": ["interface Notifier { paymentConfirmed(customerId, amount) }"]
     },
     {
       "id": "pg-adapter",
@@ -109,7 +109,7 @@
       "column": 5,
       "row": 2,
       "responsibility": "Almacenamiento. Es un detalle de infraestructura desde el punto de vista del núcleo.",
-      "examples": ["Tablas debts, payments con restricciones"]
+      "examples": ["Tablas orders, payments con restricciones"]
     },
     {
       "id": "provider",

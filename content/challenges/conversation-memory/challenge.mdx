@@ -1,8 +1,8 @@
 ---
 id: challenge.conversation-memory
 kind: code
-title: "Memoria entre conversaciones de un agente de cobranzas"
-summary: "Decidir si un agente debe contactar a un cliente según promesas, pagos y eventos previos."
+title: "Memoria entre conversaciones de un agente de reservas"
+summary: "Decidir si un agente debe contactar a un huésped según su reserva retenida, sus pagos y los eventos previos."
 difficulty: advanced
 durationMinutes: 40
 technologies: ["typescript"]
@@ -13,47 +13,48 @@ order: 8
 constraints:
   - "La función debe ser pura: recibe los eventos y la fecha de hoy; no usa `Date.now()`."
   - "Los eventos pueden llegar desordenados."
-  - "Las fechas son strings `YYYY-MM-DD` (día local del cliente)."
+  - "Las fechas son strings `YYYY-MM-DD` (día local del huésped)."
 acceptanceCriteria:
-  - "Con una disputa abierta, nunca se contacta."
+  - "Con un reclamo abierto, nunca se contacta."
   - "Si ya hubo un intento de contacto hoy, se espera."
-  - "Con una promesa vigente, se espera hasta el día anterior al vencimiento, en el que se envía un recordatorio."
-  - "Si la promesa venció sin pagos que la cubran, se contacta con estrategia de promesa incumplida."
-  - "Una promesa cumplida (pagos desde la promesa ≥ monto prometido) no genera contacto."
-  - "La información más reciente prevalece: una promesa nueva reemplaza a la anterior y una cancelación la anula."
+  - "Con una reserva retenida vigente, se espera hasta el día anterior al vencimiento de la seña, en el que se envía un recordatorio."
+  - "Si el plazo de la seña venció sin pagos que la cubran, se contacta con la estrategia de seña vencida."
+  - "Una seña pagada (pagos desde la reserva ≥ monto de la seña) no genera contacto."
+  - "La información más reciente prevalece: una reserva nueva reemplaza a la anterior y una cancelación la anula."
   - "Cada decisión incluye un motivo legible."
 hints:
   - "Empezá ordenando los eventos por fecha: así 'el más reciente' es simplemente el último."
-  - "Resolvé primero las reglas que bloquean (disputa, contacto de hoy) y después la lógica de promesas."
-  - "Para saber si una promesa se cumplió, sumá los pagos con fecha posterior o igual a la de la promesa."
+  - "Resolvé primero las reglas que bloquean (reclamo, contacto de hoy) y después la lógica de la seña."
+  - "Para saber si la seña está pagada, sumá los pagos con fecha posterior o igual a la de la reserva."
 followUpQuestions:
-  - "¿Por qué la promesa de pago no debería vivir sólo en el historial del chat del agente?"
-  - "¿Qué harías si el cliente dice por teléfono que ya pagó pero el pago todavía no aparece?"
-  - "¿Cómo versionarías estas reglas por cliente (tenant) sin desplegar código?"
+  - "¿Por qué la reserva retenida no debería vivir sólo en el historial del chat del agente?"
+  - "¿Qué harías si el huésped dice por teléfono que ya pagó la seña pero el pago todavía no aparece?"
+  - "¿Cómo versionarías estas reglas por hotel (tenant) sin desplegar código?"
 relatedLessons: []
 ---
 
 ## Contexto
 
-Un agente de IA de cobranzas habla con un cliente el día 1 y obtiene una **promesa de pago** para el día 15. El día 5,
-el orquestador de campañas intenta incluirlo en una campaña nueva. Si el agente lo contacta, el cliente recibe un
-mensaje que contradice lo acordado: mala experiencia y, en algunos mercados, un problema regulatorio.
+Un agente de IA de un hotel habla con un huésped el día 1 y le **retiene una habitación** hasta el día 15, a la espera de
+la seña. El día 5, el orquestador de avisos intenta incluirlo en una campaña de "completá tu reserva". Si el agente lo
+contacta, el huésped recibe un mensaje que contradice lo acordado: mala experiencia y, si el aviso insiste, un
+reclamo.
 
 La decisión no debe depender de lo que "recuerde" el modelo en su contexto, sino del **estado del negocio**
-reconstruido a partir de eventos: promesas, pagos, intentos de contacto y disputas.
+reconstruido a partir de eventos: reservas retenidas, pagos, intentos de contacto y reclamos.
 
 ## Qué tenés que implementar
 
 ```ts
 export type MemoryEvent =
-  | { type: "promise-made"; at: string; dueDate: string; amountCents: number }
-  | { type: "promise-cancelled"; at: string }
+  | { type: "hold-created"; at: string; dueDate: string; amountCents: number }
+  | { type: "hold-cancelled"; at: string }
   | { type: "payment-received"; at: string; amountCents: number }
   | { type: "contact-attempt"; at: string }
-  | { type: "dispute-opened"; at: string };
+  | { type: "complaint-opened"; at: string };
 
 export type ContactDecision =
-  | { action: "contact"; strategy: "standard" | "promise-reminder" | "broken-promise"; reason: string }
+  | { action: "contact"; strategy: "standard" | "deposit-reminder" | "deposit-overdue"; reason: string }
   | { action: "wait"; reason: string }
   | { action: "do-not-contact"; reason: string };
 
@@ -62,11 +63,11 @@ export function decideNextContact(events: readonly MemoryEvent[], today: string)
 
 ## Ejemplo
 
-| Eventos                             | Hoy        | Decisión                       |
-| ----------------------------------- | ---------- | ------------------------------ |
-| Promesa el 01 para el 15 por $1.500 | 2026-03-05 | `wait` (promesa vigente)       |
-| (igual)                             | 2026-03-14 | `contact` / `promise-reminder` |
-| (igual), sin pagos                  | 2026-03-16 | `contact` / `broken-promise`   |
-| (igual) + pago de $1.500 el 12      | 2026-03-16 | `wait` (promesa cumplida)      |
+| Eventos                                   | Hoy        | Decisión                          |
+| ----------------------------------------- | ---------- | --------------------------------- |
+| Reserva el 01, seña de $1.500 hasta el 15 | 2026-03-05 | `wait` (reserva retenida vigente) |
+| (igual)                                   | 2026-03-14 | `contact` / `deposit-reminder`    |
+| (igual), sin pagos                        | 2026-03-16 | `contact` / `deposit-overdue`     |
+| (igual) + pago de $1.500 el 12            | 2026-03-16 | `wait` (seña pagada)              |
 
 El helper `addDays(day, n)` ya está implementado en el starter.

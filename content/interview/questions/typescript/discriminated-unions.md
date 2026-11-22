@@ -22,7 +22,7 @@ relatedPatterns: ["state"]
 ---
 
 Una unión discriminada combina tipos que comparten una propiedad literal, por ejemplo
-`{ status: "loading" } | { status: "error"; error: string } | { status: "success"; data: Debt[] }`.
+`{ status: "loading" } | { status: "error"; error: string } | { status: "success"; data: Order[] }`.
 
 Al hacer `if (state.status === "success")`, TypeScript **estrecha** el tipo y permite usar `data` sólo en esa rama.
 Esto hace **irrepresentables los estados imposibles**: no puede haber `data` y `error` a la vez, como pasa con

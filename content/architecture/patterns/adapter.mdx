@@ -41,23 +41,23 @@ tags: ["adapter", "integraciones", "proveedores", "anticorruption"]
 
 ## Motivación
 
-La plataforma envía mensajes de cobranza por un proveedor de WhatsApp. El negocio sólo necesita "enviar este
-mensaje a este deudor y saber si se aceptó". El SDK del proveedor, en cambio, tiene su propio formato de números,
+Una app de delivery avisa por WhatsApp que el pedido salió del local. El negocio sólo necesita "avisarle a este
+cliente que su pedido está en camino y saber si el mensaje se aceptó". El SDK del proveedor, en cambio, tiene su propio formato de números,
 plantillas con parámetros posicionales, códigos de error numéricos y excepciones propias.
 
 ## Ejemplo incorrecto
 
 ```ts
-// En el caso de uso de campañas:
+// En el caso de uso de despacho:
 import { WaClient, WaError } from "proveedor-whatsapp-sdk";
 
 const client = new WaClient(process.env.WA_TOKEN!);
 
-export async function contactDebtor(debtor: Debtor) {
+export async function notifyOrderOnTheWay(order: Order) {
   try {
     await client.messages.create({
-      to: `whatsapp:+${debtor.phone.replace(/\D/g, "")}`,
-      template: { name: "recordatorio_v3", params: [debtor.name, String(debtor.amountCents / 100)] },
+      to: `whatsapp:+${order.customer.phone.replace(/\D/g, "")}`,
+      template: { name: "pedido_en_camino_v3", params: [order.customer.name, String(order.etaMinutes)] },
     });
   } catch (error) {
     if (error instanceof WaError && error.code === 131047) {
@@ -79,24 +79,28 @@ export type SendResult =
   | { status: "rejected"; reason: "outside-window" | "invalid-number" | "provider-error" };
 
 export interface MessageSender {
-  sendReminder(input: { phoneE164: string; debtorName: string; amountCents: number }): Promise<SendResult>;
+  sendDeliveryUpdate(input: {
+    phoneE164: string;
+    customerName: string;
+    etaMinutes: number;
+  }): Promise<SendResult>;
 }
 
 // Adaptador: la única pieza que conoce el SDK.
 export class WhatsAppSender implements MessageSender {
   constructor(private readonly client: WaClient) {}
 
-  async sendReminder(input: {
+  async sendDeliveryUpdate(input: {
     phoneE164: string;
-    debtorName: string;
-    amountCents: number;
+    customerName: string;
+    etaMinutes: number;
   }): Promise<SendResult> {
     try {
       const response = await this.client.messages.create({
         to: `whatsapp:${input.phoneE164}`,
         template: {
-          name: "recordatorio_v3",
-          params: [input.debtorName, (input.amountCents / 100).toFixed(2)],
+          name: "pedido_en_camino_v3",
+          params: [input.customerName, String(input.etaMinutes)],
         },
       });
       return { status: "accepted", messageId: response.sid };
@@ -122,7 +126,7 @@ usar?
 <Reveal>
 
 El caso de uso no cambia si sigue dependiendo de `MessageSender`. Se agrega un `SmsSender` que implementa el mismo
-contrato. La decisión de canal es una regla de negocio (preferencia del deudor, ventana horaria, costo) y no debe
+contrato. La decisión de canal es una regla de negocio (preferencia del cliente, costo, urgencia del aviso) y no debe
 vivir en ningún adaptador: puede ser una estrategia que elige el `MessageSender` adecuado, o un `MessageSender`
 compuesto que intenta WhatsApp y cae a SMS ante `outside-window`.
 

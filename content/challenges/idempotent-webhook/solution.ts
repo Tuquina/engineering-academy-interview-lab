@@ -1,6 +1,6 @@
 export interface PaymentEvent {
   eventId: string;
-  debtId: string;
+  orderId: string;
   amountCents: number;
 }
 
@@ -10,7 +10,7 @@ export interface EventStore {
 }
 
 export interface Ledger {
-  applyPayment(debtId: string, amountCents: number): Promise<void>;
+  applyPayment(orderId: string, amountCents: number): Promise<void>;
 }
 
 export type WebhookResponse =
@@ -26,10 +26,10 @@ function isNonEmptyString(value: unknown): value is string {
 function parsePaymentEvent(payload: unknown): PaymentEvent | null {
   if (typeof payload !== "object" || payload === null) return null;
   const candidate = payload as Record<string, unknown>;
-  const { eventId, debtId, amountCents } = candidate;
-  if (!isNonEmptyString(eventId) || !isNonEmptyString(debtId)) return null;
+  const { eventId, orderId, amountCents } = candidate;
+  if (!isNonEmptyString(eventId) || !isNonEmptyString(orderId)) return null;
   if (typeof amountCents !== "number" || !Number.isInteger(amountCents) || amountCents <= 0) return null;
-  return { eventId, debtId, amountCents };
+  return { eventId, orderId, amountCents };
 }
 
 /**
@@ -42,7 +42,7 @@ export function createPaymentWebhookHandler(deps: { store: EventStore; ledger: L
 
   const process = async (event: PaymentEvent): Promise<"processed" | "duplicate"> => {
     if (await deps.store.wasProcessed(event.eventId)) return "duplicate";
-    await deps.ledger.applyPayment(event.debtId, event.amountCents);
+    await deps.ledger.applyPayment(event.orderId, event.amountCents);
     await deps.store.markProcessed(event.eventId);
     return "processed";
   };

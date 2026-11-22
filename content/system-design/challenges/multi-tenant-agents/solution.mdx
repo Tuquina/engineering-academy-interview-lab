@@ -18,12 +18,12 @@ agent_versions (
   UNIQUE (agent_id, version_number)
 )
 agent_deployments (agent_id PRIMARY KEY, active_version_id, candidate_version_id, candidate_percent, updated_by, updated_at)
-conversations (id, tenant_id, agent_version_id, debtor_id, status, started_at)
+conversations (id, tenant_id, agent_version_id, customer_id, status, started_at)
 ```
 
 - Los borradores se editan; al **publicar**, la versión queda **inmutable**.
 - `agent_deployments` apunta a la versión activa: **rollback** es cambiar el puntero, instantáneo y sin redeploy.
-- **Rollout gradual:** un porcentaje de conversaciones nuevas usa la versión candidata, elegido por hash del deudor
+- **Rollout gradual:** un porcentaje de conversaciones nuevas usa la versión candidata, elegido por hash del cliente
   para que sea estable.
 
 ## Conversaciones ligadas a una versión

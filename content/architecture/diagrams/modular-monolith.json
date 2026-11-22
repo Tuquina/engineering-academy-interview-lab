@@ -21,7 +21,7 @@
       "column": 0,
       "row": 1,
       "responsibility": "Consumidores externos: no saben que internamente hay módulos.",
-      "examples": ["Panel de operadores", "API para tenants"]
+      "examples": ["Tienda web", "API para vendedores"]
     },
     {
       "id": "http",
@@ -31,19 +31,19 @@
       "row": 1,
       "parent": "deploy",
       "responsibility": "Adaptadores HTTP delgados que delegan en la API pública de cada módulo.",
-      "examples": ["app/api/debts/route.ts"]
+      "examples": ["app/api/orders/route.ts"]
     },
     {
-      "id": "collections",
-      "label": "Módulo Cobranzas",
+      "id": "orders",
+      "label": "Módulo Pedidos",
       "kind": "service",
       "column": 2,
       "row": 0,
       "parent": "deploy",
-      "responsibility": "Deudas, priorización y estrategia de contacto. Expone funciones públicas; sus tablas y clases internas son privadas.",
+      "responsibility": "Carrito, pedidos y su estado. Expone funciones públicas; sus tablas y clases internas son privadas.",
       "examples": [
-        "collections/index.ts exporta getDebtSummary()",
-        "Regla de lint que prohíbe importar collections/internal"
+        "orders/index.ts exporta getOrderSummary()",
+        "Regla de lint que prohíbe importar orders/internal"
       ]
     },
     {
@@ -53,7 +53,7 @@
       "column": 2,
       "row": 2,
       "parent": "deploy",
-      "responsibility": "Registro e imputación de pagos. Publica un evento cuando se registra un pago.",
+      "responsibility": "Registro y conciliación de pagos. Publica un evento cuando se registra un pago.",
       "examples": ["payments.registerPayment()", "Evento PaymentRegistered"]
     },
     {
@@ -67,14 +67,14 @@
       "examples": ["EventEmitter tipado en proceso", "Tabla outbox + worker"]
     },
     {
-      "id": "campaigns",
-      "label": "Módulo Campañas",
+      "id": "shipping",
+      "label": "Módulo Envíos",
       "kind": "service",
       "column": 4,
       "row": 1,
       "parent": "deploy",
-      "responsibility": "Decide a quién contactar y cuándo. Reacciona a pagos para no contactar a quien ya pagó.",
-      "examples": ["onPaymentRegistered → cancelar contactos pendientes"]
+      "responsibility": "Arma y despacha los envíos. Reacciona a pagos para despachar sólo lo cobrado.",
+      "examples": ["onPaymentRegistered → crear el envío del pedido"]
     },
     {
       "id": "db",
@@ -83,16 +83,16 @@
       "column": 5,
       "row": 1,
       "responsibility": "Una base, pero cada módulo es dueño de sus tablas. Ningún módulo hace JOIN sobre tablas de otro.",
-      "examples": ["Esquemas collections.*, payments.*, campaigns.*"]
+      "examples": ["Esquemas orders.*, payments.*, shipping.*"]
     }
   ],
   "edges": [
     { "id": "m-client-http", "from": "client", "to": "http", "kind": "sync" },
-    { "id": "m-http-collections", "from": "http", "to": "collections", "kind": "sync" },
+    { "id": "m-http-orders", "from": "http", "to": "orders", "kind": "sync" },
     { "id": "m-http-payments", "from": "http", "to": "payments", "kind": "sync" },
     {
-      "id": "m-collections-payments",
-      "from": "collections",
+      "id": "m-orders-payments",
+      "from": "orders",
       "to": "payments",
       "kind": "sync",
       "label": "API pública"
@@ -104,29 +104,29 @@
       "kind": "async",
       "label": "PaymentRegistered"
     },
-    { "id": "m-bus-campaigns", "from": "bus", "to": "campaigns", "kind": "async" },
-    { "id": "m-campaigns-db", "from": "campaigns", "to": "db", "kind": "sync", "label": "campaigns.*" }
+    { "id": "m-bus-shipping", "from": "bus", "to": "shipping", "kind": "async" },
+    { "id": "m-shipping-db", "from": "shipping", "to": "db", "kind": "sync", "label": "shipping.*" }
   ],
   "steps": [
     {
       "title": "1. Un despliegue, varios módulos",
       "description": "Operar un solo artefacto es barato: un pipeline, un log, transacciones locales. La modularidad está en el código, no en la red.",
-      "highlight": ["http", "collections", "payments", "campaigns", "bus"]
+      "highlight": ["http", "orders", "payments", "shipping", "bus"]
     },
     {
       "title": "2. Los módulos se llaman por su API pública",
-      "description": "Cobranzas consulta a Pagos a través de funciones exportadas, nunca leyendo sus tablas. Ese contrato es lo que permitiría extraer el módulo después.",
-      "highlight": ["collections", "payments", "m-collections-payments"]
+      "description": "Pedidos consulta a Pagos a través de funciones exportadas, nunca leyendo sus tablas. Ese contrato es lo que permitiría extraer el módulo después.",
+      "highlight": ["orders", "payments", "m-orders-payments"]
     },
     {
       "title": "3. Los hechos se comunican con eventos",
-      "description": "Pagos no conoce a Campañas: publica un evento y quien le interese reacciona. Así se evita el acoplamiento circular entre módulos.",
-      "highlight": ["payments", "bus", "campaigns", "m-payments-bus", "m-bus-campaigns"]
+      "description": "Pagos no conoce a Envíos: publica un evento y quien le interese reacciona. Así se evita el acoplamiento circular entre módulos.",
+      "highlight": ["payments", "bus", "shipping", "m-payments-bus", "m-bus-shipping"]
     },
     {
       "title": "4. Cada módulo es dueño de sus datos",
       "description": "Un esquema por módulo hace visible el acoplamiento. Si un módulo necesita datos de otro, los pide por su API o mantiene una copia a partir de eventos.",
-      "highlight": ["db", "campaigns", "m-campaigns-db"]
+      "highlight": ["db", "shipping", "m-shipping-db"]
     }
   ]
 }

@@ -1,0 +1,81 @@
+---
+id: sd.appointment-reminders
+title: "Orquestador de recordatorios de turnos médicos"
+summary: "Decidir a quién recordar un turno, cuándo y por qué canal, respetando ventanas horarias, frecuencia máxima, turnos cancelados y políticas por clínica."
+difficulty: advanced
+durationMinutes: 45
+order: 4
+topics: ["scheduling", "políticas configurables", "colas", "zonas horarias", "concurrencia"]
+functionalRequirements:
+  - "Cada clínica define reglas de recordatorio por tipo de turno (por ejemplo, 72 h y 24 h antes), canales (WhatsApp, SMS, email, voz) y prioridad."
+  - "Los mensajes sólo se envían dentro de la ventana horaria permitida en la zona horaria del paciente."
+  - "Se respeta una frecuencia máxima de mensajes por paciente (por ejemplo, 5 por semana entre todas las clínicas)."
+  - "Un turno cancelado o reprogramado no recibe recordatorios de la fecha vieja."
+  - "Las políticas (ventanas, frecuencia, canales permitidos) son configurables por clínica y por regulación."
+nonFunctionalRequirements:
+  - "Nunca enviar fuera de la ventana permitida ni superar la frecuencia máxima."
+  - "Nunca enviar dos veces el mismo recordatorio por una condición de carrera."
+  - "Los picos (lunes a la mañana, campañas de vacunación) no deben saturar a los proveedores de mensajería."
+  - "Cada decisión de enviar o no enviar debe poder explicarse."
+scale:
+  - "1 millón de turnos con recordatorios pendientes."
+  - "Hasta 400.000 recordatorios por día, concentrados en las primeras horas de cada ventana."
+  - "Proveedores con límites de envío por segundo y por número de origen."
+clarifyingQuestions:
+  - question: "¿La frecuencia máxima se cuenta por paciente entre todas las clínicas o por clínica?"
+    why: "Entre todas obliga a un contador compartido y transaccional por paciente; por clínica se simplifica pero puede saturar a quien se atiende en varias."
+  - question: "¿Qué cuenta como mensaje: el intento o la entrega?"
+    why: "Cambia cuándo se incrementa el contador y qué pasa con los envíos fallidos."
+  - question: "¿Qué pasa con un paciente que cancela el turno mientras su recordatorio está en cola?"
+    why: "Requiere revalidar las políticas y el estado del turno justo antes de enviar, no sólo al planificar."
+  - question: "¿Las ventanas dependen de la zona horaria del paciente o de la clínica?"
+    why: "Con pacientes en varias zonas (telemedicina), la planificación debe hacerse en hora local de cada uno."
+  - question: "¿Los canales tienen costos distintos y preferencias del paciente?"
+    why: "Afecta la estrategia de elección de canal y el orden de fallback."
+checklist:
+  - "Separación entre planificar (quién y cuándo) y ejecutar (enviar)."
+  - "Revalidación de políticas y del estado del turno justo antes del envío."
+  - "Contador de frecuencia por paciente con control de concurrencia (transacción o lock por paciente)."
+  - "Ventanas horarias evaluadas en la zona horaria del paciente."
+  - "Turnos cancelados o reprogramados excluidos."
+  - "Políticas por clínica versionadas y evaluadas como reglas componibles."
+  - "Rate limiting hacia cada proveedor y cola de envíos."
+  - "Registro de la decisión (enviar o no) con sus motivos."
+  - "Idempotencia del envío por (turno, regla de recordatorio)."
+rubric:
+  - id: plan-execute
+    criterion: "Planificar y ejecutar por separado"
+    description: "Un planificador genera recordatorios candidatos y un ejecutor los envía revalidando políticas al momento del envío."
+    weight: 3
+  - id: frequency
+    criterion: "Frecuencia sin carreras"
+    description: "Contador por paciente con transacción, lock por paciente o restricción, de modo que dos workers no superen el máximo."
+    weight: 3
+  - id: windows
+    criterion: "Ventanas horarias correctas"
+    description: "Evalúa la ventana en la zona horaria del paciente, incluidos feriados y cambios de horario."
+    weight: 2
+  - id: policies
+    criterion: "Políticas configurables y explicables"
+    description: "Reglas por clínica y regulación, versionadas, componibles, con el motivo de cada decisión registrado."
+    weight: 2
+  - id: throughput
+    criterion: "Capacidad y límites de proveedores"
+    description: "Distribuye los envíos en la ventana, cola con rate limiting por proveedor y backpressure."
+    weight: 2
+  - id: idempotency
+    criterion: "Envío idempotente"
+    description: "Clave por turno y regla de recordatorio para no enviar dos veces el mismo mensaje."
+    weight: 1
+relatedPatterns: ["strategy", "state", "circuit-breaker"]
+relatedSimulations: ["rate-limiting", "queue-processing"]
+---
+
+Una plataforma de turnos médicos envía recordatorios para bajar el ausentismo. Hoy un cron recorre los turnos cada
+mañana y envía un mensaje a todos los que tienen turno en los próximos días.
+
+Los problemas: pacientes que reciben mensajes a las 7 de la mañana en su zona horaria, recordatorios de turnos que ya
+se cancelaron, pacientes que se atienden en tres clínicas y reciben ocho mensajes el mismo día, y el proveedor de
+WhatsApp bloqueando envíos por exceso de tráfico los lunes a la mañana.
+
+Diseñá el orquestador de recordatorios.

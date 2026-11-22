@@ -13,7 +13,7 @@ benefits:
   - "Cada servicio conserva su autonomía y su base."
   - "El estado de la saga deja un registro auditable de qué ocurrió."
 costs:
-  - "Los estados intermedios son visibles: otros pueden ver un plan pendiente que luego se cancela."
+  - "Los estados intermedios son visibles: otros pueden ver una inscripción pendiente que luego se cancela."
   - "Diseñar compensaciones correctas es difícil; algunas acciones no se pueden deshacer (un mensaje enviado)."
   - "Requiere idempotencia en cada paso y compensación, porque todo se reintenta."
 alternatives:
@@ -44,54 +44,55 @@ tags: ["saga", "compensación", "orquestación", "consistencia"]
 
 ## Motivación
 
-Acordar un plan de pagos requiere crear el plan (servicio de planes), cobrar la primera cuota (servicio de pagos)
-y enviar la confirmación (servicio de notificaciones). Si el cobro falla, el plan no debe quedar activo.
+Inscribir a un alumno en un curso pago requiere reservar la vacante (servicio de inscripciones), cobrar la matrícula
+(servicio de pagos) y enviar la confirmación (servicio de notificaciones). Si el cobro falla, la vacante no debe
+quedar ocupada.
 
 ## Ejemplo incorrecto
 
 ```ts
-export async function createPaymentPlan(input: PlanInput) {
-  const plan = await plansApi.create(input); // servicio 1
-  await paymentsApi.charge(plan.firstInstallment); // servicio 2: si falla, el plan queda creado
-  await notificationsApi.sendConfirmation(plan.id); // servicio 3
-  return plan;
+export async function enrollInCourse(input: EnrollmentInput) {
+  const enrollment = await enrollmentsApi.create(input); // servicio 1
+  await paymentsApi.charge(enrollment.fee); // servicio 2: si falla, la vacante queda ocupada
+  await notificationsApi.sendConfirmation(enrollment.id); // servicio 3
+  return enrollment;
 }
 ```
 
-Si el proceso cae después del paso 1, nadie sabe que hay un plan huérfano. Si `charge` falla por timeout, no se
+Si el proceso cae después del paso 1, nadie sabe que hay una vacante ocupada sin pagar. Si `charge` falla por timeout, no se
 sabe si cobró o no, y reintentarlo puede cobrar dos veces.
 
 ## Implementación correcta
 
 ```ts
-type Step = "create-plan" | "charge" | "confirm" | "done" | "compensating" | "failed";
+type Step = "reserve-seat" | "charge" | "confirm" | "done" | "compensating" | "failed";
 
-interface PlanSaga {
+interface EnrollmentSaga {
   id: string;
   step: Step;
-  planId?: string;
+  enrollmentId?: string;
   chargeId?: string;
 }
 
-export async function advance(saga: PlanSaga, deps: SagaDeps): Promise<PlanSaga> {
+export async function advance(saga: EnrollmentSaga, deps: SagaDeps): Promise<EnrollmentSaga> {
   const key = (step: string) => `${saga.id}:${step}`; // idempotencia por saga y paso
   switch (saga.step) {
-    case "create-plan": {
-      const plan = await deps.plans.createPending(saga.id, key("create-plan"));
-      return deps.store.save({ ...saga, planId: plan.id, step: "charge" });
+    case "reserve-seat": {
+      const enrollment = await deps.enrollments.createPending(saga.id, key("reserve-seat"));
+      return deps.store.save({ ...saga, enrollmentId: enrollment.id, step: "charge" });
     }
     case "charge": {
-      const result = await deps.payments.charge(saga.planId!, key("charge"));
+      const result = await deps.payments.charge(saga.enrollmentId!, key("charge"));
       if (result.status === "declined") return deps.store.save({ ...saga, step: "compensating" });
-      await deps.plans.activate(saga.planId!, key("activate"));
+      await deps.enrollments.activate(saga.enrollmentId!, key("activate"));
       return deps.store.save({ ...saga, chargeId: result.chargeId, step: "confirm" });
     }
     case "confirm": {
-      await deps.notifications.planConfirmed(saga.planId!, key("confirm")); // no compensable: va al final
+      await deps.notifications.enrollmentConfirmed(saga.enrollmentId!, key("confirm")); // no compensable: va al final
       return deps.store.save({ ...saga, step: "done" });
     }
     case "compensating": {
-      await deps.plans.cancel(saga.planId!, key("cancel-plan"));
+      await deps.enrollments.cancel(saga.enrollmentId!, key("release-seat"));
       return deps.store.save({ ...saga, step: "failed" });
     }
     default:

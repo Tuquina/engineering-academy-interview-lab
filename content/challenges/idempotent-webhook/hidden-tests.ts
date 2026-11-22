@@ -19,18 +19,18 @@ function ledgerSpy(failTimes = 0): Ledger & { applied: string[] } {
   let failures = 0;
   return {
     applied,
-    async applyPayment(debtId) {
+    async applyPayment(orderId) {
       await sleep(10);
       if (failures < failTimes) {
         failures++;
         throw new Error("ledger no disponible");
       }
-      applied.push(debtId);
+      applied.push(orderId);
     },
   };
 }
 
-const event = { eventId: "evt_9", debtId: "debt_9", amountCents: 1000 };
+const event = { eventId: "evt_9", orderId: "ord_9", amountCents: 1000 };
 
 test(
   "entregas simultáneas del mismo evento aplican el pago una sola vez",
@@ -51,7 +51,7 @@ test(
     const handle = createPaymentWebhookHandler({ store: memoryStore(), ledger });
     expect((await handle(event)).status).toBe(500);
     expect(await handle(event)).toEqual({ status: 200, body: { processed: true } });
-    expect(ledger.applied).toEqual(["debt_9"]);
+    expect(ledger.applied).toEqual(["ord_9"]);
   },
   { category: "robustness" },
 );
@@ -64,10 +64,10 @@ test(
       null,
       "evento",
       {},
-      { eventId: "", debtId: "d", amountCents: 1 },
-      { eventId: "e", debtId: "d", amountCents: 10.5 },
-      { eventId: "e", debtId: "d", amountCents: -100 },
-      { eventId: "e", debtId: 42, amountCents: 100 },
+      { eventId: "", orderId: "d", amountCents: 1 },
+      { eventId: "e", orderId: "d", amountCents: 10.5 },
+      { eventId: "e", orderId: "d", amountCents: -100 },
+      { eventId: "e", orderId: 42, amountCents: 100 },
     ];
     for (const payload of invalid) {
       expect((await handle(payload)).status).toBe(400);
@@ -84,7 +84,7 @@ test(
     const start = Date.now();
     await Promise.all(
       ["a", "b", "c", "d"].map((id) =>
-        handle({ eventId: `evt_${id}`, debtId: `debt_${id}`, amountCents: 100 }),
+        handle({ eventId: `evt_${id}`, orderId: `ord_${id}`, amountCents: 100 }),
       ),
     );
     expect(ledger.applied).toHaveLength(4);

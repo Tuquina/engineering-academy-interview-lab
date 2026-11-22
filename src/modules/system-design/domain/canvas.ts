@@ -195,7 +195,7 @@ export const COMPONENT_CATALOG: Readonly<Record<ComponentType, ComponentSpec>> =
       {
         key: "schedule",
         label: "Programación",
-        placeholder: "p. ej. cada 5 min, 09:00 hora local del deudor",
+        placeholder: "p. ej. cada 5 min, 09:00 hora local del paciente",
       },
       { key: "overlap", label: "Solapamiento", options: ["Evitar con lock", "Permitir"] },
     ],

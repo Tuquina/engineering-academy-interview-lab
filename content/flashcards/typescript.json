@@ -15,7 +15,7 @@
     {
       "id": "ts.structural-typing",
       "front": "Tipado estructural vs nominal: ¿qué decide la compatibilidad en TypeScript?",
-      "back": "La forma (propiedades y sus tipos), no el nombre ni la herencia. Dos interfaces distintas con la misma forma son intercambiables; por eso alias como `CustomerId` y `DebtId` (ambos `string`) no se distinguen sin branded types.",
+      "back": "La forma (propiedades y sus tipos), no el nombre ni la herencia. Dos interfaces distintas con la misma forma son intercambiables; por eso alias como `CustomerId` y `OrderId` (ambos `string`) no se distinguen sin branded types.",
       "difficulty": "intermediate",
       "tags": ["tipos"],
       "lessonId": "typescript.runtime-vs-type-system"

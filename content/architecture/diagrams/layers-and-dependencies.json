@@ -32,7 +32,11 @@
       "row": 0,
       "parent": "clean",
       "responsibility": "Controllers, presenters y gateways: convierten entre el formato de los frameworks y el de los casos de uso.",
-      "examples": ["Route Handler delgado", "DrizzleDebtRepository", "Presenter que arma el DTO de respuesta"]
+      "examples": [
+        "Route Handler delgado",
+        "DrizzleShipmentRepository",
+        "Presenter que arma el DTO de respuesta"
+      ]
     },
     {
       "id": "usecases",
@@ -42,7 +46,7 @@
       "row": 0,
       "parent": "clean",
       "responsibility": "Reglas de la aplicación: orquestan entidades y declaran las interfaces (puertos) que necesitan.",
-      "examples": ["AssignDebtsToCampaign", "interface DebtRepository"]
+      "examples": ["AssignShipmentsToRoute", "interface ShipmentRepository"]
     },
     {
       "id": "entities",
@@ -52,7 +56,7 @@
       "row": 0,
       "parent": "clean",
       "responsibility": "Reglas de negocio de la empresa, las más estables. No dependen de nada.",
-      "examples": ["Debt, Installment, PaymentPromise", "Value objects Money y DateRange"]
+      "examples": ["Shipment, Package, DeliveryAttempt", "Value objects Money y DateRange"]
     },
     {
       "id": "layered",
@@ -71,7 +75,7 @@
       "row": 2,
       "parent": "layered",
       "responsibility": "Controllers y vistas.",
-      "examples": ["DebtController"]
+      "examples": ["ShipmentController"]
     },
     {
       "id": "business",
@@ -81,7 +85,7 @@
       "row": 2,
       "parent": "layered",
       "responsibility": "Servicios con reglas de negocio que importan directamente el acceso a datos.",
-      "examples": ["DebtService importa DebtDao"]
+      "examples": ["ShipmentService importa ShipmentDao"]
     },
     {
       "id": "data",
@@ -91,7 +95,7 @@
       "row": 2,
       "parent": "layered",
       "responsibility": "DAOs u ORM. Al estar 'abajo', sus tipos y excepciones se filtran hacia el negocio.",
-      "examples": ["DebtDao con el ORM", "Entidades del ORM usadas como modelo de negocio"]
+      "examples": ["ShipmentDao con el ORM", "Entidades del ORM usadas como modelo de negocio"]
     }
   ],
   "edges": [
@@ -134,7 +138,7 @@
     },
     {
       "title": "3. La inversión está en el repositorio",
-      "description": "El caso de uso declara la interfaz DebtRepository; el adaptador la implementa. La flecha de dependencia va del adaptador al caso de uso, al revés que en capas.",
+      "description": "El caso de uso declara la interfaz ShipmentRepository; el adaptador la implementa. La flecha de dependencia va del adaptador al caso de uso, al revés que en capas.",
       "highlight": ["adapters", "usecases", "d-adapters-usecases", "d-business-data"]
     },
     {

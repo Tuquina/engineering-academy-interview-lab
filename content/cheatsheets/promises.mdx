@@ -16,7 +16,7 @@ relatedLessons: ["typescript.promises-task-completablefuture", "nodejs.event-loo
 | La primera que salga bien               | `Promise.any`        | Rechaza con `AggregateError` si fallan todas      |
 
 ```ts
-const [debt, history] = await Promise.all([getDebt(id), getHistory(id)]);
+const [order, shipment] = await Promise.all([getOrder(id), getShipment(id)]);
 
 const results = await Promise.allSettled(customers.map(sendReminder));
 const failed = results.filter((r) => r.status === "rejected");

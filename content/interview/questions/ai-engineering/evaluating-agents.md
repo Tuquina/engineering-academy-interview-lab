@@ -24,11 +24,11 @@ relatedLessons: []
 
 Como el mismo input puede producir salidas distintas, no alcanza con un test que pasa una vez. Armaría:
 
-1. **Dataset de casos** representativos: los flujos comunes (deudor que promete pagar, que discute la deuda, que
-   pide un plan), casos límite e intentos adversarios (prompt injection, pedidos fuera de política). Cada caso con
+1. **Dataset de casos** representativos: los flujos comunes (cliente que pregunta por su pedido, que pide una
+   devolución, que reclama un cargo), casos límite e intentos adversarios (prompt injection, pedidos fuera de política). Cada caso con
    lo esperado: qué tool debería llamar, qué no debe hacer, criterios de calidad.
-2. **Evaluadores combinados:** verificaciones **deterministas** donde se pueda (llamó a `register_promise` con
-   argumentos válidos, no ofreció un descuento no permitido, respetó el formato) y **rúbricas** para lo subjetivo
+2. **Evaluadores combinados:** verificaciones **deterministas** donde se pueda (llamó a `schedule_return` con
+   argumentos válidos, no ofreció un cupón no permitido, respetó el formato) y **rúbricas** para lo subjetivo
    (tono, claridad), con humanos o un **LLM juez** cuya concordancia con humanos se midió.
 3. **Repeticiones:** cada caso varias veces, reportando tasas y su variación.
 4. **Regresión y gate:** comparar cada versión candidata contra la línea base; publicar sólo si no empeora los

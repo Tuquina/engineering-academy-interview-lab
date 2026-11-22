@@ -45,23 +45,23 @@ tags: ["hexagonal", "puertos y adaptadores", "clean architecture", "testing"]
 
 ## Motivación
 
-La plataforma registra pagos que llegan por tres caminos: el panel de operadores (HTTP), el webhook de la pasarela
-(HTTP con firma) y un archivo de conciliación diario (job). Las reglas de imputación son las mismas en los tres
-casos y son críticas: un error impacta en el saldo real de una persona.
+Una tienda registra pagos que llegan por tres caminos: la caja del local (HTTP), el webhook de la pasarela (HTTP con
+firma) y un archivo de conciliación diario (job). Las reglas para acreditar un pago a un pedido (pagos parciales,
+sobrepagos, pedidos ya cancelados) son las mismas en los tres casos y son críticas: un error despacha un pedido sin
+cobrar o cobra uno cancelado.
 
 ## Ejemplo incorrecto
 
 ```ts
 // app/api/payments/route.ts
 import { db } from "@/lib/db";
-import { payments, installments } from "@/lib/schema";
+import { payments, orders } from "@/lib/schema";
 
 export async function POST(request: Request) {
   const body = await request.json();
-  const pending = await db.select().from(installments).where(/* ... */);
-  let remaining = body.amountCents;
-  for (const installment of pending) {
-    // reglas de imputación mezcladas con el ORM y con HTTP
+  const [order] = await db.select().from(orders).where(/* ... */);
+  if (order.status === "cancelled") {
+    // reglas de negocio mezcladas con el ORM y con HTTP
   }
   await db.insert(payments).values({ ...body });
   await fetch("https://whatsapp.example/send", { method: "POST", body: "..." });
@@ -69,7 +69,7 @@ export async function POST(request: Request) {
 }
 ```
 
-Para reutilizar la imputación en el webhook y en el job habría que copiarla, y probarla requiere base de datos y
+Para reutilizar estas reglas en el webhook y en el job habría que copiarlas, y probarla requiere base de datos y
 un proveedor de mensajería.
 
 ## Implementación correcta
@@ -77,21 +77,21 @@ un proveedor de mensajería.
 ```ts
 // application/register-payment.ts — núcleo: sin imports de Next.js, ORM ni SDKs
 export interface PaymentRegistrationDeps {
-  readonly debts: DebtRepository; // puerto de salida
+  readonly orders: OrderRepository; // puerto de salida
   readonly notifier: Notifier; // puerto de salida
   readonly clock: () => Date;
 }
 
 export async function registerPayment(
   deps: PaymentRegistrationDeps,
-  command: { debtId: string; amountCents: number; externalId: string },
-): Promise<{ appliedToInstallments: number }> {
-  const debt = await deps.debts.findById(command.debtId);
-  if (!debt) throw new DomainError("debt-not-found");
-  const result = debt.applyPayment(command.amountCents, command.externalId, deps.clock()); // regla de dominio
-  await deps.debts.save(debt);
-  await deps.notifier.paymentConfirmed(debt.debtorId, command.amountCents);
-  return { appliedToInstallments: result.installmentsTouched };
+  command: { orderId: string; amountCents: number; externalId: string },
+): Promise<{ orderStatus: OrderStatus }> {
+  const order = await deps.orders.findById(command.orderId);
+  if (!order) throw new DomainError("order-not-found");
+  order.applyPayment(command.amountCents, command.externalId, deps.clock()); // regla de dominio
+  await deps.orders.save(order);
+  await deps.notifier.paymentConfirmed(order.customerId, command.amountCents);
+  return { orderStatus: order.status };
 }
 
 // app/api/payments/route.ts — adaptador de entrada delgado

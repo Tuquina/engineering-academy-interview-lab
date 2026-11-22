@@ -10,7 +10,7 @@ definition: "Repository media entre el dominio y la persistencia: expone operaci
 problem: "El SQL y los tipos del ORM aparecen dentro de los casos de uso y las reglas de negocio. Probar una regla obliga a levantar una base, y cambiar el esquema obliga a revisar lógica de negocio."
 benefits:
   - "Los casos de uso se prueban con una implementación en memoria."
-  - "Las consultas quedan concentradas y nombradas según el negocio (findOverdueByTenant)."
+  - "Las consultas quedan concentradas y nombradas según el negocio (findOpenSectionsByCourse)."
   - "El dominio no conoce el ORM ni el esquema de tablas."
 costs:
   - "Mapeo entre filas y entidades que hay que escribir y mantener."
@@ -44,23 +44,24 @@ tags: ["repository", "persistencia", "ddd", "testing"]
 
 ## Motivación
 
-El caso de uso "registrar promesa de pago" necesita cargar la deuda con sus promesas activas, aplicar la regla "no
-más de una promesa activa y el monto no puede superar el saldo" y guardar. La regla es lo importante; cómo se
-guarda es un detalle.
+El caso de uso "inscribir a un alumno en una comisión" de una facultad necesita cargar la comisión con sus
+inscripciones, aplicar las reglas "no superar el cupo y no inscribir dos veces al mismo alumno" y guardar. La regla es
+lo importante; cómo se guarda es un detalle.
 
 ## Ejemplo incorrecto
 
 ```ts
-export async function registerPromise(db: Db, debtId: string, amountCents: number, dueDate: string) {
+export async function enroll(db: Db, sectionId: string, studentId: string) {
   const rows = await db.execute(sql`
-    SELECT d.balance_cents, p.id AS promise_id
-    FROM debts d LEFT JOIN promises p ON p.debt_id = d.id AND p.status = 'active'
-    WHERE d.id = ${debtId}`);
+    SELECT s.capacity, e.student_id
+    FROM sections s LEFT JOIN enrollments e ON e.section_id = s.id AND e.status = 'active'
+    WHERE s.id = ${sectionId}`);
   if (rows.length === 0) throw new Error("no existe");
-  if (rows.some((r) => r.promise_id !== null)) throw new Error("ya hay promesa");
-  if (amountCents > Number(rows[0].balance_cents)) throw new Error("monto inválido");
-  await db.execute(sql`INSERT INTO promises (debt_id, amount_cents, due_date, status)
-                       VALUES (${debtId}, ${amountCents}, ${dueDate}, 'active')`);
+  if (rows.some((r) => r.student_id === studentId)) throw new Error("ya inscripto");
+  if (rows.filter((r) => r.student_id !== null).length >= Number(rows[0].capacity))
+    throw new Error("sin cupo");
+  await db.execute(sql`INSERT INTO enrollments (section_id, student_id, status)
+                       VALUES (${sectionId}, ${studentId}, 'active')`);
 }
 ```
 
@@ -70,70 +71,72 @@ La regla de negocio está mezclada con el SQL; probarla requiere una base con da
 
 ```ts
 // Dominio
-export class Debt {
+export class Section {
   constructor(
     readonly id: string,
-    private balanceCents: number,
-    private readonly promises: PaymentPromise[],
+    private readonly capacity: number,
+    private readonly enrollments: Enrollment[],
   ) {}
 
-  promise(amountCents: number, dueDate: string): PaymentPromise {
-    if (this.promises.some((p) => p.status === "active")) throw new DomainError("active-promise-exists");
-    if (amountCents <= 0 || amountCents > this.balanceCents) throw new DomainError("invalid-amount");
-    const promise: PaymentPromise = { id: crypto.randomUUID(), amountCents, dueDate, status: "active" };
-    this.promises.push(promise);
-    return promise;
+  enroll(studentId: string): Enrollment {
+    const active = this.enrollments.filter((e) => e.status === "active");
+    if (active.some((e) => e.studentId === studentId)) throw new DomainError("already-enrolled");
+    if (active.length >= this.capacity) throw new DomainError("section-full");
+    const enrollment: Enrollment = { id: crypto.randomUUID(), studentId, status: "active" };
+    this.enrollments.push(enrollment);
+    return enrollment;
   }
 
-  get pendingPromises(): readonly PaymentPromise[] {
-    return this.promises;
+  get allEnrollments(): readonly Enrollment[] {
+    return this.enrollments;
   }
 }
 
 // Puerto definido por la aplicación
-export interface DebtRepository {
-  findById(id: string): Promise<Debt | null>;
-  save(debt: Debt): Promise<void>;
+export interface SectionRepository {
+  findById(id: string): Promise<Section | null>;
+  save(section: Section): Promise<void>;
 }
 
 // Caso de uso: sólo orquesta
-export async function registerPromise(
-  repo: DebtRepository,
-  input: { debtId: string; amountCents: number; dueDate: string },
+export async function enrollStudent(
+  repo: SectionRepository,
+  input: { sectionId: string; studentId: string },
 ) {
-  const debt = await repo.findById(input.debtId);
-  if (!debt) throw new DomainError("debt-not-found");
-  const promise = debt.promise(input.amountCents, input.dueDate);
-  await repo.save(debt);
-  return promise;
+  const section = await repo.findById(input.sectionId);
+  if (!section) throw new DomainError("section-not-found");
+  const enrollment = section.enroll(input.studentId);
+  await repo.save(section);
+  return enrollment;
 }
 
 // Implementación para tests
-export class InMemoryDebtRepository implements DebtRepository {
-  private readonly items = new Map<string, Debt>();
+export class InMemorySectionRepository implements SectionRepository {
+  private readonly items = new Map<string, Section>();
   async findById(id: string) {
     return this.items.get(id) ?? null;
   }
-  async save(debt: Debt) {
-    this.items.set(debt.id, debt);
+  async save(section: Section) {
+    this.items.set(section.id, section);
   }
 }
 ```
 
-La implementación con PostgreSQL vive en infraestructura, mapea filas a `Debt` y se prueba con tests de
+La implementación con PostgreSQL vive en infraestructura, mapea filas a `Section` y se prueba con tests de
 integración. Además, la base mantiene su propia defensa: un índice único parcial
-(`CREATE UNIQUE INDEX ... ON promises(debt_id) WHERE status = 'active'`) evita dos promesas activas aunque dos
-requests lleguen a la vez.
+(`CREATE UNIQUE INDEX ... ON enrollments(section_id, student_id) WHERE status = 'active'`) evita dos inscripciones
+activas del mismo alumno aunque dos requests lleguen a la vez. El cupo, que depende de contar filas, necesita además
+un bloqueo de la comisión (`SELECT ... FOR UPDATE`) o un contador con una restricción `CHECK`.
 
 ## Ejercicio
 
-La bandeja del operador necesita listar 50 deudores con su saldo, última gestión y promesa activa, ordenados por
-prioridad. ¿Lo agregarías al `DebtRepository` como `findAll()` y ordenarías en memoria?
+La pantalla de la secretaría necesita listar 50 alumnos con su comisión, su última nota y si adeudan documentación,
+ordenados por apellido. ¿Lo agregarías al `SectionRepository` como `findAll()` y ordenarías en memoria?
 
 <Reveal>
 
 No. Cargar agregados completos para una pantalla es costoso y obliga a filtrar en memoria. Es una consulta de
-lectura: conviene una función dedicada (por ejemplo `InboxQueries.list(tenantId, page)`) que ejecute un SQL
+lectura: conviene una función dedicada (por ejemplo `StudentListQueries.list(facultyId, page)`) que ejecute un SQL
 optimizado con paginación y devuelva un DTO plano. El repositorio queda para cargar y guardar agregados cuando hay
 reglas que aplicar.
 
