@@ -34,6 +34,8 @@ references:
     url: "https://platform.claude.com/docs/en/api/rate-limits"
   - title: "Anthropic — Errors"
     url: "https://platform.claude.com/docs/en/api/errors"
+  - title: "Anthropic — Refusals and fallback"
+    url: "https://platform.claude.com/docs/en/build-with-claude/refusals-and-fallback"
   - title: "OWASP — Top 10 for LLM Applications (Excessive Agency)"
     url: "https://genai.owasp.org/llm-top-10/"
 interviewQuestions:
@@ -51,7 +53,7 @@ interviewQuestions:
       - "Acciones irreversibles con confirmación humana; idempotency keys en herramientas con efectos."
   - question: "¿Por qué usar una máquina de estados para orquestar un agente?"
     keyPoints:
-      - "Hace explícitas las etapas (verificación de identidad, negociación, cierre) y las transiciones válidas."
+      - "Hace explícitas las etapas (verificación de identidad, cambio del vuelo, cierre) y las transiciones válidas."
       - "Cada estado expone sólo las herramientas y las instrucciones que corresponden."
       - "Evita saltos indebidos, como dar detalles de una reserva antes de verificar identidad."
       - "Facilita la observabilidad, los tests y la reanudación de conversaciones largas."
@@ -165,16 +167,16 @@ function selectModel(task: AgentTask, config: AgentConfig): string {
     case "classify_inbound_message":
     case "summarize_for_operator":
       return MODELS.fast; // alto volumen, tarea acotada
-    case "negotiate":
+    case "rebook_flight":
       return config.model.primary; // conversación con reglas y decisiones
-    case "review_settlement_offer":
+    case "approve_large_refund":
       return MODELS.mostCapable; // alto impacto, bajo volumen
   }
 }
 ```
 
 El routing se decide **con evaluaciones**: se mide calidad y costo por tarea para cada modelo candidato. Un router
-mal calibrado ahorra en la factura y pierde en recupero.
+mal calibrado ahorra en la factura y pierde en casos resueltos.
 
 ## Timeouts, reintentos y fallbacks
 
@@ -209,8 +211,11 @@ Un proveedor de modelos es una dependencia remota: puede ser lento, devolver `42
   varias capas, porque se multiplican.
 - El **fallback a otro modelo** debe estar **evaluado**: un prompt optimizado para un modelo puede comportarse
   distinto en otro.
-- Algunos proveedores ofrecen mecanismos propios: por ejemplo, la API de Anthropic tiene un parámetro para reintentar
-  automáticamente con otro modelo cuando el principal rechaza una solicitud por políticas de seguridad.
+- Algunos proveedores ofrecen mecanismos propios: por ejemplo, la API de Messages de Anthropic tiene un parámetro
+  `fallbacks` (en beta) que, cuando el modelo principal declina una solicitud por sus políticas de seguridad
+  (`stop_reason: "refusal"`), la vuelve a ejecutar con un modelo de respaldo dentro de la misma llamada. No cubre
+  errores de red ni sobrecarga, que siguen siendo responsabilidad de los reintentos, y no está disponible en todas
+  las plataformas de nube: conviene consultar la documentación vigente antes de depender de él.
 - En flujos asíncronos (avisos masivos de reprogramación de vuelos), la mejor degradación suele ser **reencolar** el trabajo con backoff en lugar de
   responder algo de menor calidad.
 - Un **circuit breaker** evita seguir llamando a un proveedor que está fallando (curso de System Design).

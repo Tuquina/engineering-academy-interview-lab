@@ -150,3 +150,30 @@ rotar entre cursos.
   actualizan en el mismo lote.
 - Reporte de distribución de dominios del lote.
 - Revisión visual de las lecciones modificadas en el build de producción local.
+
+## Estado final (2026-11-21)
+
+Los 10 lotes están terminados, cada uno con su commit en `main`. El reporte de distribución de toda la plataforma da
+**13 de 13 cursos dentro de las reglas** (al menos 5 dominios y ninguno por encima del 30 %).
+
+| Lote  | Resultado                                                                                                                                                                                                                                                 |
+| ----- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0     | Script `scripts/domain-report.mjs` y reporte inicial.                                                                                                                                                                                                     |
+| 1 a 3 | TypeScript, React, Next.js y Node.js con ejemplos rotados por lección.                                                                                                                                                                                    |
+| 4     | Dataset del SQL Lab reemplazado por un marketplace con reservas; 8 ejercicios; challenge `sql-late-shipments`.                                                                                                                                            |
+| 5     | AI Agents Lab de cobranzas a atención al cliente de una tienda; Redis y LLMs y agentes rotados.                                                                                                                                                           |
+| 6     | Arquitectura de software y System Design rotados; "tenant" deja de contar como dominio SaaS en el reporte.                                                                                                                                                |
+| 7     | `mass-collections` pasa a `wallet-ledger` y `campaign-orchestrator` a `appointment-reminders`; patrones, diagramas, challenges, preguntas, flashcards y cheatsheets rotados.                                                                              |
+| 8     | Java, Python, Go y .NET rotados.                                                                                                                                                                                                                          |
+| 9     | Barrido final: restos sueltos corregidos, `priority` de `next/image` reemplazado por `preload` (obsoleto en Next.js 16, verificado en el paquete instalado) y la mención del parámetro `fallbacks` de la API de Anthropic precisada con su documentación. |
+
+Quedan menciones de cobranzas, a propósito, sólo en:
+
+- `docs/MASTER_PROMPT.md`: es la especificación original y no se edita desde este plan. Sus menciones al dominio de
+  cobranzas (por ejemplo, el desafío "Diseñar un sistema de cobranzas masivas") quedan reemplazadas en la práctica por
+  este plan.
+- Notas históricas (`docs/STATUS.md`, ADR-0009, `agent-lab-state.ts`) que explican qué cambió y por qué.
+- El propio reporte, que sigue buscando términos de cobranzas para detectar regresiones.
+
+Cambios que afectan datos guardados de usuarios: el estado del AI Agents Lab pasó a la versión 2 (el de la versión 1
+no se migra) y los desafíos y ejercicios con slug nuevo empiezan sin progreso.
