@@ -14,6 +14,7 @@ import {
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { cn } from "@/shared/lib/cn";
+import { OPEN_SEARCH_EVENT } from "@/shared/layout/mobile-tab-bar";
 import { searchEntries, type SearchEntry, type SearchEntryKind } from "../domain/search";
 
 const KIND_META: Readonly<Record<SearchEntryKind, { label: string; icon: LucideIcon }>> = {
@@ -81,7 +82,11 @@ export function CommandPalette({ indexUrl }: { indexUrl: string }) {
       }
     };
     window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
+    window.addEventListener(OPEN_SEARCH_EVENT, open);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      window.removeEventListener(OPEN_SEARCH_EVENT, open);
+    };
   }, [open]);
 
   const go = (entry: SearchEntry | undefined) => {
@@ -110,7 +115,7 @@ export function CommandPalette({ indexUrl }: { indexUrl: string }) {
         onClick={open}
         onPointerEnter={loadIndex}
         onFocus={loadIndex}
-        className="border-border bg-surface text-muted hover:text-foreground flex h-9 w-full max-w-xs items-center gap-2 rounded-md border px-3 text-sm transition-colors"
+        className="border-border bg-surface-2/60 text-muted hover:border-accent/40 hover:text-foreground flex h-9 w-full max-w-sm items-center gap-2 rounded-lg border px-3 text-sm transition-colors"
         aria-label="Buscar (Ctrl+K)"
       >
         <Search aria-hidden className="size-4" />

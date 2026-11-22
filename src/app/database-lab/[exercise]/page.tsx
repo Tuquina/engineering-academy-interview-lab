@@ -6,7 +6,7 @@ import { DIFFICULTY_LABELS } from "@/modules/learning/domain/catalog-types";
 import { renderLessonBody } from "@/modules/learning/presentation/mdx/render-lesson-body";
 import { StudyTimer } from "@/modules/progress/presentation/study-timer";
 import { SqlExerciseWorkspace } from "@/modules/sql-lab/presentation/sql-exercise-workspace";
-import { Badge } from "@/shared/ui/badge";
+import { Badge, DIFFICULTY_TONES } from "@/shared/ui/badge";
 
 interface ExercisePageProps {
   params: Promise<{ exercise: string }>;
@@ -48,7 +48,7 @@ export default async function SqlExercisePage({ params }: ExercisePageProps) {
         </nav>
         <h1 className="text-foreground text-2xl font-bold tracking-tight">{exercise.title}</h1>
         <div className="mt-2 flex flex-wrap gap-1.5">
-          <Badge tone="accent">{DIFFICULTY_LABELS[exercise.difficulty]}</Badge>
+          <Badge tone={DIFFICULTY_TONES[exercise.difficulty]}>{DIFFICULTY_LABELS[exercise.difficulty]}</Badge>
           {exercise.topics.map((topic) => (
             <Badge key={topic}>{topic}</Badge>
           ))}

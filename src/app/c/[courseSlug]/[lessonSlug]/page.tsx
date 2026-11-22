@@ -17,7 +17,7 @@ import {
 import { LessonNotes } from "@/modules/notebook/presentation/lesson-notes";
 import { LessonProgressControls } from "@/modules/progress/presentation/lesson-progress-controls";
 import { StudyTimer } from "@/modules/progress/presentation/study-timer";
-import { Badge } from "@/shared/ui/badge";
+import { Badge, DIFFICULTY_TONES } from "@/shared/ui/badge";
 
 interface PageProps {
   params: Promise<{ courseSlug: string; lessonSlug: string }>;
@@ -70,7 +70,7 @@ export default async function CustomLessonPage(props: PageProps) {
           <p className="text-muted mt-3 text-lg">{lesson.description}</p>
           <div className="mt-4 flex flex-wrap gap-2">
             <Badge tone="violet">Contenido personalizado</Badge>
-            <Badge tone="accent">{DIFFICULTY_LABELS[lesson.difficulty]}</Badge>
+            <Badge tone={DIFFICULTY_TONES[lesson.difficulty]}>{DIFFICULTY_LABELS[lesson.difficulty]}</Badge>
             <Badge>
               <Clock aria-hidden className="size-3" /> {lesson.estimatedMinutes} min
             </Badge>

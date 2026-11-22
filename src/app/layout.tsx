@@ -7,6 +7,7 @@ import { AccountButton } from "@/modules/auth/presentation/account-button";
 import { CommandPalette } from "@/modules/search/presentation/command-palette";
 import { AppShell } from "@/shared/layout/app-shell";
 import { themeInitScript } from "@/shared/layout/theme-toggle";
+import { areaToneClass } from "@/shared/ui/area-tone";
 import { Providers } from "./providers";
 import "./globals.css";
 
@@ -25,8 +26,8 @@ export const metadata: Metadata = {
 
 export const viewport: Viewport = {
   themeColor: [
-    { media: "(prefers-color-scheme: dark)", color: "#0d1220" },
-    { media: "(prefers-color-scheme: light)", color: "#f5f7fb" },
+    { media: "(prefers-color-scheme: dark)", color: "#0f1117" },
+    { media: "(prefers-color-scheme: light)", color: "#f6f7fb" },
   ],
 };
 
@@ -36,6 +37,7 @@ export default async function RootLayout({ children }: { children: ReactNode }) 
     href: `/courses/${course.slug}`,
     title: course.title,
     lessonCount: catalog.getLessonsOfCourse(course.id).length,
+    toneClass: areaToneClass(course.areaId),
   }));
 
   return (

@@ -4,7 +4,7 @@ import Link from "next/link";
 import { getArchitectureChallenges, getCaseStudies } from "@/infrastructure/composition/system-design";
 import { DIFFICULTY_LABELS } from "@/modules/learning/domain/catalog-types";
 import { SIMULATIONS } from "@/modules/system-design/domain/simulations/catalog";
-import { Badge } from "@/shared/ui/badge";
+import { Badge, DIFFICULTY_TONES } from "@/shared/ui/badge";
 
 export const metadata: Metadata = { title: "System Design Studio" };
 
@@ -40,7 +40,9 @@ export default async function SystemDesignPage() {
                 <h3 className="text-foreground font-semibold">{study.title}</h3>
                 <p className="text-muted flex-1 text-sm">{study.summary}</p>
                 <div className="flex flex-wrap gap-1.5">
-                  <Badge tone="accent">{DIFFICULTY_LABELS[study.difficulty]}</Badge>
+                  <Badge tone={DIFFICULTY_TONES[study.difficulty]}>
+                    {DIFFICULTY_LABELS[study.difficulty]}
+                  </Badge>
                   {study.tags.slice(0, 3).map((t) => (
                     <Badge key={t}>{t}</Badge>
                   ))}
@@ -79,7 +81,9 @@ export default async function SystemDesignPage() {
                 <h3 className="text-foreground font-semibold">{challenge.title}</h3>
                 <p className="text-muted flex-1 text-sm">{challenge.summary}</p>
                 <div className="flex flex-wrap gap-1.5">
-                  <Badge tone="accent">{DIFFICULTY_LABELS[challenge.difficulty]}</Badge>
+                  <Badge tone={DIFFICULTY_TONES[challenge.difficulty]}>
+                    {DIFFICULTY_LABELS[challenge.difficulty]}
+                  </Badge>
                   <Badge>
                     <Clock aria-hidden className="size-3" /> {challenge.durationMinutes} min
                   </Badge>

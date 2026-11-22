@@ -6,7 +6,7 @@ import { useMemo, useState } from "react";
 import { exerciseStatus } from "@/modules/exercises/domain/practice";
 import { usePracticeState } from "@/modules/exercises/presentation/practice-context";
 import { DIFFICULTY_LABELS, type Difficulty } from "@/modules/learning/domain/catalog-types";
-import { Badge } from "@/shared/ui/badge";
+import { Badge, DIFFICULTY_TONES } from "@/shared/ui/badge";
 import {
   CHALLENGE_KIND_LABELS,
   INTERVIEW_TYPE_LABELS,
@@ -125,7 +125,9 @@ export function ChallengeCatalog({ challenges }: { challenges: readonly Challeng
                   <p className="text-muted flex-1 text-sm">{challenge.summary}</p>
                   <div className="flex flex-wrap gap-1.5">
                     <Badge tone="violet">{CHALLENGE_KIND_LABELS[challenge.kind]}</Badge>
-                    <Badge tone="accent">{DIFFICULTY_LABELS[challenge.difficulty]}</Badge>
+                    <Badge tone={DIFFICULTY_TONES[challenge.difficulty]}>
+                      {DIFFICULTY_LABELS[challenge.difficulty]}
+                    </Badge>
                     <Badge>{INTERVIEW_TYPE_LABELS[challenge.interviewType]}</Badge>
                     <Badge>
                       <Clock aria-hidden className="size-3" /> {challenge.durationMinutes} min

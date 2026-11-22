@@ -7,7 +7,7 @@ import { DIFFICULTY_LABELS } from "@/modules/learning/domain/catalog-types";
 import { renderLessonBody } from "@/modules/learning/presentation/mdx/render-lesson-body";
 import { StudyTimer } from "@/modules/progress/presentation/study-timer";
 import { ArchitectureChallengeWorkspace } from "@/modules/system-design/presentation/architecture-challenge-workspace";
-import { Badge } from "@/shared/ui/badge";
+import { Badge, DIFFICULTY_TONES } from "@/shared/ui/badge";
 
 interface ChallengePageProps {
   params: Promise<{ slug: string }>;
@@ -48,7 +48,9 @@ export default async function ArchitectureChallengePage({ params }: ChallengePag
         <p className="text-muted mt-1">{challenge.summary}</p>
         <div className="mt-2 flex flex-wrap gap-1.5">
           <Badge tone="violet">Desafío de arquitectura</Badge>
-          <Badge tone="accent">{DIFFICULTY_LABELS[challenge.difficulty]}</Badge>
+          <Badge tone={DIFFICULTY_TONES[challenge.difficulty]}>
+            {DIFFICULTY_LABELS[challenge.difficulty]}
+          </Badge>
           <Badge>
             <Clock aria-hidden className="size-3" /> {challenge.durationMinutes} min
           </Badge>

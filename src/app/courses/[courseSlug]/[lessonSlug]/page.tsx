@@ -15,6 +15,7 @@ import {
 import { TableOfContents, type TocEntry } from "@/modules/learning/presentation/lesson/table-of-contents";
 import { renderLessonBody } from "@/modules/learning/presentation/mdx/render-lesson-body";
 import { LessonContextProvider } from "@/modules/learning/presentation/lesson/lesson-context";
+import { ReadingProgressBar } from "@/modules/learning/presentation/lesson/reading-progress-bar";
 import { BookmarkButton } from "@/modules/notebook/presentation/bookmark-button";
 import { LessonNotes } from "@/modules/notebook/presentation/lesson-notes";
 import { MentorPanel } from "@/modules/mentor/presentation/mentor-panel";
@@ -25,7 +26,10 @@ import {
 } from "@/modules/progress/presentation/reading-position";
 import { StudyTimer } from "@/modules/progress/presentation/study-timer";
 import { SequentialKeyboardNav } from "@/shared/layout/keyboard-navigation";
-import { Badge } from "@/shared/ui/badge";
+import { cn } from "@/shared/lib/cn";
+import { areaToneClass } from "@/shared/ui/area-tone";
+import { Badge, DIFFICULTY_TONES } from "@/shared/ui/badge";
+import { interactiveCardClass } from "@/shared/ui/card";
 
 interface LessonPageProps {
   params: Promise<{ courseSlug: string; lessonSlug: string }>;
@@ -72,29 +76,61 @@ export default async function LessonPage({ params }: LessonPageProps) {
   const previousHref = adjacent.previous ? `/courses/${course.slug}/${adjacent.previous.slug}` : undefined;
   const nextHref = adjacent.next ? `/courses/${course.slug}/${adjacent.next.slug}` : undefined;
 
+  const courseLessons = (await getCatalog()).getLessonsOfCourse(course.id);
+  const position = courseLessons.findIndex((l) => l.id === lesson.id) + 1;
+
   return (
-    <div className="mx-auto flex max-w-6xl gap-10">
+    <div className={cn(areaToneClass(course.areaId), "mx-auto flex max-w-6xl gap-10")}>
+      <ReadingProgressBar targetId="lesson-article" />
       <StudyTimer />
       <ReadingPositionTracker lessonId={lesson.id} sections={sections} />
       <SequentialKeyboardNav previousHref={previousHref} nextHref={nextHref} />
-      <article className="min-w-0 flex-1">
-        <nav aria-label="Ruta de navegación" className="text-muted mb-4 text-sm">
-          <Link href="/library" className="hover:text-foreground">
-            Biblioteca
-          </Link>
-          <span className="mx-2">/</span>
-          <Link href={`/courses/${course.slug}`} className="hover:text-foreground">
-            {course.title}
-          </Link>
-          <span className="mx-2">/</span>
-          <span>{module.title}</span>
+      <article id="lesson-article" className="mx-auto max-w-3xl min-w-0 flex-1">
+        <nav aria-label="Ruta de navegación" className="text-muted mb-5 text-sm">
+          <ol className="flex flex-wrap items-center gap-x-1.5 gap-y-1">
+            <li>
+              <Link href="/library" className="hover:text-foreground rounded">
+                Biblioteca
+              </Link>
+            </li>
+            <li aria-hidden>
+              <ChevronRight className="size-3.5" />
+            </li>
+            <li>
+              <Link
+                href={`/courses/${course.slug}`}
+                className="text-area rounded font-medium hover:underline"
+              >
+                {course.title}
+              </Link>
+            </li>
+            <li aria-hidden>
+              <ChevronRight className="size-3.5" />
+            </li>
+            <li>{module.title}</li>
+          </ol>
         </nav>
 
         <header className="mb-8">
-          <h1 className="text-foreground text-3xl font-bold tracking-tight sm:text-4xl">{lesson.title}</h1>
-          <p className="text-muted mt-3 text-lg">{lesson.description}</p>
-          <div className="mt-4 flex flex-wrap items-center gap-2">
-            <Badge tone="accent">{DIFFICULTY_LABELS[lesson.difficulty]}</Badge>
+          {position > 0 && (
+            <div className="mb-3 flex items-center gap-3">
+              <p className="text-area text-xs font-semibold tracking-wider uppercase">
+                Lección {position} de {courseLessons.length}
+              </p>
+              <span aria-hidden className="bg-surface-3/70 h-1 max-w-32 flex-1 overflow-hidden rounded-full">
+                <span
+                  className="bg-area block h-full rounded-full"
+                  style={{ width: `${(position / courseLessons.length) * 100}%` }}
+                />
+              </span>
+            </div>
+          )}
+          <h1 className="text-foreground text-3xl leading-tight font-bold tracking-tight text-balance sm:text-4xl">
+            {lesson.title}
+          </h1>
+          <p className="text-muted mt-3 text-lg leading-relaxed">{lesson.description}</p>
+          <div className="mt-5 flex flex-wrap items-center gap-2">
+            <Badge tone={DIFFICULTY_TONES[lesson.difficulty]}>{DIFFICULTY_LABELS[lesson.difficulty]}</Badge>
             <Badge>
               <Clock aria-hidden className="size-3" /> {lesson.estimatedMinutes} min
             </Badge>
@@ -115,7 +151,9 @@ export default async function LessonPage({ params }: LessonPageProps) {
           <ResumeReadingBanner lessonId={lesson.id} sections={sections} />
           <LearningObjectives objectives={lesson.objectives} />
           <LessonContextProvider lessonId={lesson.id}>
-            <div className="prose prose-headings:tracking-tight reading-scale max-w-none">{body}</div>
+            <div className="prose prose-headings:tracking-tight prose-p:leading-[1.75] reading-scale max-w-none">
+              {body}
+            </div>
           </LessonContextProvider>
           <InterviewQuestions questions={lesson.interviewQuestions} />
           <LessonSummary points={lesson.summary} />
@@ -136,33 +174,41 @@ export default async function LessonPage({ params }: LessonPageProps) {
             {adjacent.previous ? (
               <Link
                 href={`/courses/${course.slug}/${adjacent.previous.slug}`}
-                className="border-border hover:bg-surface rounded-lg border p-4"
+                className={cn(interactiveCardClass, "group flex flex-col gap-1 p-4")}
               >
-                <span className="text-muted flex items-center gap-1 text-xs">
-                  <ChevronLeft aria-hidden className="size-3" /> Anterior
+                <span className="text-muted flex items-center gap-1 text-xs font-medium">
+                  <ChevronLeft
+                    aria-hidden
+                    className="size-3.5 transition-transform group-hover:-translate-x-0.5"
+                  />
+                  Anterior
                 </span>
-                <span className="text-foreground font-medium">{adjacent.previous.title}</span>
+                <span className="text-foreground font-semibold">{adjacent.previous.title}</span>
               </Link>
             ) : (
-              <span />
+              <span className="hidden sm:block" />
             )}
             {adjacent.next ? (
               <Link
                 href={`/courses/${course.slug}/${adjacent.next.slug}`}
-                className="border-border hover:bg-surface rounded-lg border p-4 text-right"
+                className={cn(interactiveCardClass, "group bg-area/6 flex flex-col gap-1 p-4 text-right")}
               >
-                <span className="text-muted flex items-center justify-end gap-1 text-xs">
-                  Siguiente <ChevronRight aria-hidden className="size-3" />
+                <span className="text-area flex items-center justify-end gap-1 text-xs font-semibold">
+                  Siguiente
+                  <ChevronRight
+                    aria-hidden
+                    className="size-3.5 transition-transform group-hover:translate-x-0.5"
+                  />
                 </span>
-                <span className="text-foreground font-medium">{adjacent.next.title}</span>
+                <span className="text-foreground font-semibold">{adjacent.next.title}</span>
               </Link>
             ) : (
               <Link
                 href={`/courses/${course.slug}`}
-                className="border-border hover:bg-surface rounded-lg border p-4 text-right"
+                className={cn(interactiveCardClass, "flex flex-col gap-1 p-4 text-right")}
               >
                 <span className="text-muted text-xs">Fin de las lecciones publicadas</span>
-                <span className="text-foreground block font-medium">Volver al curso</span>
+                <span className="text-foreground block font-semibold">Volver al curso</span>
               </Link>
             )}
           </nav>
@@ -170,7 +216,7 @@ export default async function LessonPage({ params }: LessonPageProps) {
       </article>
 
       <aside className="hidden w-60 shrink-0 xl:block">
-        <div className="sticky top-20 max-h-[calc(100dvh-6rem)] overflow-y-auto">
+        <div className="sticky top-20 max-h-[calc(100dvh-6rem)] overflow-y-auto pb-4">
           <TableOfContents entries={toc} />
         </div>
       </aside>

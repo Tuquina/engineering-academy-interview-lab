@@ -6,27 +6,27 @@ const VARIANTS = {
   info: {
     icon: Info,
     label: "Nota",
-    className: "border-accent/40 bg-accent/8 [&_.callout-icon]:text-accent",
+    className: "border-info/35 bg-info/7 [&_.callout-icon]:text-info before:bg-info",
   },
   tip: {
     icon: Lightbulb,
     label: "Consejo",
-    className: "border-success/40 bg-success/8 [&_.callout-icon]:text-success",
+    className: "border-success/35 bg-success/7 [&_.callout-icon]:text-success before:bg-success",
   },
   warning: {
     icon: AlertTriangle,
     label: "Atención",
-    className: "border-warning/40 bg-warning/8 [&_.callout-icon]:text-warning",
+    className: "border-warning/35 bg-warning/7 [&_.callout-icon]:text-warning before:bg-warning",
   },
   danger: {
     icon: OctagonX,
     label: "Error frecuente",
-    className: "border-danger/40 bg-danger/8 [&_.callout-icon]:text-danger",
+    className: "border-danger/35 bg-danger/7 [&_.callout-icon]:text-danger before:bg-danger",
   },
   interview: {
     icon: MessagesSquare,
     label: "En la entrevista",
-    className: "border-violet/40 bg-violet/8 [&_.callout-icon]:text-violet",
+    className: "border-violet/35 bg-violet/7 [&_.callout-icon]:text-violet before:bg-violet",
   },
 } as const;
 
@@ -45,9 +45,17 @@ export function Callout({
   const variant = VARIANTS[type];
   const Icon = variant.icon;
   return (
-    <aside className={cn("not-prose my-6 rounded-lg border p-4 text-sm leading-relaxed", variant.className)}>
-      <p className="text-foreground mb-1.5 flex items-center gap-2 font-semibold">
-        <Icon aria-hidden className="callout-icon size-4" />
+    <aside
+      className={cn(
+        "not-prose relative my-7 overflow-hidden rounded-xl border py-4 pr-4 pl-5 text-[0.9375rem] leading-relaxed",
+        "before:absolute before:inset-y-0 before:left-0 before:w-1",
+        variant.className,
+      )}
+    >
+      <p className="text-foreground mb-2 flex items-center gap-2 font-semibold">
+        <span className="callout-icon bg-surface/70 flex size-6 items-center justify-center rounded-md">
+          <Icon aria-hidden className="size-4" />
+        </span>
         {title ?? variant.label}
       </p>
       <div className="text-foreground/90 [&_code]:bg-surface-2 [&_code]:rounded [&_code]:px-1 [&_code]:font-mono [&_code]:text-[0.85em] [&_p+p]:mt-2">

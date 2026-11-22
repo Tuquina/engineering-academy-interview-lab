@@ -8,7 +8,7 @@ import { customLessonId } from "@/modules/content-management/domain/custom-conte
 import { FlashcardList } from "@/modules/content-management/presentation/flashcard-list";
 import { DIFFICULTY_LABELS } from "@/modules/learning/domain/catalog-types";
 import { LessonStatusIcon } from "@/modules/progress/presentation/progress-badges";
-import { Badge } from "@/shared/ui/badge";
+import { Badge, DIFFICULTY_TONES } from "@/shared/ui/badge";
 
 interface PageProps {
   params: Promise<{ courseSlug: string }>;
@@ -52,7 +52,7 @@ export default async function CustomCoursePage(props: PageProps) {
         <p className="text-muted mt-2">{course.description}</p>
         <div className="mt-3 flex flex-wrap gap-1.5">
           <Badge tone="violet">Contenido personalizado</Badge>
-          <Badge tone="accent">{DIFFICULTY_LABELS[course.difficulty]}</Badge>
+          <Badge tone={DIFFICULTY_TONES[course.difficulty]}>{DIFFICULTY_LABELS[course.difficulty]}</Badge>
           <Badge>{course.lessons.length} lección(es)</Badge>
         </div>
       </header>

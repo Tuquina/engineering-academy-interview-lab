@@ -1,3 +1,4 @@
+import { areaToneClass } from "@/shared/ui/area-tone";
 import type { LearnerData } from "@/modules/progress/presentation/learner-data";
 import { getChallenges } from "./challenges";
 import { getDecks } from "./flashcards";
@@ -32,6 +33,7 @@ export async function getLearnerData(): Promise<LearnerData> {
       title: course.title,
       href: `/courses/${course.slug}`,
       lessonIds: catalog.getLessonsOfCourse(course.id).map((l) => l.id),
+      toneClass: areaToneClass(course.areaId),
     })),
     lessons: buildLessonIndex(catalog),
     prerequisites,

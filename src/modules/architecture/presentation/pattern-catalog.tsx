@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { DIFFICULTY_LABELS } from "@/modules/learning/domain/catalog-types";
-import { Badge } from "@/shared/ui/badge";
+import { Badge, DIFFICULTY_TONES } from "@/shared/ui/badge";
 import {
   PATTERN_CATEGORY_LABELS,
   PATTERN_KIND_LABELS,
@@ -88,7 +88,9 @@ export function PatternCatalog({ patterns }: { patterns: readonly PatternSummary
                     {PATTERN_KIND_LABELS[pattern.kind]}
                   </Badge>
                   <Badge>{PATTERN_CATEGORY_LABELS[pattern.category]}</Badge>
-                  <Badge>{DIFFICULTY_LABELS[pattern.difficulty]}</Badge>
+                  <Badge tone={DIFFICULTY_TONES[pattern.difficulty]}>
+                    {DIFFICULTY_LABELS[pattern.difficulty]}
+                  </Badge>
                 </div>
               </Link>
             </li>

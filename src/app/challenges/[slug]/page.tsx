@@ -15,7 +15,7 @@ import { DIFFICULTY_LABELS } from "@/modules/learning/domain/catalog-types";
 import { renderLessonBody } from "@/modules/learning/presentation/mdx/render-lesson-body";
 import { StudyTimer } from "@/modules/progress/presentation/study-timer";
 import { SqlExerciseWorkspace } from "@/modules/sql-lab/presentation/sql-exercise-workspace";
-import { Badge } from "@/shared/ui/badge";
+import { Badge, DIFFICULTY_TONES } from "@/shared/ui/badge";
 
 interface ChallengePageProps {
   params: Promise<{ slug: string }>;
@@ -66,7 +66,9 @@ export default async function ChallengePage({ params }: ChallengePageProps) {
         <h1 className="text-foreground text-2xl font-bold tracking-tight">{challenge.title}</h1>
         <div className="mt-2 flex flex-wrap items-center gap-1.5">
           <Badge tone="violet">{CHALLENGE_KIND_LABELS[challenge.kind]}</Badge>
-          <Badge tone="accent">{DIFFICULTY_LABELS[challenge.difficulty]}</Badge>
+          <Badge tone={DIFFICULTY_TONES[challenge.difficulty]}>
+            {DIFFICULTY_LABELS[challenge.difficulty]}
+          </Badge>
           <Badge>{INTERVIEW_TYPE_LABELS[challenge.interviewType]}</Badge>
           <Badge>
             <Clock aria-hidden className="size-3" /> {challenge.durationMinutes} min

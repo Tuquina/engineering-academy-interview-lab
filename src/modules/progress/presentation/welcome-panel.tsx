@@ -37,7 +37,7 @@ export function WelcomePanel({ data }: { data: LearnerData }) {
   return (
     <section
       aria-labelledby="bienvenida"
-      className="border-accent/30 from-accent/10 rounded-lg border bg-gradient-to-br to-transparent p-6"
+      className="border-accent/30 from-accent/14 via-violet/6 rounded-2xl border bg-gradient-to-br to-transparent p-6"
     >
       <h2 id="bienvenida" className="text-foreground text-2xl font-bold tracking-tight">
         Preparate para tu próxima búsqueda laboral
@@ -48,9 +48,11 @@ export function WelcomePanel({ data }: { data: LearnerData }) {
         funciona sin cuenta; con una cuenta, tu progreso se sincroniza entre dispositivos.
       </p>
       <ul className="mt-4 grid gap-2 sm:grid-cols-2">
-        {HIGHLIGHTS.map(({ icon: Icon, text }) => (
-          <li key={text} className="text-foreground flex gap-2 text-sm">
-            <Icon aria-hidden className="text-accent mt-0.5 size-4 shrink-0" />
+        {HIGHLIGHTS.map(({ icon: Icon, text }, index) => (
+          <li key={text} className={`area-tone-${(index % 7) + 1} text-foreground flex gap-2.5 text-sm`}>
+            <span className="bg-area/12 text-area flex size-6 shrink-0 items-center justify-center rounded-md">
+              <Icon aria-hidden className="size-3.5" />
+            </span>
             {text}
           </li>
         ))}
@@ -58,16 +60,16 @@ export function WelcomePanel({ data }: { data: LearnerData }) {
 
       <h3 className="text-foreground mt-6 mb-3 font-semibold">¿A qué puesto apuntás?</h3>
       <ul className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-        {data.paths.map((path) => (
-          <li key={path.id}>
+        {data.paths.map((path, index) => (
+          <li key={path.id} className={`area-tone-${(index % 7) + 1}`}>
             <button
               type="button"
               onClick={() => update({ activePathId: path.id })}
-              className="border-border bg-surface hover:border-accent/60 focus-visible:ring-accent flex h-full w-full flex-col gap-2 rounded-lg border p-4 text-left transition-colors focus-visible:ring-2 focus-visible:outline-none"
+              className="border-border bg-surface hover:border-area/60 border-t-area flex h-full w-full flex-col gap-2 rounded-xl border border-t-4 p-4 text-left shadow-xs transition-[border-color,box-shadow] hover:shadow-md"
             >
               <span className="text-foreground font-semibold">{path.title}</span>
               <span className="text-muted flex-1 text-sm">{path.description}</span>
-              <span className="text-accent flex items-center gap-1 text-sm font-medium">
+              <span className="text-area flex items-center gap-1 text-sm font-medium">
                 Elegir esta ruta <ArrowRight aria-hidden className="size-4" />
               </span>
             </button>

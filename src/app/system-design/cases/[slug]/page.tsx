@@ -9,7 +9,7 @@ import { DIFFICULTY_LABELS } from "@/modules/learning/domain/catalog-types";
 import { renderLessonBody } from "@/modules/learning/presentation/mdx/render-lesson-body";
 import { StudyTimer } from "@/modules/progress/presentation/study-timer";
 import { SIMULATIONS } from "@/modules/system-design/domain/simulations/catalog";
-import { Badge } from "@/shared/ui/badge";
+import { Badge, DIFFICULTY_TONES } from "@/shared/ui/badge";
 
 interface CaseStudyPageProps {
   params: Promise<{ slug: string }>;
@@ -55,7 +55,7 @@ export default async function CaseStudyPage({ params }: CaseStudyPageProps) {
         <p className="text-muted mt-2 max-w-3xl">{study.summary}</p>
         <div className="mt-3 flex flex-wrap gap-1.5">
           <Badge tone="violet">Caso de estudio</Badge>
-          <Badge tone="accent">{DIFFICULTY_LABELS[study.difficulty]}</Badge>
+          <Badge tone={DIFFICULTY_TONES[study.difficulty]}>{DIFFICULTY_LABELS[study.difficulty]}</Badge>
           <Badge>
             <Clock aria-hidden className="size-3" /> {study.durationMinutes} min de entrevista
           </Badge>

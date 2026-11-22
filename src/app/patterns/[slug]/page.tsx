@@ -10,7 +10,7 @@ import { InteractiveDiagram } from "@/modules/architecture/presentation/interact
 import { DIFFICULTY_LABELS } from "@/modules/learning/domain/catalog-types";
 import { renderLessonBody } from "@/modules/learning/presentation/mdx/render-lesson-body";
 import { StudyTimer } from "@/modules/progress/presentation/study-timer";
-import { Badge } from "@/shared/ui/badge";
+import { Badge, DIFFICULTY_TONES } from "@/shared/ui/badge";
 
 interface PatternPageProps {
   params: Promise<{ slug: string }>;
@@ -79,7 +79,7 @@ export default async function PatternPage({ params }: PatternPageProps) {
             {PATTERN_KIND_LABELS[pattern.kind]}
           </Badge>
           <Badge>{PATTERN_CATEGORY_LABELS[pattern.category]}</Badge>
-          <Badge>{DIFFICULTY_LABELS[pattern.difficulty]}</Badge>
+          <Badge tone={DIFFICULTY_TONES[pattern.difficulty]}>{DIFFICULTY_LABELS[pattern.difficulty]}</Badge>
         </div>
       </header>
 

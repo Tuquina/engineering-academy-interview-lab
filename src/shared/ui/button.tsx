@@ -11,8 +11,9 @@ const buttonVariants = cva(
   {
     variants: {
       variant: {
-        primary: "bg-accent text-accent-foreground hover:bg-accent/90",
-        secondary: "border border-border bg-surface-2 text-foreground hover:bg-surface-3",
+        primary: "bg-accent text-accent-foreground shadow-xs hover:bg-accent/88",
+        secondary:
+          "border border-border bg-surface text-foreground shadow-xs hover:border-accent/40 hover:bg-surface-2",
         ghost: "text-muted hover:bg-surface-2 hover:text-foreground",
         success: "bg-success/15 text-success hover:bg-success/25",
       },

@@ -21,7 +21,14 @@ export interface LearnerData {
     href: string;
     lessonIds: readonly string[];
   }>;
-  readonly courses: ReadonlyArray<{ id: string; title: string; href: string; lessonIds: readonly string[] }>;
+  readonly courses: ReadonlyArray<{
+    id: string;
+    title: string;
+    href: string;
+    lessonIds: readonly string[];
+    /** Clase de tono del área del curso (`area-tone-N`). */
+    toneClass: string;
+  }>;
   readonly lessons: LessonIndex;
   readonly prerequisites: Readonly<Record<string, readonly string[]>>;
   readonly cards: ReadonlyArray<{ id: string; front: string; lessonId: string | null; deckTitle: string }>;

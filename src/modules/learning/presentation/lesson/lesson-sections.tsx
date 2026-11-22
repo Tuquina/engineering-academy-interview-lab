@@ -18,13 +18,13 @@ export function LearningObjectives({ objectives }: { objectives: readonly string
   return (
     <section
       aria-labelledby={FIXED_SECTION_IDS.objectives}
-      className="border-border bg-surface rounded-lg border p-5"
+      className="border-area/25 bg-area/5 rounded-xl border p-5"
     >
       <h2
         id={FIXED_SECTION_IDS.objectives}
         className="text-foreground mb-3 flex scroll-mt-20 items-center gap-2 text-base font-semibold"
       >
-        <Target aria-hidden className="text-accent size-4" /> ¿Qué vas a aprender?
+        <Target aria-hidden className="text-area size-4" /> ¿Qué vas a aprender?
       </h2>
       <ul className="flex flex-col gap-2 text-sm">
         {objectives.map((objective) => (
@@ -58,10 +58,10 @@ export function InterviewQuestions({ questions }: { questions: readonly Intervie
         {questions.map((q) => (
           <details
             key={q.question}
-            className="group border-border bg-surface open:bg-surface-2/40 rounded-lg border"
+            className="group border-border bg-surface open:border-violet/30 rounded-xl border transition-colors"
           >
             <summary className="text-foreground cursor-pointer list-none px-4 py-3 font-medium marker:hidden">
-              <span className="text-muted mr-2 inline-block transition-transform group-open:rotate-90">
+              <span className="text-violet mr-2 inline-block transition-transform group-open:rotate-90">
                 ›
               </span>
               {q.question}
@@ -84,7 +84,7 @@ export function LessonSummary({ points }: { points: readonly string[] }) {
   return (
     <section
       aria-labelledby={FIXED_SECTION_IDS.summary}
-      className="border-success/30 bg-success/5 rounded-lg border p-5"
+      className="border-success/30 bg-success/6 rounded-xl border p-5"
     >
       <h2 id={FIXED_SECTION_IDS.summary} className="text-foreground mb-3 scroll-mt-20 text-xl font-semibold">
         Resumen y puntos clave

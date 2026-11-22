@@ -1,6 +1,6 @@
 "use client";
 
-import { CheckCircle2, RotateCcw, XCircle } from "lucide-react";
+import { BrainCircuit, CheckCircle2, RotateCcw, XCircle } from "lucide-react";
 import { useId, useState } from "react";
 import { useProgressActions, useProgressState } from "@/modules/progress/presentation/progress-context";
 import { cn } from "@/shared/lib/cn";
@@ -47,10 +47,12 @@ export function KnowledgeCheck({ id, question, options }: KnowledgeCheckProps) {
   return (
     <section
       aria-labelledby={`${groupId}-q`}
-      className="not-prose border-border bg-surface my-8 rounded-lg border p-5"
+      className="not-prose border-violet/30 from-violet/7 to-surface bg-surface my-8 rounded-xl border bg-gradient-to-b p-5 shadow-xs"
     >
       <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
-        <p className="text-violet text-xs font-semibold tracking-wide uppercase">Knowledge check</p>
+        <p className="text-violet flex items-center gap-1.5 text-xs font-semibold tracking-wider uppercase">
+          <BrainCircuit aria-hidden className="size-4" /> Knowledge check
+        </p>
         {record && !checked && (
           <p className="text-muted text-xs">
             Última respuesta: {record.lastCorrect ? "correcta" : "incorrecta"} · {record.attempts}{" "}
@@ -71,10 +73,13 @@ export function KnowledgeCheck({ id, question, options }: KnowledgeCheckProps) {
             <label
               key={option.text}
               className={cn(
-                "flex cursor-pointer flex-col gap-1 rounded-md border px-3 py-2.5 text-sm transition-colors",
-                !checked && (isSelected ? "border-accent bg-accent/8" : "border-border hover:bg-surface-2"),
-                checked && option.correct && "border-success/60 bg-success/8",
-                checked && isSelected && !option.correct && "border-danger/60 bg-danger/8",
+                "has-focus-visible:outline-ring flex cursor-pointer flex-col gap-1 rounded-lg border px-3 py-2.5 text-sm transition-colors has-focus-visible:outline-2",
+                !checked &&
+                  (isSelected
+                    ? "border-accent bg-accent/10"
+                    : "border-border bg-surface hover:border-accent/40 hover:bg-surface-2"),
+                checked && option.correct && "border-success/60 bg-success/10",
+                checked && isSelected && !option.correct && "border-danger/60 bg-danger/10",
                 checked && !showResult && "border-border opacity-80",
               )}
             >

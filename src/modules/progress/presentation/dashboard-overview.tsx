@@ -28,18 +28,24 @@ function Metric({
   label,
   value,
   hint,
+  tone,
 }: {
   icon: typeof Flame;
   label: string;
   value: string;
   hint: string;
+  /** Tono de la paleta (`area-tone-N`) del ícono: distingue las métricas de un vistazo. */
+  tone: number;
 }) {
   return (
-    <div className="border-border bg-surface rounded-lg border p-4">
-      <dt className="text-muted flex items-center gap-1.5 text-xs">
-        <Icon aria-hidden className="size-3.5" /> {label}
+    <div className={`area-tone-${tone} border-border bg-surface rounded-xl border p-4 shadow-xs`}>
+      <dt className="text-muted flex items-center gap-2 text-xs font-medium">
+        <span className="bg-area/12 text-area flex size-7 items-center justify-center rounded-lg">
+          <Icon aria-hidden className="size-4" />
+        </span>
+        {label}
       </dt>
-      <dd className="text-foreground mt-1 text-2xl font-semibold tabular-nums">{value}</dd>
+      <dd className="text-foreground mt-2 text-2xl font-semibold tabular-nums">{value}</dd>
       <dd className="text-muted text-xs">{hint}</dd>
     </div>
   );
@@ -67,7 +73,7 @@ export function DashboardOverview({ data }: { data: LearnerData }) {
   return (
     <div className="flex flex-col gap-6">
       <WelcomePanel data={data} />
-      <Card className="from-accent/8 border-accent/30 flex flex-col gap-5 bg-gradient-to-br to-transparent p-6">
+      <Card className="from-accent/14 via-violet/6 border-accent/30 flex flex-col gap-5 bg-gradient-to-br to-transparent p-6">
         <div>
           <p className="text-accent text-xs font-semibold tracking-wide uppercase">
             Siguiente paso recomendado
@@ -122,24 +128,28 @@ export function DashboardOverview({ data }: { data: LearnerData }) {
       <dl className="grid grid-cols-2 gap-3 lg:grid-cols-4">
         <Metric
           icon={Flame}
+          tone={4}
           label="Racha de estudio"
           value={show(`${snapshot.streakDays} ${snapshot.streakDays === 1 ? "día" : "días"}`)}
           hint="Días seguidos con 5+ min activos"
         />
         <Metric
           icon={Timer}
+          tone={1}
           label="Últimos 7 días"
           value={show(`${snapshot.minutesLast7Days} min`)}
           hint="Tiempo activo estimado"
         />
         <Metric
           icon={Boxes}
+          tone={5}
           label="Flashcards vencidas"
           value={show(String(snapshot.dueFlashcards))}
           hint={`${snapshot.reviewedFlashcards} repasos en total`}
         />
         <Metric
           icon={Target}
+          tone={6}
           label="Precisión en quizzes"
           value={show(
             snapshot.quiz.answered > 0 ? `${Math.round(snapshot.quiz.accuracy * 100)}%` : "Sin datos",
@@ -232,16 +242,20 @@ export function DashboardOverview({ data }: { data: LearnerData }) {
           {data.courses.map((course) => {
             const summary = summarizeProgress(state, course.lessonIds);
             return (
-              <li key={course.id} className="flex min-w-0 flex-col gap-1.5">
+              <li key={course.id} className={`${course.toneClass} flex min-w-0 flex-col gap-1.5`}>
                 <div className="flex justify-between gap-2 text-sm">
-                  <Link href={course.href} className="text-foreground hover:text-accent truncate">
-                    {course.title}
+                  <Link
+                    href={course.href}
+                    className="text-foreground hover:text-area flex min-w-0 items-center gap-2 rounded"
+                  >
+                    <span aria-hidden className="bg-area size-2 shrink-0 rounded-full" />
+                    <span className="truncate">{course.title}</span>
                   </Link>
                   <span className="text-muted shrink-0 text-xs tabular-nums">
                     {summary.total > 0 ? `${summary.completed}/${summary.total}` : "en preparación"}
                   </span>
                 </div>
-                <ProgressIndicator value={summary.ratio} label={`Progreso en ${course.title}`} />
+                <ProgressIndicator value={summary.ratio} label={`Progreso en ${course.title}`} tone="area" />
               </li>
             );
           })}

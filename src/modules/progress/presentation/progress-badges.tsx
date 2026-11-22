@@ -12,13 +12,22 @@ export function LessonStatusIcon({ lessonId }: { lessonId: string }) {
     return <CheckCircle2 aria-label="Completada" className="text-success size-4 shrink-0" />;
   }
   if (status === "in_progress") {
-    return <CircleDot aria-label="En curso" className="text-accent size-4 shrink-0" />;
+    return <CircleDot aria-label="En curso" className="text-info size-4 shrink-0" />;
   }
   return <Circle aria-label="Pendiente" className="text-muted/60 size-4 shrink-0" />;
 }
 
 /** Progreso agregado sobre un conjunto de lecciones (curso o ruta). */
-export function ProgressSummaryBar({ lessonIds, label }: { lessonIds: readonly string[]; label: string }) {
+export function ProgressSummaryBar({
+  lessonIds,
+  label,
+  tone,
+}: {
+  lessonIds: readonly string[];
+  label: string;
+  /** Color de la barra (ver `ProgressIndicator`). */
+  tone?: "accent" | "area";
+}) {
   const summary = summarizeProgress(useProgressState(), lessonIds);
   if (summary.total === 0) {
     return <p className="text-muted text-sm">Todavía no hay lecciones publicadas.</p>;
@@ -31,7 +40,7 @@ export function ProgressSummaryBar({ lessonIds, label }: { lessonIds: readonly s
           {summary.completed}/{summary.total} lecciones
         </span>
       </div>
-      <ProgressIndicator value={summary.ratio} label={label} />
+      <ProgressIndicator value={summary.ratio} label={label} tone={tone} />
     </div>
   );
 }

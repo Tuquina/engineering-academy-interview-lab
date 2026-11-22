@@ -4,43 +4,95 @@
 /* El tema se controla con data-theme en <html>; oscuro es la experiencia principal. */
 @custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
 
+/*
+ * Paleta (ver docs/adr/0012): neutros grafito, acento índigo, un color por área de conocimiento y estados bien
+ * diferenciados. Los pares texto/fondo cumplen WCAG AA (≥ 4.5:1) en ambos modos; `scripts/check-contrast.mjs`
+ * lo verifica.
+ */
 :root,
 [data-theme="light"] {
   color-scheme: light;
-  --background: #f5f7fb;
+  --background: #f6f7fb;
   --surface: #ffffff;
-  --surface-2: #eef1f7;
-  --surface-3: #e3e8f1;
-  --border: #d9dfea;
-  --foreground: #131a2a;
-  --muted: #566176;
-  --accent: #2c5fe6;
+  --surface-2: #eff1f6;
+  --surface-3: #e3e6ee;
+  --border: #dde1ea;
+  --foreground: #151823;
+  --muted: #586174;
+  --accent: #4f46e5;
   --accent-foreground: #ffffff;
-  --violet: #6f43dc;
-  --success: #17804b;
-  --warning: #955f00;
-  --danger: #c43434;
-  --ring: #2c5fe6;
-  --code-bg: #f3f5fa;
+  --violet: #7e22ce;
+  --success: #146c36;
+  --warning: #8a5300;
+  --danger: #c81e1e;
+  --info: #1d4ed8;
+  --ring: #4f46e5;
+  --code-bg: #f4f5f9;
+  /* Áreas de conocimiento: tonos oscuros para que funcionen como texto sobre fondos claros. */
+  --area-1: #1d4ed8;
+  --area-2: #0e7490;
+  --area-3: #7e22ce;
+  --area-4: #974306;
+  --area-5: #be185d;
+  --area-6: #047857;
+  --area-7: #b3390b;
 }
 
 [data-theme="dark"] {
   color-scheme: dark;
-  --background: #0d1220;
-  --surface: #141a2a;
-  --surface-2: #1b2235;
-  --surface-3: #242c42;
-  --border: #283149;
-  --foreground: #e4e8f2;
-  --muted: #98a3ba;
-  --accent: #6b95ff;
-  --accent-foreground: #0d1220;
-  --violet: #a68bff;
-  --success: #46c587;
-  --warning: #eab04a;
-  --danger: #f27474;
-  --ring: #6b95ff;
-  --code-bg: #10172a;
+  --background: #0f1117;
+  --surface: #171a23;
+  --surface-2: #1f2330;
+  --surface-3: #2a2f3e;
+  --border: #2b3040;
+  --foreground: #e7e9f0;
+  --muted: #9ca3b5;
+  --accent: #8b91ff;
+  --accent-foreground: #0f1117;
+  --violet: #c084fc;
+  --success: #4ade80;
+  --warning: #fbbf24;
+  --danger: #f87171;
+  --info: #60a5fa;
+  --ring: #8b91ff;
+  --code-bg: #12141c;
+  /* Áreas de conocimiento: tonos claros, legibles sobre las superficies oscuras. */
+  --area-1: #60a5fa;
+  --area-2: #22d3ee;
+  --area-3: #c084fc;
+  --area-4: #fbbf24;
+  --area-5: #f472b6;
+  --area-6: #34d399;
+  --area-7: #fb923c;
+}
+
+/*
+ * Tono de área: un contenedor con `area-tone-N` expone su color como `--area`, que usan dentro las utilidades
+ * `text-area`, `bg-area/10` o `border-area/40`. Sin tono, `--area` es el acento.
+ */
+:root {
+  --area: var(--accent);
+}
+.area-tone-1 {
+  --area: var(--area-1);
+}
+.area-tone-2 {
+  --area: var(--area-2);
+}
+.area-tone-3 {
+  --area: var(--area-3);
+}
+.area-tone-4 {
+  --area: var(--area-4);
+}
+.area-tone-5 {
+  --area: var(--area-5);
+}
+.area-tone-6 {
+  --area: var(--area-6);
+}
+.area-tone-7 {
+  --area: var(--area-7);
 }
 
 @theme inline {
@@ -57,6 +109,8 @@
   --color-success: var(--success);
   --color-warning: var(--warning);
   --color-danger: var(--danger);
+  --color-info: var(--info);
+  --color-area: var(--area);
   --color-ring: var(--ring);
   --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
   --font-mono: var(--font-jetbrains-mono), ui-monospace, monospace;
@@ -76,7 +130,8 @@
     background: color-mix(in srgb, var(--accent) 30%, transparent);
   }
   :focus-visible {
-    outline-color: var(--ring);
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
   }
 }
 
@@ -94,10 +149,10 @@
   --tw-prose-links: var(--accent);
   --tw-prose-bold: var(--foreground);
   --tw-prose-counters: var(--muted);
-  --tw-prose-bullets: var(--muted);
+  --tw-prose-bullets: var(--area);
   --tw-prose-hr: var(--border);
   --tw-prose-quotes: var(--foreground);
-  --tw-prose-quote-borders: var(--accent);
+  --tw-prose-quote-borders: var(--area);
   --tw-prose-captions: var(--muted);
   --tw-prose-code: var(--foreground);
   --tw-prose-pre-code: var(--foreground);
@@ -110,10 +165,49 @@
   scroll-margin-top: 5rem;
 }
 
-.prose :where(code):not(:where(pre code)) {
-  border-radius: 0.25rem;
+/* Jerarquía de títulos: los h2 abren secciones con un separador; los h3 llevan una marca del color del área. */
+.prose :where(h2):not(:where(.not-prose *)) {
+  margin-top: 2.75em;
+  padding-top: 1.25em;
+  border-top: 1px solid var(--border);
+}
+.prose > h2:first-child {
+  margin-top: 0;
+  padding-top: 0;
+  border-top: 0;
+}
+.prose :where(h3):not(:where(.not-prose *)) {
+  padding-left: 0.75rem;
+  border-left: 3px solid var(--area);
+}
+
+.prose :where(a):not(:where(.not-prose *)) {
+  text-decoration-color: color-mix(in srgb, var(--accent) 45%, transparent);
+  text-underline-offset: 3px;
+  transition: text-decoration-color 150ms;
+}
+.prose :where(a):not(:where(.not-prose *)):hover {
+  text-decoration-color: var(--accent);
+}
+
+.prose :where(blockquote):not(:where(.not-prose *)) {
+  border-radius: 0 0.5rem 0.5rem 0;
+  background: color-mix(in srgb, var(--area) 6%, transparent);
+  padding: 0.25rem 1rem;
+  font-style: normal;
+}
+
+.prose :where(thead th):not(:where(.not-prose *)) {
   background: var(--surface-2);
-  padding: 0.1rem 0.35rem;
+  padding-top: 0.5rem;
+  padding-bottom: 0.5rem;
+}
+
+.prose :where(code):not(:where(pre code)) {
+  border: 1px solid var(--border);
+  border-radius: 0.3rem;
+  background: var(--surface-2);
+  padding: 0.05rem 0.35rem;
   font-weight: 500;
 }
 .prose :where(code):not(:where(pre code))::before,
@@ -123,8 +217,9 @@
 
 .prose :where(pre) {
   border: 1px solid var(--border);
+  border-radius: 0.75rem;
   font-size: 0.85rem;
-  line-height: 1.6;
+  line-height: 1.65;
 }
 
 /* Shiki con temas duales: los colores llegan como variables y se eligen según el tema activo. */

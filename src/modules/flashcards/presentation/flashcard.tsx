@@ -6,7 +6,7 @@ import { useEffect } from "react";
 import { isTypingTarget } from "@/shared/layout/keyboard-navigation";
 import { cn } from "@/shared/lib/cn";
 import type { LessonLink } from "@/shared/kernel/lesson-link";
-import { Badge } from "@/shared/ui/badge";
+import { Badge, DIFFICULTY_TONES } from "@/shared/ui/badge";
 import { Button } from "@/shared/ui/button";
 import { InlineCodeText } from "@/shared/ui/inline-code-text";
 import { DIFFICULTY_LABELS } from "@/modules/learning/domain/catalog-types";
@@ -71,7 +71,7 @@ export function Flashcard({
     >
       <div className="flex flex-wrap items-center gap-2">
         <Badge tone="violet">{deckTitle}</Badge>
-        <Badge>{DIFFICULTY_LABELS[card.difficulty]}</Badge>
+        <Badge tone={DIFFICULTY_TONES[card.difficulty]}>{DIFFICULTY_LABELS[card.difficulty]}</Badge>
         {card.tags.map((tag) => (
           <Badge key={tag}>{tag}</Badge>
         ))}

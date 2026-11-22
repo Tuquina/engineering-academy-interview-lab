@@ -503,6 +503,18 @@ La plataforma pasa a ser una academia genérica para prepararse para buscar trab
 - [x] Diagramas animados: un punto recorre cada conexión en la dirección del flujo (en el orden del paso actual),
       reproducción automática del recorrido y respeto de `prefers-reduced-motion`. 21 diagramas en total.
 
+## Rediseño visual y navegación (2026-11-21)
+
+Ver [ADR-0012](adr/0012-visual-identity-and-navigation.md). El contenido no cambió.
+
+- [x] Paleta nueva en tokens: neutros grafito, acento índigo, estados diferenciados (éxito, advertencia, error, info)
+      y un color e ícono por área. `scripts/check-contrast.mjs` verifica WCAG AA en claro y oscuro.
+- [x] Barra lateral agrupada (Aprender, Practicar, Entrevistas, Tu progreso) y cursos con color de área, plegables.
+- [x] Barra inferior en móvil: Inicio, Biblioteca, Labs y Buscar.
+- [x] Biblioteca, curso y dashboard con identidad por área (franja, ícono, progreso coloreado) y hover/foco visibles.
+- [x] Lección: ancho de lectura acotado, barra de progreso de lectura, "Lección N de M", migas con color del curso,
+      jerarquía de títulos, callouts y Knowledge check más legibles, anterior/siguiente como tarjetas.
+
 ## Próximas fases
 
 | Fase                                                                          | Estado     |

@@ -17,7 +17,7 @@ export function TableOfContents({ entries }: { entries: readonly TocEntry[] }) {
             <a
               href={`#${entry.id}`}
               className={cn(
-                "text-muted hover:border-accent hover:text-foreground -ml-px block border-l border-transparent py-0.5",
+                "text-muted hover:border-area hover:text-foreground -ml-px block border-l-2 border-transparent py-0.5 transition-colors",
                 entry.depth === 2 ? "pl-3" : "pl-6 text-xs",
               )}
             >
