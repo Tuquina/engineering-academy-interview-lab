@@ -75,9 +75,9 @@ class StripeGateway:                            # cumple el Protocol por tener e
     def charge(self, amount_cents: int, token: str) -> str:
         ...
 
-class OrderPayload(TypedDict):                  # forma de un diccionario
-    sku: str
-    quantity: int
+class SensorReading(TypedDict):                 # forma de un diccionario
+    sensor_id: str
+    celsius: float
 
 def first[T](items: list[T]) -> T | None:       # genéricos con la sintaxis de Python 3.12
     return items[0] if items else None
@@ -140,7 +140,7 @@ def transaction(connection):
         raise
 
 with transaction(conn) as tx:
-    tx.execute("UPDATE stock SET quantity = quantity - 1 WHERE sku = %s", (sku,))
+    tx.execute("UPDATE drivers SET available = false WHERE id = %s", (driver_id,))
 ```
 
 ## Módulos, paquetes y pyproject.toml

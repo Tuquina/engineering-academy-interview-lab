@@ -59,14 +59,14 @@ summary:
 En Python todo es un objeto y las variables son **nombres que apuntan a objetos**. Asignar no copia:
 
 ```python
-cart = ["SKU-1"]
-backup = cart          # mismo objeto
-backup.append("SKU-2")
-cart                   # ['SKU-1', 'SKU-2']
+playlist = ["tema-1"]
+backup = playlist      # mismo objeto
+backup.append("tema-2")
+playlist               # ['tema-1', 'tema-2']
 
 import copy
-snapshot = cart.copy()           # copia superficial (también list(cart) o cart[:])
-deep = copy.deepcopy(order)      # copia también los objetos anidados
+snapshot = playlist.copy()       # copia superficial (también list(playlist) o playlist[:])
+deep = copy.deepcopy(album)      # copia también los objetos anidados
 ```
 
 Los tipos **inmutables** (`int`, `str`, `tuple`, `frozenset`) no cambian: cualquier "modificación" crea un objeto
@@ -83,10 +83,10 @@ nuevo. Los **mutables** (`list`, `dict`, `set`, objetos de tus clases) sí.
 Una **comprensión** construye una colección a partir de otra en una sola expresión:
 
 ```python
-prices = [p.price_cents for p in products if p.active]                 # lista
-by_sku = {p.sku: p for p in products}                                  # diccionario
-categories = {p.category for p in products}                            # set
-total = sum(i.price_cents * i.quantity for i in cart)                  # expresión generadora
+temps = [r.celsius for r in readings if r.valid]                     # lista
+by_sensor = {r.sensor_id: r for r in readings}                      # diccionario
+zones = {r.zone for r in readings}                                  # set
+total_kwh = sum(r.kwh for r in readings)                            # expresión generadora
 ```
 
 Son más rápidas y legibles que el `for` con `append` equivalente, siempre que la lógica sea simple. Si necesitás
@@ -98,26 +98,26 @@ Un **generador** es una función con `yield`: produce valores de a uno, **bajo d
 llamadas.
 
 ```python
-def read_orders(path):
+def read_shipments(path):
     with open(path, encoding="utf-8") as file:
         next(file)                              # salta el encabezado
         for line in file:                       # el archivo también se lee línea por línea
-            yield Order.from_csv(line)
+            yield Shipment.from_csv(line)
 
-paid = (o for o in read_orders("orders.csv") if o.status == "PAID")   # nada se ejecutó todavía
-revenue = sum(o.total_cents for o in paid)                            # recién acá se recorre
+delivered = (s for s in read_shipments("shipments.csv") if s.status == "DELIVERED")  # nada se ejecutó todavía
+total_grams = sum(s.weight_grams for s in delivered)                                # recién acá se recorre
 ```
 
-Procesar un archivo de 10 GB así usa memoria constante, porque nunca hay más de un pedido en memoria. Un generador
+Procesar un archivo de 10 GB así usa memoria constante, porque nunca hay más de un envío en memoria. Un generador
 **se consume una sola vez**. El módulo `itertools` agrega herramientas como `islice`, `groupby` y `chain`.
 
 <MermaidDiagram
   caption="Un pipeline de generadores procesa un elemento por vez: cada etapa pide el siguiente a la anterior sólo cuando lo necesita."
   chart={`
 flowchart LR
-  A["Archivo CSV"] -->|"una línea"| B["read_orders: yield Order"]
-  B -->|"un pedido"| C["filtro: status PAID"]
-  C -->|"un pedido"| D["sum: acumula el total"]
+  A["Archivo CSV"] -->|"una línea"| B["read_shipments: yield Shipment"]
+  B -->|"un envío"| C["filtro: status DELIVERED"]
+  C -->|"un envío"| D["sum: acumula el peso"]
 `}
 />
 
@@ -155,25 +155,25 @@ Flask, pytest y `functools.cache` usan decoradores constantemente.
 ## Clases
 
 ```python
-class Cart:
-    def __init__(self, customer_id: str):
-        self.customer_id = customer_id          # atributos de instancia
-        self._items: dict[str, int] = {}        # el guion bajo indica "privado" por convención
+class Squad:
+    def __init__(self, squad_id: str):
+        self.squad_id = squad_id                # atributos de instancia
+        self._players: dict[str, int] = {}      # el guion bajo indica "privado" por convención
 
-    def add(self, sku: str, quantity: int = 1) -> None:
-        if quantity <= 0:
-            raise ValueError("Cantidad inválida")
-        self._items[sku] = self._items.get(sku, 0) + quantity
+    def add(self, player: str, level: int = 1) -> None:
+        if level <= 0:
+            raise ValueError("Nivel inválido")
+        self._players[player] = level
 
     @property
-    def total_items(self) -> int:              # se usa como atributo: cart.total_items
-        return sum(self._items.values())
+    def total_level(self) -> int:              # se usa como atributo: squad.total_level
+        return sum(self._players.values())
 
-    def __len__(self) -> int:                  # len(cart)
-        return len(self._items)
+    def __len__(self) -> int:                  # len(squad)
+        return len(self._players)
 
     def __repr__(self) -> str:                 # representación para depurar
-        return f"Cart({self.customer_id!r}, {self._items})"
+        return f"Squad({self.squad_id!r}, {self._players})"
 ```
 
 - `self` es explícito: es la instancia, equivalente a `this`.
@@ -200,9 +200,9 @@ class Money:
             raise ValueError("Monto negativo")
 
 @dataclass
-class Order:
+class Trip:
     id: str
-    items: list[str] = field(default_factory=list)   # evita el problema del mutable por defecto
+    stops: list[str] = field(default_factory=list)   # evita el problema del mutable por defecto
 
 Money(1500) == Money(1500)       # True: compara por valor
 ```

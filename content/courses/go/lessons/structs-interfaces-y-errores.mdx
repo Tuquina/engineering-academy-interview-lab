@@ -66,21 +66,21 @@ type Money struct {
     Currency string
 }
 
-type Order struct {
-    ID         string
-    CustomerID string
-    Items      []Item
-    Status     string
+type Appointment struct {
+    ID        string
+    PatientID string
+    Notes     []Note
+    Status    string
 }
 
 // Constructor por convención: una función NewX
-func NewOrder(id, customerID string) *Order {
-    return &Order{ID: id, CustomerID: customerID, Status: "CREATED"}
+func NewAppointment(id, patientID string) *Appointment {
+    return &Appointment{ID: id, PatientID: patientID, Status: "BOOKED"}
 }
 
-// Receptor por puntero: modifica el pedido
-func (o *Order) AddItem(item Item) {
-    o.Items = append(o.Items, item)
+// Receptor por puntero: modifica el turno
+func (a *Appointment) AddNote(note Note) {
+    a.Notes = append(a.Notes, note)
 }
 
 // Receptor por valor: sólo lee
@@ -91,13 +91,13 @@ func (m Money) String() string {
 
 ## Punteros y receptores
 
-Go pasa todo **por valor**: pasar un struct copia todos sus campos. Un **puntero** (`*Order`) permite compartir y
+Go pasa todo **por valor**: pasar un struct copia todos sus campos. Un **puntero** (`*Appointment`) permite compartir y
 modificar el mismo valor. No hay aritmética de punteros, y el garbage collector se encarga de la memoria.
 
-| Receptor             | Cuándo                                                                       |
-| -------------------- | ---------------------------------------------------------------------------- |
-| Puntero `(o *Order)` | El método modifica el struct, el struct es grande o contiene un `sync.Mutex` |
-| Valor `(m Money)`    | Tipos chicos e inmutables                                                    |
+| Receptor                   | Cuándo                                                                       |
+| -------------------------- | ---------------------------------------------------------------------------- |
+| Puntero `(a *Appointment)` | El método modifica el struct, el struct es grande o contiene un `sync.Mutex` |
+| Valor `(m Money)`          | Tipos chicos e inmutables                                                    |
 
 Por consistencia, si un método del tipo usa puntero, en general todos lo hacen.
 
@@ -118,8 +118,8 @@ func (s *StripeGateway) Charge(ctx context.Context, amountCents int64, token str
     return "tx_123", nil
 }
 
-type CheckoutService struct {
-    payments PaymentGateway        // depende de la interfaz, no del proveedor
+type CopaymentService struct {
+    payments PaymentGateway        // cobra el copago de un turno; depende de la interfaz, no del proveedor
 }
 ```
 
@@ -146,17 +146,17 @@ type Timestamps struct {
 
 func (t *Timestamps) Touch() { t.UpdatedAt = time.Now() }
 
-type Product struct {
-    Timestamps                  // embedding: Product "tiene" Timestamps
-    SKU   string
-    Price Money
+type Doctor struct {
+    Timestamps                  // embedding: Doctor "tiene" Timestamps
+    License string
+    Fee     Money
 }
 
-p := &Product{SKU: "SKU-1"}
-p.Touch()                       // método promovido desde Timestamps
+d := &Doctor{License: "MN-12345"}
+d.Touch()                       // método promovido desde Timestamps
 ```
 
-No es herencia: un `Product` no es un `Timestamps` y no hay polimorfismo por subtipos; el polimorfismo se logra con
+No es herencia: un `Doctor` no es un `Timestamps` y no hay polimorfismo por subtipos; el polimorfismo se logra con
 interfaces.
 
 ## Errores idiomáticos
@@ -169,22 +169,22 @@ type ValidationError struct {                      // error con datos
 }
 func (e *ValidationError) Error() string { return "campo inválido: " + e.Field }
 
-func (r *Repo) Find(ctx context.Context, id string) (*Order, error) {
-    order, err := r.query(ctx, id)
+func (r *Repo) Find(ctx context.Context, id string) (*Appointment, error) {
+    appointment, err := r.query(ctx, id)
     if errors.Is(err, sql.ErrNoRows) {
         return nil, ErrNotFound
     }
     if err != nil {
         return nil, fmt.Errorf("repo.Find %s: %w", id, err)   // agrega contexto y conserva la causa
     }
-    return order, nil
+    return appointment, nil
 }
 
 // Quien llama consulta la cadena de errores
-order, err := repo.Find(ctx, id)
+appointment, err := repo.Find(ctx, id)
 switch {
 case errors.Is(err, ErrNotFound):
-    http.Error(w, "pedido inexistente", http.StatusNotFound)
+    http.Error(w, "turno inexistente", http.StatusNotFound)
 case err != nil:
     var validation *ValidationError
     if errors.As(err, &validation) {
@@ -200,7 +200,7 @@ case err != nil:
   chart={`
 flowchart LR
   A["sql.ErrNoRows"] -->|"repo devuelve ErrNotFound"| B["ErrNotFound"]
-  B -->|"servicio: fmt.Errorf con %w"| C["checkout: buscar pedido o-9: no encontrado"]
+  B -->|"servicio: fmt.Errorf con %w"| C["turnos: buscar turno t-9: no encontrado"]
   C -->|"handler: errors.Is con ErrNotFound"| D["HTTP 404"]
 `}
 />

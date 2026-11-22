@@ -115,10 +115,10 @@ Console.WriteLine($"Hola, {name}!");
 | Otros     | `bool`, `char`, `string`       | `string` es un tipo de referencia inmutable       |
 
 ```csharp
-int quantity = 3;
-var price = 1250.50m;              // m: literal decimal
+int nights = 3;
+var nightlyRate = 1250.50m;        // m: literal decimal
 const int MaxRetries = 3;
-string? coupon = null;             // ? : puede ser null (con nullable habilitado)
+string? promoCode = null;          // ? : puede ser null (con nullable habilitado)
 ```
 
 **Nullable reference types** (C# 8, habilitado por defecto en los proyectos nuevos): el compilador distingue `string`
@@ -126,26 +126,26 @@ string? coupon = null;             // ? : puede ser null (con nullable habilitad
 estático; no cambia el runtime.
 
 ```csharp
-int length = coupon?.Length ?? 0;  // ?. y ?? como en TypeScript
-coupon ??= "SINCUPON";             // asigna si es null
+int length = promoCode?.Length ?? 0;  // ?. y ?? como en TypeScript
+promoCode ??= "SINPROMO";             // asigna si es null
 ```
 
 ## Control de flujo y pattern matching
 
 ```csharp
-if (stock == 0) status = "agotado";
-else if (stock < 5) status = "últimas unidades";
+if (roomsLeft == 0) status = "sin disponibilidad";
+else if (roomsLeft < 5) status = "últimas habitaciones";
 else status = "disponible";
 
 for (var i = 0; i < 3; i++) { }
-foreach (var item in cart) { }
+foreach (var guest in guests) { }
 while (retries < 3) retries++;
 
 // switch expression (C# 8+): devuelve un valor y debe cubrir todos los casos
 var label = status switch
 {
-    OrderStatus.Paid => "Pagado",
-    OrderStatus.Shipped or OrderStatus.Delivered => "Enviado",
+    BookingStatus.Confirmed => "Confirmada",
+    BookingStatus.CheckedIn or BookingStatus.CheckedOut => "En curso o finalizada",
     _ => "Pendiente",
 };
 
@@ -159,30 +159,30 @@ if (payment is CardPayment { Installments: > 1 } card)
 ## Métodos, clases y propiedades
 
 ```csharp
-public class Order
+public class Booking
 {
-    private readonly List<OrderItem> _items = new();
+    private readonly List<BookingExtra> _extras = new();
 
-    public Order(string id, string customerId)          // constructor
+    public Booking(string id, string guestId)           // constructor
     {
         Id = id;
-        CustomerId = customerId;
+        GuestId = guestId;
     }
 
     public string Id { get; }                           // propiedad de sólo lectura
-    public string CustomerId { get; }
-    public OrderStatus Status { get; private set; } = OrderStatus.Created;
-    public decimal Total => _items.Sum(i => i.Price * i.Quantity);   // propiedad calculada
+    public string GuestId { get; }
+    public BookingStatus Status { get; private set; } = BookingStatus.Pending;
+    public decimal ExtrasTotal => _extras.Sum(e => e.Price * e.Quantity);   // propiedad calculada
 
-    public void AddItem(string sku, decimal price, int quantity = 1)  // parámetro opcional
+    public void AddExtra(string code, decimal price, int quantity = 1)  // parámetro opcional
     {
         if (quantity <= 0) throw new ArgumentOutOfRangeException(nameof(quantity));
-        _items.Add(new OrderItem(sku, price, quantity));
+        _extras.Add(new BookingExtra(code, price, quantity));
     }
 }
 
-var order = new Order("o-1", "c-7");
-order.AddItem("SKU-1", 1500m, quantity: 2);             // argumento con nombre
+var booking = new Booking("b-1", "g-7");
+booking.AddExtra("DESAYUNO", 1500m, quantity: 2);       // argumento con nombre
 ```
 
 - Las **propiedades** (`{ get; set; }`) reemplazan a los getters y setters de Java, y se usan como campos.
@@ -193,19 +193,19 @@ order.AddItem("SKU-1", 1500m, quantity: 2);             // argumento con nombre
 ## Strings y colecciones básicas
 
 ```csharp
-var message = $"Total: {order.Total:C}";          // interpolación con formato de moneda
+var message = $"Extras: {booking.ExtrasTotal:C}";  // interpolación con formato de moneda
 var raw = """
     Texto multilínea (C# 11+)
     sin escapar "comillas".
     """;
-"Zapatillas".Contains("lla", StringComparison.OrdinalIgnoreCase);
+"Suite Superior".Contains("sup", StringComparison.OrdinalIgnoreCase);
 string.Equals(a, b);                              // en C#, == en string compara contenido
 
-var skus = new List<string> { "SKU-1", "SKU-2" };
-skus.Add("SKU-3");
+var roomNumbers = new List<string> { "101", "102" };
+roomNumbers.Add("201");
 
-var stock = new Dictionary<string, int> { ["SKU-1"] = 5 };
-if (stock.TryGetValue("SKU-9", out var qty)) { /* existe */ }
+var freeRooms = new Dictionary<string, int> { ["doble"] = 5 };
+if (freeRooms.TryGetValue("triple", out var count)) { /* existe */ }
 
 int[] numbers = [1, 2, 3];                        // collection expressions (C# 12)
 ```

@@ -84,19 +84,19 @@ Las anotaciones de estereotipo marcan clases como beans: `@Component` (genérica
 
 ```java
 @Service
-public class CheckoutService {
-    private final InventoryClient inventory;
+public class EnrollmentService {
+    private final CourseCatalog courses;
     private final PaymentGateway payments;
-    private final OrderRepository orders;
+    private final EnrollmentRepository enrollments;
 
     // Con un único constructor, Spring lo usa para inyectar: no hace falta @Autowired
-    public CheckoutService(InventoryClient inventory, PaymentGateway payments, OrderRepository orders) {
-        this.inventory = inventory;
+    public EnrollmentService(CourseCatalog courses, PaymentGateway payments, EnrollmentRepository enrollments) {
+        this.courses = courses;
         this.payments = payments;
-        this.orders = orders;
+        this.enrollments = enrollments;
     }
 
-    public Order checkout(CheckoutCommand command) { /* ... */ }
+    public Enrollment enroll(EnrollCommand command) { /* ... */ }
 }
 ```
 
@@ -117,8 +117,8 @@ public class HttpClientsConfig {
 
 <Callout type="warning" title="Los beans son singleton y compartidos entre hilos">
   Por defecto hay una sola instancia de cada bean para toda la aplicación, y la usan todas las requests al
-  mismo tiempo. Nunca guardes datos de una request (el usuario actual, un carrito) en un campo de un
-  `@Service`.
+  mismo tiempo. Nunca guardes datos de una request (el usuario actual, la inscripción que se está procesando)
+  en un campo de un `@Service`.
 </Callout>
 
 ## Una API REST
@@ -139,31 +139,31 @@ flowchart LR
 />
 
 ```java
-public record CreateProductRequest(
-    @NotBlank String name,
-    @Positive long priceCents,
-    @NotBlank @Size(min = 3, max = 3) String currency) {}
+public record CreateCourseRequest(
+    @NotBlank String title,
+    @Positive int capacity,
+    @NotBlank @Size(min = 2, max = 2) String language) {}
 
-public record ProductResponse(String id, String name, long priceCents, String currency) {}
+public record CourseResponse(String id, String title, int capacity, String language) {}
 
 @RestController
-@RequestMapping("/api/products")
-public class ProductController {
-    private final ProductService products;
+@RequestMapping("/api/courses")
+public class CourseController {
+    private final CourseService courses;
 
-    public ProductController(ProductService products) {
-        this.products = products;
+    public CourseController(CourseService courses) {
+        this.courses = courses;
     }
 
     @GetMapping("/{id}")
-    public ProductResponse get(@PathVariable String id) {
-        return products.get(id);                                    // se serializa a JSON con Jackson
+    public CourseResponse get(@PathVariable String id) {
+        return courses.get(id);                                    // se serializa a JSON con Jackson
     }
 
     @PostMapping
-    public ResponseEntity<ProductResponse> create(@Valid @RequestBody CreateProductRequest request) {
-        ProductResponse created = products.create(request);
-        return ResponseEntity.created(URI.create("/api/products/" + created.id())).body(created);
+    public ResponseEntity<CourseResponse> create(@Valid @RequestBody CreateCourseRequest request) {
+        CourseResponse created = courses.create(request);
+        return ResponseEntity.created(URI.create("/api/courses/" + created.id())).body(created);
     }
 }
 ```
@@ -177,13 +177,13 @@ public class ProductController {
 ```java
 @RestControllerAdvice
 public class ApiErrors {
-    @ExceptionHandler(ProductNotFoundException.class)
-    ProblemDetail notFound(ProductNotFoundException e) {
+    @ExceptionHandler(CourseNotFoundException.class)
+    ProblemDetail notFound(CourseNotFoundException e) {
         return ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, e.getMessage());
     }
 
-    @ExceptionHandler(InsufficientStockException.class)
-    ProblemDetail conflict(InsufficientStockException e) {
+    @ExceptionHandler(CourseFullException.class)
+    ProblemDetail conflict(CourseFullException e) {
         return ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, e.getMessage());
     }
 }
@@ -220,7 +220,7 @@ entorno, nunca en el repositorio.
 ## Cómo organizar el código
 
 La estructura clásica es por capas (controller → service → repository), pero en aplicaciones medianas suele ser más
-mantenible **por funcionalidad** (`orders`, `payments`, `catalog`), cada paquete con sus capas internas y una API
+mantenible **por funcionalidad** (`enrollments`, `payments`, `courses`), cada paquete con sus capas internas y una API
 pública mínima. Es la idea del monolito modular, que Spring Modulith ayuda a verificar. La arquitectura hexagonal
 encaja naturalmente: el dominio define interfaces (puertos) y Spring inyecta los adaptadores.
 

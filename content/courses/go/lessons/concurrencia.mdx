@@ -68,7 +68,7 @@ summary:
 Una **goroutine** es una función que se ejecuta de forma concurrente. Se lanza con la palabra `go`:
 
 ```go
-go sendConfirmationEmail(order)   // no espera: la función sigue en paralelo
+go sendWelcomeEmail(student)     // no espera: la función sigue en paralelo
 ```
 
 Las goroutines son mucho más livianas que los hilos del sistema operativo: empiezan con un stack chico que crece
@@ -113,12 +113,12 @@ compartí memoria comunicándote_.
 
 ```go
 results := make(chan Rate)          // sin buffer
-jobs := make(chan Order, 100)       // con buffer de 100
+jobs := make(chan Reading, 100)     // con buffer de 100
 
 results <- rate                     // enviar
 rate := <-results                   // recibir
 close(jobs)                         // lo cierra el emisor cuando no hay más datos
-for order := range jobs { }         // recibe hasta que el channel se cierra
+for reading := range jobs { }       // recibe hasta que el channel se cierra
 ```
 
 | Operación | Channel sin buffer          | Con buffer                | Cerrado                                |
@@ -147,10 +147,10 @@ case <-ctx.Done():
 **primer parámetro** de toda función que hace I/O:
 
 ```go
-func (s *CheckoutService) Quote(ctx context.Context, cart Cart) (Rate, error) {
+func (s *ShippingService) Quote(ctx context.Context, parcel Parcel) (Rate, error) {
     ctx, cancel := context.WithTimeout(ctx, 800*time.Millisecond)
     defer cancel()                     // siempre: libera los recursos del contexto
-    return s.carrier.Rate(ctx, cart)   // el cliente HTTP y el driver de base respetan ctx
+    return s.carrier.Rate(ctx, parcel) // el cliente HTTP y el driver de base respetan ctx
 }
 ```
 
@@ -162,14 +162,14 @@ llamadas a otros servicios) se corta en lugar de trabajar para nadie.
 ### Worker pool
 
 ```go
-func processAll(ctx context.Context, orders []Order, workers int) error {
-    jobs := make(chan Order)
+func processAll(ctx context.Context, readings []Reading, workers int) error {
+    jobs := make(chan Reading)
     g, ctx := errgroup.WithContext(ctx)      // golang.org/x/sync/errgroup
 
     for range workers {                       // Go 1.22+: range sobre un entero
         g.Go(func() error {
-            for order := range jobs {
-                if err := invoice(ctx, order); err != nil {
+            for reading := range jobs {
+                if err := store(ctx, reading); err != nil { // guarda la lectura del sensor
                     return err                // cancela ctx: los demás workers se detienen
                 }
             }
@@ -179,9 +179,9 @@ func processAll(ctx context.Context, orders []Order, workers int) error {
 
     g.Go(func() error {
         defer close(jobs)
-        for _, order := range orders {
+        for _, reading := range readings {
             select {
-            case jobs <- order:
+            case jobs <- reading:
             case <-ctx.Done():
                 return ctx.Err()
             }
@@ -204,13 +204,13 @@ channel:
 ```go
 type Cache struct {
     mu    sync.RWMutex
-    items map[string]Product
+    players map[string]Player
 }
 
-func (c *Cache) Get(sku string) (Product, bool) {
+func (c *Cache) Get(playerID string) (Player, bool) {
     c.mu.RLock()                    // varios lectores a la vez
     defer c.mu.RUnlock()
-    p, ok := c.items[sku]
+    p, ok := c.players[playerID]
     return p, ok
 }
 ```

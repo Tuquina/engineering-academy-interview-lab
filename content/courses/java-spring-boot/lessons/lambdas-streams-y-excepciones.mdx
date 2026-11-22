@@ -67,10 +67,10 @@ paquete `java.util.function` trae las más comunes:
 | `UnaryOperator` | T → T       | `s -> s.trim()`           |
 
 ```java
-Predicate<Order> isPaid = order -> order.status() == OrderStatus.PAID;
-Function<Order, Long> total = Order::totalCents;       // referencia a método
-Comparator<Product> byPrice = Comparator.comparingLong(Product::priceCents)
-                                        .thenComparing(Product::name);
+Predicate<Appointment> isCompleted = appointment -> appointment.status() == AppointmentStatus.COMPLETED;
+Function<Appointment, Long> fee = Appointment::feeCents;           // referencia a método
+Comparator<Doctor> byRating = Comparator.comparingDouble(Doctor::rating)
+                                        .thenComparing(Doctor::name);
 ```
 
 Las lambdas pueden usar variables locales del método que las contiene sólo si son **efectivamente finales** (no se
@@ -82,38 +82,38 @@ Un stream procesa una secuencia de elementos en tres partes: **fuente**, **opera
 **operación terminal**.
 
 ```java
-record Order(String id, String customerId, OrderStatus status, long totalCents) {}
+record Appointment(String id, String doctorId, AppointmentStatus status, long feeCents) {}
 
-List<Order> orders = repository.findAll();
+List<Appointment> appointments = repository.findAll();
 
-// Total facturado de los pedidos pagados
-long revenue = orders.stream()
-    .filter(o -> o.status() == OrderStatus.PAID)
-    .mapToLong(Order::totalCents)
+// Total facturado de los turnos atendidos
+long revenue = appointments.stream()
+    .filter(t -> t.status() == AppointmentStatus.COMPLETED)
+    .mapToLong(Appointment::feeCents)
     .sum();
 
-// Pedidos agrupados por cliente
-Map<String, List<Order>> byCustomer = orders.stream()
-    .collect(Collectors.groupingBy(Order::customerId));
+// Turnos agrupados por profesional
+Map<String, List<Appointment>> byDoctor = appointments.stream()
+    .collect(Collectors.groupingBy(Appointment::doctorId));
 
-// Total por cliente
-Map<String, Long> totalByCustomer = orders.stream()
-    .collect(Collectors.groupingBy(Order::customerId, Collectors.summingLong(Order::totalCents)));
+// Total por profesional
+Map<String, Long> totalByDoctor = appointments.stream()
+    .collect(Collectors.groupingBy(Appointment::doctorId, Collectors.summingLong(Appointment::feeCents)));
 
-// Top 3 pedidos más caros
-List<Order> top3 = orders.stream()
-    .sorted(Comparator.comparingLong(Order::totalCents).reversed())
+// Top 3 consultas más caras
+List<Appointment> top3 = appointments.stream()
+    .sorted(Comparator.comparingLong(Appointment::feeCents).reversed())
     .limit(3)
     .toList();                                   // Java 16+: lista inmutable
 
-String ids = orders.stream().map(Order::id).collect(Collectors.joining(", "));
+String ids = appointments.stream().map(Appointment::id).collect(Collectors.joining(", "));
 ```
 
 <MermaidDiagram
   caption="Las operaciones intermedias sólo describen el procesamiento; nada se ejecuta hasta la operación terminal."
   chart={`
 flowchart LR
-  S["Fuente: orders.stream()"] --> F["filter (intermedia)"]
+  S["Fuente: appointments.stream()"] --> F["filter (intermedia)"]
   F --> M["mapToLong (intermedia)"]
   M --> T["sum (terminal): recién acá se recorre"]
 `}
@@ -182,9 +182,9 @@ Todo lo que implementa `AutoCloseable` (conexiones, archivos, streams de I/O) se
 incluso si hay una excepción:
 
 ```java
-try (var reader = Files.newBufferedReader(Path.of("orders.csv"));
+try (var reader = Files.newBufferedReader(Path.of("appointments.csv"));
      var lines = reader.lines()) {
-    return lines.skip(1).map(OrderCsv::parse).toList();
+    return lines.skip(1).map(AppointmentCsv::parse).toList();
 } // reader y lines se cierran en orden inverso
 ```
 
@@ -194,7 +194,7 @@ Antes de Java 7 había que cerrar en un `finally`, con riesgo de fugas si el cie
 
 <KnowledgeCheck
   id="java.streams-exceptions.q1"
-  question="orders.stream().filter(...).map(...) sin ninguna operación terminal. ¿Cuántas veces se ejecuta el filtro?"
+  question="appointments.stream().filter(...).map(...) sin ninguna operación terminal. ¿Cuántas veces se ejecuta el filtro?"
   options={[
     { text: "Una vez por elemento.", explanation: "Sin operación terminal no se procesa nada." },
     {

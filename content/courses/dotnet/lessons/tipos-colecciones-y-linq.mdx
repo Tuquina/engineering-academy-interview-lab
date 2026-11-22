@@ -68,9 +68,9 @@ var a = new Point(1, 2);   // struct
 var b = a;                 // copia
 b.X = 10;                  // a.X sigue siendo 1 (si Point es mutable)
 
-var c1 = new Cart();       // class
+var c1 = new Classroom();  // class
 var c2 = c1;               // misma instancia
-c2.Add("SKU-1");           // c1 también ve el ítem
+c2.Add("ana");             // c1 también ve a la alumna
 ```
 
 Asignar un tipo de valor a `object` o a una interfaz lo **encapsula** en un objeto del heap (_boxing_), con su costo;
@@ -149,17 +149,17 @@ Exponé colecciones como `IReadOnlyList<T>` o `IEnumerable<T>` para que quien la
 **LINQ** (Language Integrated Query) agrega operadores de consulta a cualquier colección:
 
 ```csharp
-var paidByCustomer = orders
-    .Where(o => o.Status == OrderStatus.Paid)
-    .GroupBy(o => o.CustomerId)
-    .Select(g => new { CustomerId = g.Key, Total = g.Sum(o => o.Total), Count = g.Count() })
-    .OrderByDescending(x => x.Total)
+var averageByStudent = exams
+    .Where(e => e.Status == ExamStatus.Graded)
+    .GroupBy(e => e.StudentId)
+    .Select(g => new { StudentId = g.Key, Average = g.Average(e => e.Score), Count = g.Count() })
+    .OrderByDescending(x => x.Average)
     .Take(10)
     .ToList();
 
-bool anyPending = orders.Any(o => o.Status == OrderStatus.Created);
-var first = orders.FirstOrDefault(o => o.Id == id);      // null si no hay
-var skus = orders.SelectMany(o => o.Items).Select(i => i.Sku).Distinct();
+bool anyPending = exams.Any(e => e.Status == ExamStatus.Submitted);
+var first = exams.FirstOrDefault(e => e.Id == id);       // null si no hay
+var subjects = students.SelectMany(s => s.Enrollments).Select(en => en.SubjectCode).Distinct();
 ```
 
 ### Ejecución diferida
@@ -171,7 +171,7 @@ Una consulta LINQ sobre `IEnumerable<T>` **no se ejecuta cuando se define**, sin
   caption="IEnumerable ejecuta los operadores en memoria al recorrer; IQueryable arma un árbol de expresión que un proveedor (Entity Framework) traduce a SQL."
   chart={`
 flowchart LR
-  Q["orders.Where(...).Select(...)"] --> E{"¿IEnumerable o IQueryable?"}
+  Q["exams.Where(...).Select(...)"] --> E{"¿IEnumerable o IQueryable?"}
   E -->|"IEnumerable"| M["Se ejecuta en memoria al recorrer"]
   E -->|"IQueryable"| X["Árbol de expresión"]
   X --> S["Entity Framework genera SQL"]
@@ -187,20 +187,20 @@ después: un error clásico de performance.
 
 <KnowledgeCheck
   id="dotnet.types-linq.q1"
-  question="var a = new Cart(); var b = a; b.Add(item). Cart es una clase. ¿Qué ve a?"
+  question="var a = new Classroom(); var b = a; b.Add(student). Classroom es una clase. ¿Qué ve a?"
   options={[
     {
-      text: "No ve el ítem: b es una copia.",
+      text: "No ve al alumno: b es una copia.",
       explanation: "Las clases son tipos de referencia: no se copian al asignar.",
     },
-    { text: "Ve el ítem: a y b referencian el mismo objeto.", correct: true, explanation: "Correcto." },
+    { text: "Ve al alumno: a y b referencian el mismo objeto.", correct: true, explanation: "Correcto." },
     { text: "Error de compilación.", explanation: "Es código válido." },
   ]}
 />
 
 <KnowledgeCheck
   id="dotnet.types-linq.q2"
-  question="Definís var query = orders.Where(o => o.Total > 1000) y después la recorrés dos veces con foreach. ¿Cuántas veces se evalúa el filtro?"
+  question="Definís var query = exams.Where(e => e.Score > 7) y después la recorrés dos veces con foreach. ¿Cuántas veces se evalúa el filtro?"
   options={[
     { text: "Una: al definir la consulta.", explanation: "LINQ sobre IEnumerable usa ejecución diferida." },
     {

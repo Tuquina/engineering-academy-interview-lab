@@ -73,13 +73,13 @@ try (ExecutorService executor = Executors.newFixedThreadPool(8)) {   // Executor
 JavaScript:
 
 ```java
-CompletableFuture<Product> product = CompletableFuture.supplyAsync(() -> catalog.find(sku), executor);
-CompletableFuture<Price> price = CompletableFuture.supplyAsync(() -> pricing.priceFor(sku), executor);
+CompletableFuture<Flight> flight = CompletableFuture.supplyAsync(() -> flights.find(flightId), executor);
+CompletableFuture<Hotel> hotel = CompletableFuture.supplyAsync(() -> hotels.find(hotelId), executor);
 
-CompletableFuture<ProductView> view = product
-    .thenCombine(price, ProductView::new)                    // combina dos resultados
+CompletableFuture<TravelPackage> view = flight
+    .thenCombine(hotel, TravelPackage::new)                    // combina dos resultados
     .orTimeout(500, TimeUnit.MILLISECONDS)                   // Java 9+
-    .exceptionally(error -> ProductView.unavailable(sku));   // fallback
+    .exceptionally(error -> TravelPackage.unavailable(flightId, hotelId));   // fallback
 ```
 
 Pasá siempre tu propio executor: sin él se usa el `ForkJoinPool` común, compartido por toda la aplicación.
@@ -143,14 +143,14 @@ try (var executor = Executors.newVirtualThreadPerTaskExecutor()) {
   chart={`
 flowchart LR
   subgraph T1["Hilo 1: stack"]
-    A["order (referencia)"]
+    A["match (referencia)"]
   end
   subgraph T2["Hilo 2: stack"]
-    B["cart (referencia)"]
+    B["player (referencia)"]
   end
   subgraph H["Heap compartido"]
-    O["Objeto Order"]
-    C["Objeto Cart"]
+    O["Objeto Match"]
+    C["Objeto Player"]
     X["Objeto sin referencias: candidato a GC"]
   end
   A --> O

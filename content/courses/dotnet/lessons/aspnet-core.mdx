@@ -62,8 +62,8 @@ Una aplicación ASP.NET Core se arma en `Program.cs` en dos fases: **registrar s
 var builder = WebApplication.CreateBuilder(args);
 
 // 1. Servicios (inyección de dependencias)
-builder.Services.AddScoped<IOrderRepository, PostgresOrderRepository>();
-builder.Services.AddScoped<CheckoutService>();
+builder.Services.AddScoped<IAppointmentRepository, PostgresAppointmentRepository>();
+builder.Services.AddScoped<AppointmentService>();
 builder.Services.AddProblemDetails();
 builder.Services.AddHttpClient<IPaymentGateway, PaymentGatewayClient>(c =>
     c.BaseAddress = new Uri(builder.Configuration["Payments:BaseUrl"]!));
@@ -77,8 +77,8 @@ app.UseAuthentication();
 app.UseAuthorization();
 
 // 3. Endpoints
-app.MapGet("/orders/{id}", async (string id, IOrderRepository orders, CancellationToken ct) =>
-    await orders.FindAsync(id, ct) is { } order ? Results.Ok(order) : Results.NotFound());
+app.MapGet("/appointments/{id}", async (string id, IAppointmentRepository appointments, CancellationToken ct) =>
+    await appointments.FindAsync(id, ct) is { } appointment ? Results.Ok(appointment) : Results.NotFound());
 
 app.Run();
 ```
@@ -126,12 +126,12 @@ autenticación antes que la autorización, y los endpoints al final.
 **Minimal APIs** definen endpoints con lambdas y se agrupan con `MapGroup`:
 
 ```csharp
-var products = app.MapGroup("/api/products").RequireAuthorization();
+var doctors = app.MapGroup("/api/doctors").RequireAuthorization();
 
-products.MapPost("/", async (CreateProductRequest request, ProductService service, CancellationToken ct) =>
+doctors.MapPost("/", async (CreateDoctorRequest request, DoctorService service, CancellationToken ct) =>
 {
     var created = await service.CreateAsync(request, ct);
-    return Results.Created($"/api/products/{created.Id}", created);
+    return Results.Created($"/api/doctors/{created.Id}", created);
 });
 ```
 
@@ -139,12 +139,12 @@ products.MapPost("/", async (CreateProductRequest request, ProductService servic
 
 ```csharp
 [ApiController]
-[Route("api/products")]
-public class ProductsController(ProductService service) : ControllerBase   // constructor primario (C# 12)
+[Route("api/doctors")]
+public class DoctorsController(DoctorService service) : ControllerBase   // constructor primario (C# 12)
 {
     [HttpGet("{id}")]
-    public async Task<ActionResult<ProductResponse>> Get(string id, CancellationToken ct) =>
-        await service.FindAsync(id, ct) is { } product ? product : NotFound();
+    public async Task<ActionResult<DoctorResponse>> Get(string id, CancellationToken ct) =>
+        await service.FindAsync(id, ct) is { } doctor ? doctor : NotFound();
 }
 ```
 
@@ -208,12 +208,12 @@ public sealed class DomainExceptionHandler(IProblemDetailsService problems) : IE
 {
     public async ValueTask<bool> TryHandleAsync(HttpContext context, Exception exception, CancellationToken ct)
     {
-        if (exception is not OutOfStockException outOfStock) return false;   // que lo maneje el siguiente
+        if (exception is not SlotTakenException slotTaken) return false;   // que lo maneje el siguiente
         context.Response.StatusCode = StatusCodes.Status409Conflict;
         return await problems.TryWriteAsync(new ProblemDetailsContext
         {
             HttpContext = context,
-            ProblemDetails = { Title = "Sin stock", Detail = outOfStock.Message },
+            ProblemDetails = { Title = "Horario ocupado", Detail = slotTaken.Message },
         });
     }
 }

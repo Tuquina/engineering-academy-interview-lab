@@ -70,29 +70,29 @@ FastAPI se apoya en **Starlette** (la capa web ASGI) y **Pydantic** (validación
 from fastapi import FastAPI, HTTPException, status
 from pydantic import BaseModel, Field
 
-app = FastAPI(title="Catálogo")
+app = FastAPI(title="Reservas de hotel")
 
-class ProductIn(BaseModel):
+class RoomIn(BaseModel):
     name: str = Field(min_length=1, max_length=120)
-    price_cents: int = Field(gt=0)
+    nightly_rate_cents: int = Field(gt=0)
     currency: str = Field(pattern=r"^[A-Z]{3}$")
 
-class ProductOut(BaseModel):
+class RoomOut(BaseModel):
     id: str
     name: str
-    price_cents: int
+    nightly_rate_cents: int
     currency: str
 
-@app.post("/products", response_model=ProductOut, status_code=status.HTTP_201_CREATED)
-def create_product(product: ProductIn) -> ProductOut:
-    return catalog.create(product)
+@app.post("/rooms", response_model=RoomOut, status_code=status.HTTP_201_CREATED)
+def create_room(room: RoomIn) -> RoomOut:
+    return rooms.create(room)
 
-@app.get("/products/{product_id}", response_model=ProductOut)
-def get_product(product_id: str) -> ProductOut:
-    product = catalog.get(product_id)
-    if product is None:
-        raise HTTPException(status_code=404, detail="Producto no encontrado")
-    return product
+@app.get("/rooms/{room_id}", response_model=RoomOut)
+def get_room(room_id: str) -> RoomOut:
+    room = rooms.get(room_id)
+    if room is None:
+        raise HTTPException(status_code=404, detail="Habitación no encontrada")
+    return room
 ```
 
 ```bash
@@ -103,7 +103,7 @@ uvicorn app.main:app --reload   # desarrollo
 - Si el body no cumple el modelo, FastAPI responde **422** con el detalle de cada error, sin ejecutar la función.
 - `response_model` filtra la salida: aunque el objeto interno tenga más campos (un costo, un hash), sólo viaja lo
   declarado.
-- Los parámetros de ruta (`product_id`) y de query (`limit: int = 20`) también se validan por su tipo.
+- Los parámetros de ruta (`room_id`) y de query (`limit: int = 20`) también se validan por su tipo.
 
 ## Inyección de dependencias
 
@@ -129,9 +129,9 @@ def current_user(authorization: Annotated[str, Header()], session=Depends(get_se
 SessionDep = Annotated[Session, Depends(get_session)]
 UserDep = Annotated[User, Depends(current_user)]
 
-@app.get("/orders")
-def list_orders(session: SessionDep, user: UserDep, limit: int = 20):
-    return orders_repository.list_for(session, user.id, limit)
+@app.get("/appointments")
+def list_appointments(session: SessionDep, user: UserDep, limit: int = 20):
+    return appointments_repository.list_for_patient(session, user.id, limit)
 ```
 
 Las dependencias se encadenan (`current_user` usa la sesión) y en los tests se reemplazan con
@@ -165,13 +165,13 @@ Mezclar mal es el error más común: un `async def` que llama a una librería bl
 from fastapi import Request
 from fastapi.responses import JSONResponse
 
-class OutOfStockError(Exception):
-    def __init__(self, sku: str):
-        self.sku = sku
+class CourseFullError(Exception):
+    def __init__(self, course_id: str):
+        self.course_id = course_id
 
-@app.exception_handler(OutOfStockError)
-async def out_of_stock_handler(request: Request, error: OutOfStockError):
-    return JSONResponse(status_code=409, content={"error": "out_of_stock", "sku": error.sku})
+@app.exception_handler(CourseFullError)
+async def course_full_handler(request: Request, error: CourseFullError):
+    return JSONResponse(status_code=409, content={"error": "course_full", "course_id": error.course_id})
 ```
 
 El dominio lanza sus propias excepciones y la capa web las traduce a HTTP en un solo lugar.
@@ -196,14 +196,14 @@ def client(test_session):                     # test_session: otra fixture con u
     yield TestClient(app)
     app.dependency_overrides.clear()
 
-# tests/test_products.py
-def test_rejects_negative_price(client):
-    response = client.post("/products", json={"name": "Remera", "price_cents": -1, "currency": "ARS"})
+# tests/test_rooms.py
+def test_rejects_negative_rate(client):
+    response = client.post("/rooms", json={"name": "Doble superior", "nightly_rate_cents": -1, "currency": "ARS"})
     assert response.status_code == 422
 
 @pytest.mark.parametrize("currency", ["ARS", "USD", "EUR"])
-def test_creates_product(client, currency):
-    response = client.post("/products", json={"name": "Remera", "price_cents": 1500, "currency": currency})
+def test_creates_room(client, currency):
+    response = client.post("/rooms", json={"name": "Doble superior", "nightly_rate_cents": 1500, "currency": currency})
     assert response.status_code == 201
     assert response.json()["currency"] == currency
 ```
@@ -223,7 +223,7 @@ una cola.
 
 <KnowledgeCheck
   id="python.fastapi.q1"
-  question="Un POST llega con price_cents como 'abc' y el modelo declara price_cents: int. ¿Qué responde FastAPI?"
+  question="Un POST llega con nightly_rate_cents como 'abc' y el modelo declara nightly_rate_cents: int. ¿Qué responde FastAPI?"
   options={[
     { text: "500, porque falla la función.", explanation: "La función ni siquiera se ejecuta." },
     {

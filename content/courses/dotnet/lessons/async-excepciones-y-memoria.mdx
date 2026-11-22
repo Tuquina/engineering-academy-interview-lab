@@ -61,11 +61,11 @@ Una **`Task`** representa una operación en curso que eventualmente produce un r
 (`Task`). `async`/`await` permite escribir código asíncrono con forma secuencial:
 
 ```csharp
-public async Task<Quote> GetQuoteAsync(string sku, CancellationToken ct)
+public async Task<DeviceStatus> GetDeviceStatusAsync(string deviceId, CancellationToken ct)
 {
-    var product = await _catalog.GetAsync(sku, ct);          // libera el hilo mientras espera
-    var price = await _pricing.GetPriceAsync(sku, ct);
-    return new Quote(product, price);
+    var device = await _registry.GetAsync(deviceId, ct);          // libera el hilo mientras espera
+    var reading = await _telemetry.GetLatestAsync(deviceId, ct);
+    return new DeviceStatus(device, reading);
 }
 ```
 
@@ -77,14 +77,14 @@ crea hilos: en un servidor, eso significa que mientras una request espera a la b
 
 ```csharp
 // Las dos llamadas en paralelo: el tiempo total es el de la más lenta
-var productTask = _catalog.GetAsync(sku, ct);
-var priceTask = _pricing.GetPriceAsync(sku, ct);
-await Task.WhenAll(productTask, priceTask);
-var quote = new Quote(productTask.Result, priceTask.Result);   // ya terminaron: .Result no bloquea acá
+var deviceTask = _registry.GetAsync(deviceId, ct);
+var readingTask = _telemetry.GetLatestAsync(deviceId, ct);
+await Task.WhenAll(deviceTask, readingTask);
+var status = new DeviceStatus(deviceTask.Result, readingTask.Result);   // ya terminaron: .Result no bloquea acá
 
 // Muchas operaciones con concurrencia limitada
-await Parallel.ForEachAsync(customers, new ParallelOptions { MaxDegreeOfParallelism = 10, CancellationToken = ct },
-    async (customer, token) => await _notifications.SendAsync(customer, token));
+await Parallel.ForEachAsync(devices, new ParallelOptions { MaxDegreeOfParallelism = 10, CancellationToken = ct },
+    async (device, token) => await _firmware.CheckForUpdateAsync(device, token));
 ```
 
 ### Cancelación
@@ -149,7 +149,7 @@ archivos o sockets. Esos tipos implementan **`IDisposable`** (o `IAsyncDisposabl
 await using var connection = new NpgsqlConnection(connectionString);   // se libera al salir del ámbito
 await connection.OpenAsync(ct);
 
-using (var stream = File.OpenRead("orders.csv"))
+using (var stream = File.OpenRead("readings.csv"))
 {
     // ...
 } // Dispose acá, aunque haya una excepción
@@ -166,7 +166,7 @@ using (var stream = File.OpenRead("orders.csv"))
   caption="El GC de .NET es generacional: los objetos nacen en la generación 0; los que sobreviven a una recolección pasan a la siguiente."
   chart={`
 flowchart LR
-  N["new Order()"] --> G0["Generación 0: recolección frecuente y rápida"]
+  N["new SensorReading()"] --> G0["Generación 0: recolección frecuente y rápida"]
   G0 -->|"sobrevive"| G1["Generación 1: intermedia"]
   G1 -->|"sobrevive"| G2["Generación 2: objetos de larga vida"]
   L["Objetos de 85.000 bytes o más"] --> LOH["Large Object Heap: se recolecta con la generación 2"]

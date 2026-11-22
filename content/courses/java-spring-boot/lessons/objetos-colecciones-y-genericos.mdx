@@ -119,8 +119,8 @@ price.cents();   // los accessors no llevan "get"
 Un **enum** modela un conjunto cerrado de valores y puede tener campos y métodos:
 
 ```java
-public enum OrderStatus {
-    CREATED, PAID, SHIPPED, DELIVERED, CANCELLED;
+public enum ShipmentStatus {
+    CREATED, PICKED_UP, IN_TRANSIT, DELIVERED, CANCELLED;
 
     public boolean isFinal() {
         return this == DELIVERED || this == CANCELLED;
@@ -161,7 +161,7 @@ implementan bien; en clases comunes se usa `Objects.equals` y `Objects.hash`, o 
 @Override
 public boolean equals(Object o) {
     if (this == o) return true;
-    if (!(o instanceof Sku other)) return false;   // pattern matching de instanceof (Java 16)
+    if (!(o instanceof TrackingCode other)) return false;   // pattern matching de instanceof (Java 16)
     return code.equals(other.code);
 }
 
@@ -185,13 +185,13 @@ public int hashCode() {
 | Prioridad       | `PriorityQueue`         | O(log n)                   | Heap binario                                        |
 
 ```java
-List<String> skus = new ArrayList<>();
-skus.add("SKU-1");
+List<String> trackingCodes = new ArrayList<>();
+trackingCodes.add("TRK-1");
 
-Map<String, Integer> stock = new HashMap<>();
-stock.merge("SKU-1", 5, Integer::sum);            // suma si ya existe
-stock.getOrDefault("SKU-9", 0);
-stock.computeIfAbsent("SKU-2", k -> 0);
+Map<String, Integer> deliveriesByZone = new HashMap<>();
+deliveriesByZone.merge("norte", 5, Integer::sum);     // suma si ya existe
+deliveriesByZone.getOrDefault("oeste", 0);
+deliveriesByZone.computeIfAbsent("sur", k -> 0);
 
 List<String> fixed = List.of("a", "b");            // inmutable: add lanza UnsupportedOperationException
 Map<String, Integer> prices = Map.of("A", 100, "B", 200);

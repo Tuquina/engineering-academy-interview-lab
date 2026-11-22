@@ -95,13 +95,13 @@ lockfile a partir del `pyproject.toml` (`uv add fastapi`, `uv run app.py`).
 ## Tipos y variables
 
 ```python
-quantity = 3                 # int: precisión arbitraria, no hay desbordamiento
-price = 1250.50              # float (doble precisión)
-active = True                # bool: True / False con mayúscula
-name = "Zapatillas"          # str: inmutable, Unicode
-discount = None              # None: ausencia de valor
+credits = 6                  # int: precisión arbitraria, no hay desbordamiento
+average = 8.75               # float (doble precisión)
+enrolled = True              # bool: True / False con mayúscula
+subject = "Álgebra"          # str: inmutable, Unicode
+scholarship = None           # None: ausencia de valor
 
-type(quantity)               # <class 'int'>
+type(credits)                # <class 'int'>
 "3" + 3                      # TypeError: Python es dinámico pero fuertemente tipado
 int("3") + 3                 # 6
 ```
@@ -119,18 +119,18 @@ otro objeto. La convención de nombres es `snake_case` para variables y funcione
 La **indentación** (4 espacios por convención) define los bloques:
 
 ```python
-if stock == 0:
-    status = "agotado"
-elif stock < 5:
-    status = "últimas unidades"
+if seats_left == 0:
+    status = "vuelo completo"
+elif seats_left < 5:
+    status = "últimos asientos"
 else:
     status = "disponible"
 
-for item in cart:                      # for recorre cualquier iterable
-    print(item)
+for passenger in passengers:           # for recorre cualquier iterable
+    print(passenger)
 
-for index, item in enumerate(cart):    # índice y valor
-    print(index, item)
+for index, passenger in enumerate(passengers):  # índice y valor
+    print(index, passenger)
 
 for i in range(3):                     # 0, 1, 2
     ...
@@ -154,13 +154,13 @@ lista está vacía. Los operadores lógicos son `and`, `or` y `not`; la comparac
 ## Funciones
 
 ```python
-def total_cents(items: list[dict], discount_pct: float = 0) -> int:
-    """Suma los ítems y aplica un descuento porcentual."""
-    subtotal = sum(i["price_cents"] * i["quantity"] for i in items)
-    return round(subtotal * (1 - discount_pct / 100))
+def final_grade(scores: list[dict], bonus_pct: float = 0) -> float:
+    """Promedia las notas ponderadas y aplica un bonus porcentual."""
+    weighted = sum(s["score"] * s["weight"] for s in scores)
+    return round(weighted * (1 + bonus_pct / 100), 2)
 
-total_cents(cart)                       # usa el valor por defecto
-total_cents(cart, discount_pct=10)      # argumento por nombre
+final_grade(scores)                     # usa el valor por defecto
+final_grade(scores, bonus_pct=10)       # argumento por nombre
 
 def log_event(name, *args, **kwargs):   # args: tupla posicional; kwargs: diccionario por nombre
     print(name, args, kwargs)
@@ -174,13 +174,13 @@ herramientas como mypy, que veremos más adelante. Las funciones son objetos: se
 ## Strings
 
 ```python
-customer = "Ana"
-total = 1234.5
-f"Hola {customer}, tu total es ${total:,.2f}"   # 'Hola Ana, tu total es $1,234.50'
+student = "Ana"
+points = 1234.5
+f"Hola {student}, sumaste {points:,.2f} puntos"   # 'Hola Ana, sumaste 1,234.50 puntos'
 
-text = "  Zapatillas Running  "
-text.strip().lower()             # 'zapatillas running'
-"running" in text.lower()        # True
+text = "  Análisis Matemático  "
+text.strip().lower()             # 'análisis matemático'
+"matemático" in text.lower()      # True
 "a,b,c".split(",")               # ['a', 'b', 'c']
 ", ".join(["a", "b"])            # 'a, b'
 text[0:5]                        # slicing: desde el índice 0 hasta el 5 (exclusivo)
@@ -192,23 +192,23 @@ text[0:5]                        # slicing: desde el índice 0 hasta el 5 (exclu
 | ------- | ------------ | ------- | ----------------------------------------------------- |
 | `list`  | `[1, 2, 3]`  | Sí      | Secuencias que cambian                                |
 | `tuple` | `(1, 2)`     | No      | Registros de tamaño fijo, claves de diccionario       |
-| `dict`  | `{"sku": 1}` | Sí      | Tabla hash clave → valor; conserva orden de inserción |
+| `dict`  | `{"ana": 9}` | Sí      | Tabla hash clave → valor; conserva orden de inserción |
 | `set`   | `{1, 2}`     | Sí      | Sin duplicados, pertenencia O(1)                      |
 
 ```python
-cart = ["SKU-1", "SKU-2"]
-cart.append("SKU-3")
-cart[-1]                              # último elemento
+students = ["Ana", "Bruno"]
+students.append("Carla")
+students[-1]                          # último elemento
 
-stock = {"SKU-1": 5, "SKU-2": 0}
-stock["SKU-3"] = 12
-stock.get("SKU-9", 0)                 # valor por defecto si no existe (stock["SKU-9"] lanza KeyError)
-for sku, qty in stock.items():
+grades = {"Ana": 9, "Bruno": 7}
+grades["Carla"] = 8
+grades.get("Diego", 0)                # valor por defecto si no existe (grades["Diego"] lanza KeyError)
+for name, grade in grades.items():
     ...
 
 seen = set()
-seen.add("SKU-1")
-"SKU-1" in seen                       # True, O(1) promedio
+seen.add("Ana")
+"Ana" in seen                         # True, O(1) promedio
 
 point = (10, 20)
 x, y = point                          # desempaquetado
